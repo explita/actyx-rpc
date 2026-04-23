@@ -1,0 +1,50 @@
+import type { ErrorResponse } from "../../types/misc.js";
+import type { TimeoutOptions } from "./types.js";
+
+export function withTimeout<TInput, TOutput>(
+  handler: (
+    opts: { ctx: any; input: TInput },
+    ...args: any[]
+  ) => Promise<TOutput>,
+  options: TimeoutOptions = {},
+): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
+  const timeoutMs = options.ms ?? 5000;
+  const message = options.message ?? `Request timeout after ${timeoutMs}ms`;
+  const reason = options.reason ?? "TIMEOUT";
+  const onTimeout = options.onTimeout;
+
+  return async (opts, ...args): Promise<TOutput> => {
+    let timeoutId: NodeJS.Timeout;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        onTimeout?.(timeoutMs);
+
+        const error: ErrorResponse = {
+          success: false,
+          message,
+          reason,
+          statusCode: 504,
+        };
+
+        reject(error);
+      }, timeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([
+        handler(opts, ...args),
+        timeoutPromise,
+      ]);
+
+      //@ts-ignore
+      clearTimeout(timeoutId);
+
+      return result;
+    } catch (error) {
+      //@ts-ignore
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  };
+}

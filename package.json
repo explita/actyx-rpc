@@ -1,0 +1,99 @@
+{
+  "name": "@explita/actyx-rpc",
+  "version": "0.1.0",
+  "author": "Explita",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "description": "Actyx RPC — type-safe RPC for composable server actions in TypeScript",
+  "keywords": [
+    "actyx",
+    "rpc",
+    "typescript",
+    "action",
+    "procedure",
+    "nodejs"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.js",
+      "types": "./dist/react/index.d.ts"
+    },
+    "./resolver": {
+      "import": "./dist/resolver/index.js",
+      "require": "./dist/resolver/index.js",
+      "types": "./dist/resolver/index.d.ts"
+    },
+    "./resolver/arktype": {
+      "import": "./dist/resolver/arktype/index.js",
+      "require": "./dist/resolver/arktype/index.js",
+      "types": "./dist/resolver/arktype/index.d.ts"
+    },
+    "./resolver/joi": {
+      "import": "./dist/resolver/joi/index.js",
+      "require": "./dist/resolver/joi/index.js",
+      "types": "./dist/resolver/joi/index.d.ts"
+    },
+    "./resolver/valibot": {
+      "import": "./dist/resolver/valibot/index.js",
+      "require": "./dist/resolver/valibot/index.js",
+      "types": "./dist/resolver/valibot/index.d.ts"
+    },
+    "./resolver/yup": {
+      "import": "./dist/resolver/yup/index.js",
+      "require": "./dist/resolver/yup/index.js",
+      "types": "./dist/resolver/yup/index.d.ts"
+    },
+    "./resolver/zod": {
+      "import": "./dist/resolver/zod/index.js",
+      "require": "./dist/resolver/zod/index.js",
+      "types": "./dist/resolver/zod/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/explita/actyx-rpc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/explita/actyx-rpc/issues"
+  },
+  "homepage": "https://github.com/explita/actyx-rpc#readme",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "npm run clean && tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.8",
+    "@types/react": "^19.2.14",
+    "rimraf": "^6.1.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.0.7"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "arktype": "^2.2.0",
+    "ioredis": "^5.10.1",
+    "joi": "^18.1.2",
+    "valibot": "^1.3.1",
+    "yup": "^1.7.1",
+    "zod": "^4.3.6"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}
