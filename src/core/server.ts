@@ -25,24 +25,39 @@ import type {
   ProcedureProps,
 } from "../types/procedure.js";
 import { withInvalidation } from "./cache/with-invalidation.js";
+import type { InputMode, InputCtx, SchemaResolver } from "../types/misc.js";
 
 export function createProcedure<
   TCtx extends Record<string, unknown>,
   TEnrich extends Record<string, unknown> = {},
-  //@ts-ignore
-  GIM extends InputMode,
->(opts: ProcedureProps<TCtx, TEnrich, GIM>) {
+  TMeta extends Record<string, any> = {},
+  GIM extends InputMode = InputMode,
+>(opts: ProcedureProps<TCtx, TEnrich, GIM, TMeta>) {
   const globalCache = opts.cache ?? new MemoryCache();
   const globalCompressor = opts.compression ?? new Compressor();
 
-  function procedureBuilder<I = undefined, Ctx = TCtx>(
-    config: ProcedureConfig<Ctx, TEnrich> = {},
-  ): ProcedureInstance<Ctx, TEnrich, I, GIM, GIM> {
+  function procedureBuilder<
+    I = undefined,
+    Ctx = TCtx,
+    TLocalMeta extends Record<string, any> = TMeta,
+    TICtx extends InputCtx = {},
+  >(
+    config: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {},
+  ): ProcedureInstance<Ctx, TEnrich, TLocalMeta, I, TICtx, GIM> {
     const nextConfig = { ...config };
 
     return {
       name(name) {
-        return procedureBuilder({ ...nextConfig, name });
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+          ...nextConfig,
+          name,
+        });
+      },
+      meta(meta) {
+        return procedureBuilder<I, Ctx, any, TICtx>({
+          ...nextConfig,
+          meta: { ...(nextConfig.meta as any), ...(meta as any) },
+        });
       },
       circuitBreaker: (options?: CircuitBreakerOptions) => {
         const state: CircuitBreakerState = nextConfig.circuitBreaker?.state ?? {
@@ -51,7 +66,7 @@ export function createProcedure<
           lastFailure: 0,
         };
 
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           circuitBreaker: {
             enabled: true,
@@ -61,7 +76,7 @@ export function createProcedure<
         });
       },
       telemetry: () => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           telemetry: true,
         });
@@ -75,7 +90,7 @@ export function createProcedure<
       cache: <TInput = I>(
         options?: WithCacheOptions<Ctx & TEnrich, TInput>,
       ) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           cache: {
             enabled: true,
@@ -86,7 +101,7 @@ export function createProcedure<
       },
 
       invalidate: (options: CacheInvalidationOptions<Ctx, I>) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           invalidate: {
             enabled: true,
@@ -97,7 +112,7 @@ export function createProcedure<
       },
 
       retry: (options?: RetryOptions) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           retry: {
             enabled: true,
@@ -107,7 +122,7 @@ export function createProcedure<
       },
 
       timeout: (options?: TimeoutOptions) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           timeout: {
             enabled: true,
@@ -117,7 +132,7 @@ export function createProcedure<
       },
 
       compress: (options?: CompressionOptions) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           compression: {
             enabled: true,
@@ -127,7 +142,7 @@ export function createProcedure<
       },
 
       rateLimit: (options?: RateLimitOptions<Ctx>) => {
-        return procedureBuilder<I, Ctx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
           ...nextConfig,
           rateLimit: {
             enabled: true,
@@ -149,7 +164,7 @@ export function createProcedure<
       use(mwOrPlugin: Middleware<any, any, any, any> | Plugin<any, any, any>) {
         const isPlugin = typeof mwOrPlugin !== "function";
 
-        const nextConfig: ProcedureConfig<Ctx, TEnrich> = {
+        const nextConfig: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
           ...config,
 
           middlewares: isPlugin
@@ -161,12 +176,11 @@ export function createProcedure<
             : config.plugins,
         };
 
-        return procedureBuilder<I, Ctx>(nextConfig);
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>(nextConfig);
       },
 
-      //@ts-ignore
-      input<T>(r: SchemaResolver<T>, options?: InputCtx) {
-        return procedureBuilder<T, Ctx>({
+      input<T, NextICtx extends InputCtx>(r: SchemaResolver<T>) {
+        return procedureBuilder<T, Ctx, TLocalMeta, NextICtx>({
           ...config,
           resolver: r,
         });
@@ -175,6 +189,7 @@ export function createProcedure<
       resolve<O, P = any>(
         handler: (opts: { ctx: Ctx; input: any }, ...args: P[]) => Promise<O>,
       ) {
+        //@ts-ignore
         return handlerResolver(handler, opts, config, globalCache);
       },
 
@@ -200,9 +215,27 @@ export function createProcedure<
         }
 
         //@ts-ignore
-        return this.resolve(exec);
+        const resolvedFn = this.resolve(exec);
+
+        // Return the actual handler function
+        return async (...args: any[]) => {
+          // Call the resolved function to get the tuple
+          const [result, error] = await resolvedFn(...args);
+
+          // Handle redirect response
+          if (
+            error &&
+            "_redirect" in error &&
+            typeof error._redirect === "function"
+          ) {
+            error._redirect();
+          }
+
+          return [result, error];
+        };
       },
 
+      //@ts-ignore
       query(handler) {
         let exec = handler;
 
@@ -240,10 +273,27 @@ export function createProcedure<
         }
 
         //@ts-ignore
-        return this.resolve(exec);
+        const resolvedFn = this.resolve(exec);
+
+        // Return the actual handler function
+        return async (...args: any[]) => {
+          // Call the resolved function to get the tuple
+          const [result, error] = await resolvedFn(...args);
+
+          // Handle redirect response
+          if (
+            error &&
+            "_redirect" in error &&
+            typeof error._redirect === "function"
+          ) {
+            error._redirect();
+          }
+
+          return [result, error];
+        };
       },
     };
   }
 
-  return procedureBuilder();
+  return procedureBuilder({ meta: opts.meta });
 }

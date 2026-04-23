@@ -158,21 +158,27 @@ const procedure = createProcedure({
       },
     };
   },
-  onContextError(reason) {
-    console.warn("Context creation failed:", reason);
+  onContextError({ reason }) {
+    if (reason === "INVALID_SESSION") {
+      return {
+        _redirect: () => redirect("/login"),
+        message: "Session expired",
+      };
+    }
   },
   onSuccess({ ctx, input, output, duration }) {
     console.log("Procedure completed", { ctx, input, output, duration });
   },
-  inputMode: "form", // "strict" | "form" | "partial"
+  inputMode: "strict", // "strict" | "patch" | "form" | "partial"
 });
 ```
 
 `inputMode` is the default input mode for all procedures created from this builder.
 This can be overridden by the `.input()` method.
 
-`onContextError` is a function that is called when the context creation fails. It receives the reason for the failure as passed from `createContext`. If not provided, a generic error object is returned.
-When using `createContext`, make sure to return an object with `ok` and `ctx` properties, where `ok` is `true` if the context was created successfully, and `false` otherwise. If `ok` is `false`, the `ctx` property is ignored and `onContextError` is called with the `reason`.
+`onContextError` is called when `createContext` returns `{ ok: false }`. It receives the `reason` and current `ctx`. If it returns an object, that object is merged into the error response.
+
+**Next.js Redirects**: You can return a `_redirect` callback to trigger a top-level redirect (e.g., using `next/navigation`). This is executed at the very start of the procedure response before returning to the caller.
 
 The `ctx` object passed to handlers, middlewares, and plugins automatically includes `handlerName` (if provided via `.name()`).
 
@@ -330,6 +336,24 @@ const getUser = procedure.name("getUserProfile").query(async ({ ctx }) => {
 });
 ```
 
+### `.meta()`
+
+Attaches arbitrary metadata to a procedure. This is useful for authorization roles, audit flags, or UI hints. Metadata is automatically merged during `.extend()` and is available in all handlers and lifecycle hooks via `ctx.meta`.
+
+```ts
+const root = createProcedure({
+  createContext: () => ({ ok: true, ctx: {} }),
+  meta: { app: "store-api" }
+});
+
+const uploadImage = root
+  .meta({ role: "admin", audit: true })
+  .mutation(async ({ ctx }) => {
+    console.log(ctx.meta.role); // "admin"
+    console.log(ctx.meta.app);  // "store-api"
+  });
+```
+
 #
 
 ### `.circuitBreaker()`
@@ -398,9 +422,10 @@ The payload can be a plain object or `FormData`. `FormData` is normalized with `
 
 The optional second argument to `.input()` controls how the mutation input is typed. If set, it overrides global input mode.
 
-- `strict` keeps the exact inferred schema shape
-- `form` accepts all declared keys as `unknown`, which is useful when posting raw form values
-- `partial` accepts a partial object of the declared keys
+- `strict` (Default): Uses the exact inferred schema shape.
+- `patch`: Uses a partial object shape with strict inferred types for each key.
+- `form`: Uses a loose object shape where every declared key is `unknown`.
+- `partial`: Uses a loose partial object shape for maximum flexibility.
 
 ```ts
 const schema = z.object({

@@ -33,13 +33,19 @@ export function handlerResolver<O, P = any>(
       handlerName: config.name ?? "",
     };
 
-    const baseCtx = { handlerName: config.name ?? "" };
+    const baseCtx = {
+      handlerName: config.name ?? "",
+      meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
+    };
 
     try {
-      rootCtx = await opts.createContext();
+      rootCtx = await opts.createContext(baseCtx);
 
       if (!rootCtx.ok) {
-        const customError = await opts.onContextError?.(rootCtx.reason);
+        const customError = await opts.onContextError?.({
+          reason: rootCtx.reason,
+          ctx: { ...baseCtx, ...rootCtx },
+        });
 
         if (customError) {
           return [null, customError];
@@ -90,7 +96,9 @@ export function handlerResolver<O, P = any>(
         input = {};
       }
 
-      const enrichment = (await opts.enrichInput?.(rootCtx.ctx)) ?? {};
+      const enrichment =
+        (await opts.enrichInput?.({ ...rootCtx.ctx, meta: baseCtx.meta })) ??
+        {};
       let enrichedData = {
         ...enrichment,
         ...(typeof input === "object" && input !== null ? input : {}),
@@ -211,6 +219,7 @@ export function handlerResolver<O, P = any>(
           input: enrichedData,
           output: result,
           duration: end - start,
+          args,
         }),
       ).catch((err) => console.error(err));
 
@@ -246,7 +255,9 @@ export function handlerResolver<O, P = any>(
           return [null, onErrorRes];
         }
       } else {
-        console.error(`[Procedure Error (${baseError.handlerName})]:`, error);
+        if (process.env.NODE_ENV === "development") {
+          console.error(`[Procedure Error (${baseError.handlerName})]:`, error);
+        }
       }
       return [
         null,

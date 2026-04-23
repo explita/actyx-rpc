@@ -18,6 +18,9 @@ export function mergeConfigs<TCtx, TEnrich>(
     ...base,
     ...(override ?? {}),
 
+    // Merge meta
+    meta: { ...(base.meta ?? {}), ...(override?.meta ?? {}) },
+
     // arrays → compose (important!)
     middlewares: [...(base.middlewares ?? []), ...(override.middlewares ?? [])],
 
@@ -28,7 +31,7 @@ export function mergeConfigs<TCtx, TEnrich>(
     merged.createContext = async (prevCtx?: any) => {
       const res = await base.createContext(prevCtx);
       if (!res.ok) return res;
-      return override.createContext(res.ctx);
+      return override.createContext({ ...prevCtx, ...res.ctx });
     };
   }
 

@@ -3,6 +3,21 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-04-23
+
+### Added
+- **Top-level Redirects**: Support for `_redirect` callback in error responses, enabling seamless framework redirects (e.g. Next.js `redirect()`) from within procedures.
+- **Metadata System**: New `.meta()` method for attaching arbitrary, type-safe data to procedures, accessible via `ctx.meta`.
+- **Enhanced Hooks**: `onSuccess` now receives the original `args` passed to the procedure, aiding in detailed audit logging.
+- **New `patch` Input Mode**: Added `patch` to `InputMode` for partial object shapes with strictly typed keys.
+
+### Changed
+- **Default Input Mode**: The default `InputMode` has been changed from `form` to `strict` for better out-of-the-box type safety.
+
+### Fixed
+- **Logging Refinement**: Procedure error stack traces are now suppressed in production (`NODE_ENV === "production"`) while remaining fully visible in development.
+- **Type safety**: Improved `onContextError` signature to include the `ctx` object for better error mapping.
+
 ## [0.1.0] - 2026-04-23
 
 ### Added

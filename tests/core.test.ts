@@ -71,4 +71,22 @@ describe("Core: Input Modes", () => {
     const [result] = await proc({ a: "test" });
     expect(result).toEqual({ a: "test" });
   });
+
+  it("should merge and provide metadata in context", async () => {
+    const root = createProcedure({
+      createContext: () => ({ ok: true, ctx: {} }),
+      meta: { app: "test-app", roles: ["user"] },
+    });
+
+    const proc = root
+      .meta({ roles: ["admin"], custom: 123 })
+      .query(async ({ ctx }) => ctx.meta);
+
+    const [meta] = await proc();
+    expect(meta).toEqual({
+      app: "test-app",
+      roles: ["admin"], // Overwritten by local meta
+      custom: 123,
+    });
+  });
 });
