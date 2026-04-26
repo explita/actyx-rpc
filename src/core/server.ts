@@ -25,7 +25,12 @@ import type {
   ProcedureProps,
 } from "../types/procedure.js";
 import { withInvalidation } from "./cache/with-invalidation.js";
-import type { InputMode, InputCtx, SchemaResolver } from "../types/misc.js";
+import type {
+  InputMode,
+  InputCtx,
+  SchemaResolver,
+  Prettify,
+} from "../types/misc.js";
 
 export function createProcedure<
   TCtx extends Record<string, unknown>,
@@ -41,20 +46,21 @@ export function createProcedure<
     Ctx = TCtx,
     TLocalMeta extends Record<string, any> = TMeta,
     TICtx extends InputCtx = {},
+    TName extends string = string,
   >(
     config: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {},
-  ): ProcedureInstance<Ctx, TEnrich, TLocalMeta, I, TICtx, GIM> {
-    const nextConfig = { ...config };
+  ): ProcedureInstance<Ctx, TEnrich, TLocalMeta, I, TICtx, GIM, TName> {
+    const nextConfig = { ...config, name: config.name ?? "unnamed" };
 
     return {
       name(name) {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, typeof name>({
           ...nextConfig,
           name,
         });
       },
       meta(meta) {
-        return procedureBuilder<I, Ctx, any, TICtx>({
+        return procedureBuilder<I, Ctx, any, TICtx, TName>({
           ...nextConfig,
           meta: { ...(nextConfig.meta as any), ...(meta as any) },
         });
@@ -66,7 +72,7 @@ export function createProcedure<
           lastFailure: 0,
         };
 
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           circuitBreaker: {
             enabled: true,
@@ -76,7 +82,7 @@ export function createProcedure<
         });
       },
       telemetry: () => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           telemetry: true,
         });
@@ -87,10 +93,9 @@ export function createProcedure<
         return createProcedure(mergeConfigs<TCtx, TEnrich>(opts, override));
       },
 
-      cache: <TInput = I>(
-        options?: WithCacheOptions<Ctx & TEnrich, TInput>,
-      ) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+      //@ts-ignore
+      cache: (options?: WithCacheOptions<Prettify<Ctx & TEnrich>, I>) => {
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           cache: {
             enabled: true,
@@ -100,8 +105,9 @@ export function createProcedure<
         });
       },
 
+      //@ts-ignore
       invalidate: (options: CacheInvalidationOptions<Ctx, I>) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           invalidate: {
             enabled: true,
@@ -112,7 +118,7 @@ export function createProcedure<
       },
 
       retry: (options?: RetryOptions) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           retry: {
             enabled: true,
@@ -122,7 +128,7 @@ export function createProcedure<
       },
 
       timeout: (options?: TimeoutOptions) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           timeout: {
             enabled: true,
@@ -132,7 +138,7 @@ export function createProcedure<
       },
 
       compress: (options?: CompressionOptions) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           compression: {
             enabled: true,
@@ -141,8 +147,9 @@ export function createProcedure<
         });
       },
 
-      rateLimit: (options?: RateLimitOptions<Ctx>) => {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>({
+      //@ts-ignore
+      rateLimit: (options?: RateLimitOptions<Ctx, TLocalMeta>) => {
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           rateLimit: {
             enabled: true,
@@ -176,11 +183,11 @@ export function createProcedure<
             : config.plugins,
         };
 
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx>(nextConfig);
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>(nextConfig);
       },
 
       input<T, NextICtx extends InputCtx>(r: SchemaResolver<T>) {
-        return procedureBuilder<T, Ctx, TLocalMeta, NextICtx>({
+        return procedureBuilder<T, Ctx, TLocalMeta, NextICtx, TName>({
           ...config,
           resolver: r,
         });
@@ -189,10 +196,16 @@ export function createProcedure<
       resolve<O, P = any>(
         handler: (opts: { ctx: Ctx; input: any }, ...args: P[]) => Promise<O>,
       ) {
-        //@ts-ignore
-        return handlerResolver(handler, opts, config, globalCache);
+        return handlerResolver(
+          handler,
+          //@ts-ignore
+          opts,
+          config,
+          globalCache,
+        );
       },
 
+      //@ts-ignore
       mutation(handler) {
         let exec = handler;
 

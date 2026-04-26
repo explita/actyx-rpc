@@ -329,28 +329,31 @@ const deletePost = adminProcedure
 
 Provides a unique identifier for the procedure. This name is automatically attached to the context as `handlerName` and included in error responses, making it invaluable for debugging and auditing.
 
+> [!NOTE]
+> Actyx-RPC strictly infers the exact string literal you provide here! The `ctx.handlerName` inside your handlers and plugins will be strongly typed to match the name (e.g. `"getUserProfile"` instead of `string`).
+
 ```ts
 const getUser = procedure.name("getUserProfile").query(async ({ ctx }) => {
-  // ctx.handlerName is "getUserProfile"
+  // ctx.handlerName is strictly typed as "getUserProfile"
   // ...
 });
 ```
 
 ### `.meta()`
 
-Attaches arbitrary metadata to a procedure. This is useful for authorization roles, audit flags, or UI hints. Metadata is automatically merged during `.extend()` and is available in all handlers and lifecycle hooks via `ctx.meta`.
+Attaches arbitrary metadata to a procedure. This is useful for authorization roles, audit flags, or UI hints. Metadata is deeply merged with full type-safety during `.extend()` and `.meta()`. All handlers and lifecycle hooks instantly inherit the fully merged `ctx.meta` type.
 
 ```ts
 const root = createProcedure({
   createContext: () => ({ ok: true, ctx: {} }),
-  meta: { app: "store-api" }
+  meta: { app: "store-api" },
 });
 
 const uploadImage = root
   .meta({ role: "admin", audit: true })
   .mutation(async ({ ctx }) => {
     console.log(ctx.meta.role); // "admin"
-    console.log(ctx.meta.app);  // "store-api"
+    console.log(ctx.meta.app); // "store-api"
   });
 ```
 
@@ -537,39 +540,56 @@ await getPost({ id: "post_1" }, "preview_123");
 
 Creates a reusable, fully typed middleware without attaching it immediately.
 
-Use it when you want to define a middleware once and apply it to multiple procedures with `.use()` or not to mess your procedure definition with too many lines of code.
+Use it when you want to define a middleware once and apply it to multiple procedures with `.use()` or to keep your procedure definition clean.
+
+If your middleware depends on a specific input shape, you can strictly type it using the `ExpectedInput` generic:
 
 ```ts
-const requireSession = procedure.middleware(({ ctx, next }) => {
-  if (!ctx.userId) {
-    return { userId: "You must be signed in" };
-  }
+const requirePostOwnership = procedure.middleware<{ postId: string }>(
+  async ({ ctx, input, next }) => {
+    // input.postId is strictly typed!
+    const post = await db.post.find(input.postId);
 
-  return next();
+    if (post.authorId !== ctx.userId) {
+      return { _message: "Forbidden", _statusCode: 403 };
+    }
+
+    return next({ post });
+  },
+);
+```
+
+const requireSession = procedure.middleware(({ ctx, next }) => {
+if (!ctx.userId) {
+return { userId: "You must be signed in" };
+}
+
+return next();
 });
 
 const withTenant = procedure.middleware(async ({ ctx, next }) => {
-  const tenant = await getTenantForUser(ctx.userId);
+const tenant = await getTenantForUser(ctx.userId);
 
-  if (!tenant) {
-    return { tenant: "Tenant not found" };
-  }
+if (!tenant) {
+return { tenant: "Tenant not found" };
+}
 
-  return next({
-    tenantId: tenant.id,
-  });
+return next({
+tenantId: tenant.id,
+});
 });
 
 const [listProjects, error] = procedure
-  .use(requireSession)
-  .use(withTenant)
-  .query(async ({ ctx }) => {
-    return {
-      tenantId: ctx.tenantId,
-      items: [],
-    };
-  });
-```
+.use(requireSession)
+.use(withTenant)
+.query(async ({ ctx }) => {
+return {
+tenantId: ctx.tenantId,
+items: [],
+};
+});
+
+````
 
 #
 
@@ -577,17 +597,20 @@ const [listProjects, error] = procedure
 
 Creates a reusable, fully typed plugin without attaching it immediately.
 
-Use it when you want to define a plugin once and apply it to multiple procedures with `.use()` or not to mess your procedure definition with too many lines of code.
+Use it when you want to define a plugin once and apply it to multiple procedures with `.use()` or to keep your procedure definition clean.
+
+Just like middlewares, if your plugin depends on a specific input shape, you can strictly type it using the `ExpectedInput` generic:
 
 ```ts
-const withAudit = procedure.plugin({
+const withAudit = procedure.plugin<{ postId: string }>({
   validate: (input) => {
+    // input.postId is strictly typed!
     return {
       success: true,
       data: input,
     };
   },
-  onBefore: ({ next }) => next({ myPlugin: "plugin" }), // the next() is the same as middleware next() and can be used to pass data to the next middleware or handler
+  onBefore: ({ next }) => next({ myPlugin: "plugin" }),
   onAfter: (ctx, result) => {
     console.log("Procedure completed", { ctx, result });
   },
@@ -595,7 +618,7 @@ const withAudit = procedure.plugin({
     console.log("Procedure failed", props);
   },
 });
-```
+````
 
 #
 
@@ -714,6 +737,20 @@ Execution order is:
 6. handler
 7. plugin `onAfter()`
 8. global `onError()` and plugin `onError()` on thrown errors
+
+---
+
+### Builder Ordering
+
+> [!IMPORTANT]
+> To ensure your configuration hooks (like `.cache()` or `.rateLimit()`) have access to the fully enriched context and validated input types, always follow this order:
+>
+> 1. **Setup**: `.name()`, `.meta()`, `.input()`
+> 2. **Middlewares**: `.use()`
+> 3. **Execution Policies**: `.cache()`, `.retry()`, `.timeout()`, `.rateLimit()`, `.circuitBreaker()`, `.telemetry()`
+> 4. **Terminal**: `.query()`, `.mutation()`
+>
+> Actyx RPC strictly enforces this order at the type level. Once you call an execution policy method, setup methods like `.use()` or `.input()` will no longer be available in the autocomplete for that chain.
 
 #
 
@@ -1195,7 +1232,7 @@ Known failure reasons include:
   });
 
   // How it works:
-  // - Thrown errors → [null, error]
+  // - Thrown errors → [null, error] - throw new Error(), throw { success: false }, throw "some string"
   // - Returned { success: false } → [null, error]
   // - Everything else → [data, null]
 

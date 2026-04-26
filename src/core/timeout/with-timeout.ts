@@ -25,6 +25,7 @@ export function withTimeout<TInput, TOutput>(
           message,
           reason,
           statusCode: 504,
+          handlerName: opts.ctx?.handlerName ?? "timeout",
         };
 
         reject(error);

@@ -1,8 +1,8 @@
-import type { Middleware } from "../../types/middleware.js";
+import { type Middleware } from "../../types/middleware.js";
 import type { ErrorResponse } from "../../types/misc.js";
 
 export async function runMiddlewares(
-  middlewares: Middleware<any, any, any, any>[],
+  middlewares: Middleware<any, any, any, any, any>[],
   ctx: any,
   input: any,
   next: any,
@@ -19,7 +19,9 @@ export async function runMiddlewares(
       currentCtx = { ...currentCtx, ...mwResult.ctx };
     } else if (mwResult && typeof mwResult === "object") {
       // Early return or error from middleware
-      const parsed = parseMiddlewareResponse(mwResult as Record<string, unknown>);
+      const parsed = parseMiddlewareResponse(
+        mwResult as Record<string, unknown>,
+      );
 
       return {
         ctx: currentCtx,

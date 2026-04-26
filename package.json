@@ -1,6 +1,6 @@
 {
   "name": "@explita/actyx-rpc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Explita",
   "license": "MIT",
   "type": "module",
@@ -95,5 +95,8 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "tsx": "^4.21.0"
+  }
 }

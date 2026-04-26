@@ -4,15 +4,27 @@ export type Prettify<T> = {
 
 export type BaseError = {
   success: boolean;
-  handlerName?: string;
+  handlerName: string;
+  statusCode: number;
 };
 
-export type BaseContext = {
-  handlerName?: string;
+export type MergeMeta<T, U> = Prettify<
+  {
+    [K in keyof T]: K extends keyof U
+      ? U[K] extends never
+        ? T[K]
+        : U[K]
+      : T[K];
+  } & U
+>;
+
+export type BaseContext<TMeta, TName extends string = string> = {
+  handlerName: TName;
+  meta: TMeta;
 };
 
 export type PlusMeta<T> = {
-  meta: T;
+  meta: Prettify<T>;
 };
 
 export type MaybePromise<T> = Promise<T> | T;
@@ -98,12 +110,7 @@ export type ErrorResponse = Prettify<
   {
     message: string;
     reason: FailureReason;
-    statusCode?: number;
     errors?: Record<string, string>;
-    /**
-     * Internal/Hidden: Execution callback for top-level side effects (like Next.js redirect())
-     */
-    _redirect?: () => void;
   } & BaseError
 >;
 

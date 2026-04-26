@@ -41,8 +41,8 @@ export function joiResolver<
         if (error instanceof Joi.ValidationError) {
           const errors = error.details.reduce(
             (acc, detail) => {
-              const path = detail.path.join(".");
-              acc[path ?? "root"] = detail.message;
+              const path = detail.path.join(".") || "root";
+              acc[path] = detail.message;
               return acc;
             },
             {} as Record<string, string>,

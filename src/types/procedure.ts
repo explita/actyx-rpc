@@ -28,6 +28,7 @@ import type {
   InputMode,
   InputParams,
   MaybePromise,
+  MergeMeta,
   MutationResult,
   PlusMeta,
   Prettify,
@@ -42,8 +43,8 @@ export type ProcedureConfig<
 > = {
   name?: string;
   resolver?: SchemaResolver<any>;
-  middlewares?: Middleware<TCtx, TEnrich, any, any>[];
-  plugins?: Plugin<TCtx, TEnrich, any, any>[];
+  middlewares?: Middleware<TCtx, TEnrich, any, any, TMeta>[];
+  plugins?: Plugin<TCtx, TEnrich, any, any, TMeta>[];
   cache?: CacheConfig;
   invalidate?: CacheInvalidationConfig;
   retry?: RetryConfig;
@@ -62,67 +63,120 @@ export type ProcedureInstance<
   I = void,
   ICtx extends InputCtx = InputCtx,
   GIM extends InputMode = InputMode, //Global Input Mode
+  TName extends string = string,
 > = {
-  name: (
-    name: string,
+  name: <const Name extends string>(
+    name: Name,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, Name>,
     "extend" | "name"
   >;
   meta: <NextMeta extends Record<string, any>>(
     meta: NextMeta,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, Prettify<TMeta & NextMeta>, I, ICtx, GIM>,
+    ProcedureInstance<
+      Prettify<Ctx>,
+      TEnrich,
+      Prettify<TMeta & NextMeta>,
+      I,
+      ICtx,
+      GIM,
+      TName
+    >,
     "extend" | "meta"
   >;
   circuitBreaker: (
     options?: CircuitBreakerOptions,
-  ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "circuitBreaker"
+  ) => Pick<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "retry"
+    | "timeout"
+    | "compress"
+    | "rateLimit"
+    | "telemetry"
   >;
-  telemetry: () => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "telemetry"
+  telemetry: () => Pick<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "retry"
+    | "timeout"
+    | "compress"
+    | "rateLimit"
+    | "circuitBreaker"
   >;
   use: (<NextCtx = Ctx>(
     mw: Middleware<
       Ctx,
       TEnrich,
       [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
-      NextCtx
+      NextCtx,
+      TMeta,
+      TName
     >,
   ) => Omit<
-    ProcedureInstance<Prettify<Ctx & NextCtx>, TEnrich, TMeta, I, ICtx, GIM>,
-    "input" | "extend" | "middleware" | "plugin"
+    ProcedureInstance<
+      Prettify<Ctx & NextCtx>,
+      TEnrich,
+      TMeta,
+      I,
+      ICtx,
+      GIM,
+      TName
+    >,
+    "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
   >) &
     (<NextCtx = Ctx>(
       plugin: Plugin<
         Ctx,
         TEnrich,
         [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
-        NextCtx
+        NextCtx,
+        TMeta,
+        TName
       >,
     ) => Omit<
-      ProcedureInstance<Prettify<Ctx & NextCtx>, TEnrich, TMeta, I, ICtx, GIM>,
-      "input" | "extend" | "middleware" | "plugin"
+      ProcedureInstance<
+        Prettify<Ctx & NextCtx>,
+        TEnrich,
+        TMeta,
+        I,
+        ICtx,
+        GIM,
+        TName
+      >,
+      "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
     >);
 
-  middleware: <NextCtx = Ctx>(
+  middleware: <ExpectedInput = unknown, NextCtx = Ctx>(
     mw: Middleware<
       Ctx,
       TEnrich,
-      [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
-      NextCtx
+      [I] extends [void]
+        ? Prettify<ExpectedInput & TEnrich>
+        : Prettify<I & TEnrich>,
+      Prettify<NextCtx>,
+      TMeta,
+      TName
     >,
   ) => typeof mw;
 
-  plugin: <NextCtx = Ctx>(
+  plugin: <ExpectedInput = unknown, NextCtx = Ctx>(
     plugin: Plugin<
       Ctx,
       TEnrich,
-      [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
-      NextCtx
+      [I] extends [void]
+        ? Prettify<ExpectedInput & TEnrich>
+        : Prettify<I & TEnrich>,
+      NextCtx,
+      TMeta,
+      TName
     >,
   ) => typeof plugin;
 
@@ -130,92 +184,155 @@ export type ProcedureInstance<
     resolver: SchemaResolver<T>,
     options?: NextICtx,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, T, NextICtx, GIM>,
-    "input" | "extend" | "middleware" | "plugin" | "meta"
+    ProcedureInstance<Ctx, TEnrich, TMeta, T, NextICtx, GIM, TName>,
+    "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
   >;
 
   mutation: <T, P extends unknown[]>(
     handler: (
       opts: {
-        ctx: Prettify<Ctx & BaseContext & { meta: TMeta }>;
+        ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
       ...args: P
     ) => T,
-  ) => (
-    data: InputParams<I, ICtx, GIM>,
-    ...args: P
-  ) => Promise<MutationResult<Awaited<T>>>;
+  ) => [I] extends [void]
+    ? // No input - just pass through args
+      (...args: P) => Promise<MutationResult<Awaited<T>>>
+    : // Has input - first arg is input, then optional args
+      (
+        input: InputParams<I, ICtx, GIM>,
+        ...args: P
+      ) => Promise<MutationResult<Awaited<T>>>;
 
   query: <T, P extends unknown[]>(
     handler: (
       opts: {
-        ctx: Prettify<Ctx & BaseContext & { meta: TMeta }>;
+        ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
       ...args: P
     ) => T,
-  ) => (
-    input: InputParams<I, ICtx, GIM>,
-    ...args: P
-  ) => Promise<QueryResult<Awaited<T>>>;
+  ) => [I] extends [void]
+    ? // No input - just pass through args
+      (...args: P) => Promise<QueryResult<Awaited<T>>>
+    : // Has input - first arg is input, then optional args
+      (
+        input: InputParams<I, ICtx, GIM>,
+        ...args: P
+      ) => Promise<QueryResult<Awaited<T>>>;
 
-  extend: <
-    NextCtx = Ctx,
-    NextEnrich = TEnrich,
-    NextMeta extends Record<string, any> = {},
-  >(
+  extend: <NextCtx = Ctx, NextEnrich = TEnrich, NextMeta = unknown>(
     config: Omit<
-      Partial<ProcedureProps<Ctx, TEnrich, GIM, NextMeta>>,
+      Partial<
+        ProcedureProps<Ctx, TEnrich, GIM, NextMeta, MergeMeta<TMeta, NextMeta>>
+      >,
       "createContext" | "enrichInput"
     > &
-      ProcedureExtensionConfig<Ctx, TEnrich, NextCtx, NextEnrich, TMeta>,
+      ProcedureExtensionConfig<
+        Ctx,
+        TEnrich,
+        NextCtx,
+        NextEnrich,
+        TMeta,
+        NextMeta
+      >,
   ) => ProcedureInstance<
     NextCtx,
     NextEnrich,
-    Prettify<TMeta & NextMeta>,
+    MergeMeta<TMeta, NextMeta>,
     I,
     ICtx,
-    GIM
+    GIM,
+    TName
   >;
 
-  cache: <TInput = I>(
-    options?: WithCacheOptions<Prettify<Ctx & TEnrich>, TInput>,
+  cache: (
+    options?: WithCacheOptions<
+      Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+      [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
+    >,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "query" | "mutation" | "retry" | "timeout" | "rateLimit"
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "invalidate"
+    | "retry"
+    | "timeout"
+    | "compress"
+    | "rateLimit"
+    | "circuitBreaker"
+    | "telemetry"
   >;
 
   invalidate: (
-    options: CacheInvalidationOptions<Ctx, I>,
-  ) => Pick<ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>, "mutation">;
+    options: CacheInvalidationOptions<
+      Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+      [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
+    >,
+  ) => Pick<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    "mutation"
+  >;
 
   retry: (
     options?: RetryOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "query" | "cache" | "timeout" | "rateLimit"
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "timeout"
+    | "compress"
+    | "rateLimit"
+    | "circuitBreaker"
+    | "telemetry"
   >;
 
   timeout: (
     options?: TimeoutOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "query" | "mutation" | "retry" | "cache" | "rateLimit"
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "retry"
+    | "compress"
+    | "rateLimit"
+    | "circuitBreaker"
+    | "telemetry"
   >;
 
   compress: (
     options?: CompressionOptions,
-  ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "compress" | "extend" | "middleware" | "plugin" | "input" | "meta"
+  ) => Pick<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "retry"
+    | "timeout"
+    | "rateLimit"
+    | "circuitBreaker"
+    | "telemetry"
   >;
 
   rateLimit: (
-    options?: RateLimitOptions<Ctx>,
-  ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM>,
-    "rateLimit" | "input" | "middleware" | "plugin" | "extend" | "meta"
+    options?: RateLimitOptions<Ctx, TMeta, TName>,
+  ) => Pick<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    | "query"
+    | "mutation"
+    | "cache"
+    | "invalidate"
+    | "retry"
+    | "timeout"
+    | "compress"
+    | "circuitBreaker"
+    | "telemetry"
   >;
 };
 
@@ -225,47 +342,50 @@ export type ProcedureExtensionConfig<
   TNextCtx,
   TNextEnrich,
   TMeta extends Record<string, any> = {},
+  TNextMeta = unknown,
 > = {
   createContext?: (
-    ctx: Prettify<TCtx & { meta: TMeta } & BaseContext>,
-  ) => Promise<ContextResult<TNextCtx>> | ContextResult<TNextCtx>;
+    ctx: MergeMeta<TCtx, PlusMeta<MergeMeta<TMeta, TNextMeta>>>,
+  ) => MaybePromise<ContextResult<TNextCtx>>;
   enrichInput?: (options: {
     previous: TEnrich;
-    ctx: TNextCtx;
-  }) => Promise<TNextEnrich> | TNextEnrich;
+    ctx: MergeMeta<
+      Prettify<TCtx & TNextCtx>,
+      PlusMeta<MergeMeta<TMeta, TNextMeta>>
+    >;
+  }) => MaybePromise<TNextEnrich>;
 };
 
 export type ProcedureProps<
   TCtx,
   TEnrich,
   GIM extends InputMode = InputMode,
-  TMeta extends Record<string, any> = {},
+  TMeta = unknown,
+  TTotalMeta = TMeta,
 > = {
-  createContext: (
-    prevCtx: Prettify<BaseContext & PlusMeta<TMeta>>,
-  ) => MaybePromise<ContextResult<TCtx>>;
+  createContext: (prevCtx: unknown) => MaybePromise<ContextResult<TCtx>>;
   onContextError?: (options: {
     reason: FailureReason;
-    ctx: Prettify<TCtx & PlusMeta<TMeta>>;
-  }) => Promise<Partial<ErrorResponse> | void> | Partial<ErrorResponse> | void;
-  enrichInput: (
-    ctx: Prettify<TCtx & PlusMeta<TMeta>>,
-  ) => Promise<TEnrich> | TEnrich;
+    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
+  }) => MaybePromise<Partial<ErrorResponse> | void>;
+  enrichInput?: (
+    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>,
+  ) => MaybePromise<TEnrich>;
   onError?: (props: {
     error: any;
-    ctx: Prettify<TCtx & PlusMeta<TMeta>>;
+    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
     input: any;
     args: any[];
   }) => MaybePromise<Partial<ErrorResponse> | void>;
   onSuccess?: (props: {
-    ctx: Prettify<TCtx & PlusMeta<TMeta>>;
+    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
     input: any;
     output: any;
     duration: number;
     args: any[];
   }) => MaybePromise<void>;
-  middlewares?: Middleware<any, any, any, any>[];
-  plugins?: Plugin<any, any, any, any>[];
+  middlewares?: Middleware<any, any, any, any, TTotalMeta>[];
+  plugins?: Plugin<any, any, any, any, TTotalMeta>[];
   inputMode?: GIM;
   cache?: CacheAdapter;
   compression?: Compressor;

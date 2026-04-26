@@ -37,7 +37,7 @@ export function yupResolver<S extends yup.Schema<any>>(
           const errors = error.inner.reduce(
             (acc, err) => {
               if (err.path) {
-                acc[err.path] = err.message;
+                acc[err.path || "root"] = err.message;
               }
               return acc;
             },

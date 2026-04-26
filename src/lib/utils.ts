@@ -7,7 +7,7 @@ export function normalizeInput(data: unknown) {
   if (data instanceof FormData) {
     return Object.fromEntries(data.entries());
   }
-  return data as Record<string, unknown>;
+  return (data ?? {}) as Record<string, unknown>;
 }
 
 export function mergeConfigs<TCtx, TEnrich>(
@@ -127,10 +127,8 @@ export function parseWindow(
 }
 
 export function getFinalStatusCode(originalError: any): number {
-  // Use original status code if it exists
   if (originalError?.statusCode) {
-    // Don't use 4xx because we shouldn't have retried them
-    return originalError.statusCode >= 500 ? originalError.statusCode : 500;
+    return originalError.statusCode;
   }
 
   // Determine based on error type

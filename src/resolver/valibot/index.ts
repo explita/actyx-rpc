@@ -29,7 +29,7 @@ export function valibotResolver<S extends v.ObjectSchema<any, any>>(
       if (!result.success) {
         const errors = result.issues.reduce(
           (acc, item) => {
-            acc[item.path?.map((p: any) => String(p.key)).join(".") ?? "root"] =
+            acc[item.path?.map((p: any) => String(p.key)).join(".") || "root"] =
               item.message;
             return acc;
           },

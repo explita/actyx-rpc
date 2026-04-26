@@ -1,43 +1,47 @@
-import type { BaseContext, Prettify } from "./misc.js";
+import type { BaseContext, MaybePromise, MergeMeta, Prettify } from "./misc.js";
 
-type MiddlewareResult<NextCtx> = {
-  _isNext: true;
-  ctx: NextCtx;
-};
-
-// Context mutating middlewares
-export type Middleware<Ctx, TEnrich, I, NextCtx> = (
-  opts: {
-    ctx: Prettify<Ctx & BaseContext>;
-    input: Prettify<I & TEnrich>;
-    next: <NewCtx extends Record<string, unknown> = {}>(
-      ctx?: NewCtx,
-    ) => MiddlewareResult<Prettify<Ctx & NewCtx>>;
-  },
-  ...args: any[]
-) =>
-  | Promise<
-      | MiddlewareResult<NextCtx>
-      | Record<string, string>
-      | void
-      | undefined
-      | null
-    >
-  | MiddlewareResult<NextCtx>
-  | Record<string, string>
+export type MiddlewareResult<NextCtx> =
+  | { _isNext: true; ctx: NextCtx }
+  | Record<string, any>
   | void
   | undefined
   | null;
 
-export type Plugin<Ctx, TEnrich, I, NextCtx> = {
-  onBefore?: Middleware<Ctx, TEnrich, I, NextCtx>;
+// Context mutating middlewares
+export type Middleware<
+  Ctx,
+  TEnrich,
+  I,
+  NextCtx,
+  TMeta,
+  TName extends string = string,
+> = (
+  opts: {
+    ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+    input: Prettify<I & TEnrich>;
+    next: <NewCtx extends Record<string, unknown>>(
+      ctx?: NewCtx,
+    ) => MiddlewareResult<MergeMeta<Ctx, NewCtx>>;
+  },
+  ...args: any[]
+) => MaybePromise<MiddlewareResult<MergeMeta<Ctx, NextCtx>>>;
+
+export type Plugin<
+  Ctx,
+  TEnrich,
+  I,
+  NextCtx,
+  TMeta,
+  TName extends string = string,
+> = {
+  onBefore?: Middleware<Ctx, TEnrich, I, NextCtx, TMeta, TName>;
   onAfter?: (
-    ctx: Prettify<Ctx & BaseContext>,
+    ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>,
     result: unknown,
   ) => Promise<void> | void;
   onError?: (params: {
     error: unknown;
-    ctx: Prettify<Ctx & BaseContext>;
+    ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
     input: unknown;
     args: any;
   }) => Promise<void> | void;

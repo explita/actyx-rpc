@@ -1,4 +1,5 @@
 import type { Redis } from "ioredis";
+import { BaseContext, Prettify } from "../../types/misc.js";
 
 export type WindowTime = `${number}${"m" | "h" | "d" | "w" | "M"}` | number;
 
@@ -285,13 +286,17 @@ export type CacheInvalidationConfig = {
   options?: CacheInvalidationOptions;
 };
 
-export type RateLimitOptions<Ctx = unknown> = {
+export type RateLimitOptions<
+  Ctx = unknown,
+  TMeta = unknown,
+  TName extends string = string,
+> = {
   /** Number of requests allowed (default: 100) */
   limit?: number;
   /** Time window (e.g., "1m", "5m", "1h", "1d", "1w", "1M") */
   window?: WindowTime;
   /** Custom key generator (default: based on ctx) */
-  key?: (ctx: Ctx) => string;
+  key?: (ctx: Prettify<Ctx & BaseContext<TMeta, TName>>) => string;
   /** Response message when rate limited (default: "Too many requests") */
   message?: string;
   /** Callback when rate limited */

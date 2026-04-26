@@ -26,7 +26,7 @@ export function zodResolver<S extends z.ZodType>(
       if (!result.success) {
         const errors = result.error.issues.reduce(
           (acc, item) => {
-            acc[item.path.join(".")] = item.message;
+            acc[item.path.join(".") || "root"] = item.message;
             return acc;
           },
           {} as Record<string, string>,

@@ -3,6 +3,19 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-04-26
+
+### Added
+- **Strict Handler Naming**: The `.name("...")` method now strictly types `ctx.handlerName` in your query and mutation handlers (and hooks) as the exact string literal provided, rather than a generic `string`.
+- **Merged Metadata inheritance**: Calling `.extend` or `.meta` now correctly deeply merges and persists metadata types across the entire lifecycle (including `createContext`, `enrichInput`, `onError`, `middlewares`, and `plugins`).
+- **Client Abort Fallbacks**: The React `useMutation` hook now gracefully yields an error with `statusCode: 499` and `handlerName: "client"` when a request is aborted on the frontend.
+- **Reusable Middleware Generics**: Added `ExpectedInput` generic to `.middleware()` and `.plugin()` factories, allowing you to explicitly type the input shape your reusable logic depends on.
+- **Standardized Builder Ordering**: Enforced a strict sequence where all context and input setup (`.use`, `.input`, `.meta`, `.name`, `.extend`) must happen *before* configuring execution policies (`.cache`, `.retry`, `.rateLimit`, etc.). This ensures configuration hooks always have access to the fully enriched context and validated input types.
+
+### Changed (Breaking Types)
+- **Strict Error Signatures**: `BaseError` now strictly requires `handlerName` and `statusCode` fields (they are no longer optional).
+- **Core Generics**: `ProcedureInstance`, `ProcedureProps`, `ProcedureExtensionConfig`, and `BaseContext` now accept additional generics (`TName`, `TNextMeta`, `TTotalMeta`) to enable stricter type persistence. Custom type helpers depending on the old signatures will need to be updated.
+
 ## [0.1.1] - 2026-04-23
 
 ### Added

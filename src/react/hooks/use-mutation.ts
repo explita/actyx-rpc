@@ -87,7 +87,13 @@ export function useMutation<
         }
         return [
           null,
-          { success: false, message: "Request aborted", reason: "ABORTED" },
+          {
+            success: false,
+            message: "Request aborted",
+            reason: "ABORTED",
+            handlerName: "client",
+            statusCode: 499,
+          },
         ];
       }
 
@@ -124,7 +130,13 @@ export function useMutation<
         }
         return [
           null,
-          { success: false, message: "Request aborted", reason: "ABORTED" },
+          {
+            success: false,
+            message: "Request aborted",
+            reason: "ABORTED",
+            handlerName: "client",
+            statusCode: 499,
+          },
         ];
       }
 

@@ -3,7 +3,7 @@ import {
   isErrorResponse,
   normalizeInput,
 } from "../../lib/utils.js";
-import type { Middleware } from "../../types/middleware.js";
+import { type Middleware } from "../../types/middleware.js";
 import type { ProcedureConfig, ProcedureProps } from "../../types/procedure.js";
 import { checkRateLimit } from "../cache/rate-limit.js";
 import type { CacheAdapter } from "../cache/types.js";
@@ -13,7 +13,7 @@ import { runMiddlewares } from "./run-middlewares.js";
 export function handlerResolver<O, P = any>(
   handler: (opts: { ctx: any; input: any }, ...args: P[]) => Promise<O>,
   opts: ProcedureProps<any, any, any>,
-  config: ProcedureConfig<any, any> = {},
+  config: ProcedureConfig<any, any>,
   cache: CacheAdapter,
 ) {
   return async (payload?: Record<string, unknown> | FormData, ...args: P[]) => {
@@ -23,18 +23,18 @@ export function handlerResolver<O, P = any>(
 
     let span: any = null;
     if (config.telemetry) {
-      span = startSpan(`RPC ${config.name || "unnamed"}`, {
+      span = startSpan(`RPC ${config.name}`, {
         "rpc.method": config.name,
       });
     }
 
     const baseError = {
       success: false,
-      handlerName: config.name ?? "",
+      handlerName: config.name,
     };
 
     const baseCtx = {
-      handlerName: config.name ?? "",
+      handlerName: config.name,
       meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
     };
 
@@ -48,7 +48,7 @@ export function handlerResolver<O, P = any>(
         });
 
         if (customError) {
-          return [null, customError];
+          return [null, { statusCode: 401, ...customError }];
         }
 
         return [
@@ -77,7 +77,7 @@ export function handlerResolver<O, P = any>(
         if (!result.allowed) return [null, { ...baseError, ...result.error }]; // Rate limited
       }
 
-      if (config.resolver && payload) {
+      if (config.resolver) {
         const rawData = normalizeInput(payload);
         const result = await config.resolver.parse(rawData);
         if (!result.success)
@@ -91,9 +91,11 @@ export function handlerResolver<O, P = any>(
               ...result,
             },
           ];
+
         input = result.data;
-      } else if (payload === undefined) {
+      } else {
         input = {};
+        args = [payload as any, ...args];
       }
 
       const enrichment =
@@ -142,7 +144,7 @@ export function handlerResolver<O, P = any>(
       const allMiddlewares = [
         ...(config.middlewares ?? []),
         ...(config.plugins ?? []).map((p) => p.onBefore).filter(Boolean),
-      ] as Middleware<any, any, any, any>[];
+      ] as Middleware<any, any, any, any, any>[];
 
       const mwResult = await runMiddlewares(
         allMiddlewares,
@@ -186,6 +188,7 @@ export function handlerResolver<O, P = any>(
               null,
               {
                 reason: "UNEXPECTED_ERROR",
+                statusCode: 500,
                 ...baseError,
                 ...onErrorRes,
               },
@@ -252,7 +255,14 @@ export function handlerResolver<O, P = any>(
           args,
         });
         if (onErrorRes && typeof onErrorRes === "object") {
-          return [null, onErrorRes];
+          return [
+            null,
+            {
+              statusCode: getFinalStatusCode(error),
+              ...baseError,
+              ...onErrorRes,
+            },
+          ];
         }
       } else {
         if (process.env.NODE_ENV === "development") {
@@ -263,9 +273,12 @@ export function handlerResolver<O, P = any>(
         null,
         {
           ...baseError,
-          message: error.message ?? "An unexpected error occurred",
-          reason: error.reason ?? "UNEXPECTED_ERROR",
-          statusCode: getFinalStatusCode(error.statusCode),
+          message:
+            error?.message ??
+            (typeof error === "string" ? error : "An unexpected error occurred"),
+          reason: error?.reason ?? "UNEXPECTED_ERROR",
+          statusCode: getFinalStatusCode(error),
+          ...(typeof error === "object" && error !== null ? error : {}),
         },
       ];
     }

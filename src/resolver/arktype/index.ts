@@ -26,7 +26,7 @@ export function arktypeResolver<S extends Type<any, any>>(
       if (result instanceof type.errors) {
         const errors = result.reduce(
           (acc, item) => {
-            acc[item.path.join(".")] = item.message;
+            acc[item.path.join(".") || "root"] = item.message;
             return acc;
           },
           {} as Record<string, string>,

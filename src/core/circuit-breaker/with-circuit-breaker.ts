@@ -13,7 +13,7 @@ export function withCircuitBreaker<TInput, TOutput>(
   ) => Promise<TOutput>,
   state: CircuitBreakerState,
   options: CircuitBreakerOptions,
-  handlerName?: string,
+  handlerName: string,
 ): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
   const threshold = options.failureThreshold ?? 5;
   const timeout = options.resetTimeout ?? 30000;
