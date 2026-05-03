@@ -105,3 +105,27 @@ export type UseInfiniteQueryReturn<TPage, TContext> = {
   reset: () => void;
   context: TContext | undefined;
 };
+
+export type UseQueryOpts<TOutput> = {
+  enabled?: boolean;
+  initialData?: Omit<TOutput, "success">;
+  onSuccess?: (data: TOutput) => void;
+  onError?: (error: ErrorResponse) => void;
+  onSettled?: (data: TOutput | null, error: ErrorResponse | null) => void;
+  refetchInterval?: number;
+  refetchOnWindowFocus?: boolean;
+};
+
+// Conditional return type based on initialData presence
+export type QueryResult<TOutput, TInitialData> = {
+  data: TInitialData extends undefined ? TOutput | undefined : TOutput;
+  error: ErrorResponse | undefined;
+  isLoading: boolean;
+  isFetching: boolean;
+  isError: boolean;
+  isSuccess: boolean;
+  refetch: TInitialData extends undefined
+    ? () => Promise<TOutput | undefined>
+    : () => Promise<TOutput>;
+  reset: () => void;
+};

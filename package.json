@@ -1,6 +1,6 @@
 {
   "name": "@explita/actyx-rpc",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": "Explita",
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,11 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./adapters/next": {
+      "import": "./dist/adapters/next.js",
+      "require": "./dist/adapters/next.js",
+      "types": "./dist/adapters/next.d.ts"
     },
     "./react": {
       "import": "./dist/react/index.js",
@@ -77,6 +82,7 @@
   "devDependencies": {
     "@types/node": "^25.0.8",
     "@types/react": "^19.2.14",
+    "next": "^16.2.4",
     "rimraf": "^6.1.2",
     "typescript": "^5.8.3",
     "vitest": "^3.0.7"
@@ -86,9 +92,36 @@
     "arktype": "^2.2.0",
     "ioredis": "^5.10.1",
     "joi": "^18.1.2",
+    "next": ">=16.0.0",
     "valibot": "^1.3.1",
     "yup": "^1.7.1",
     "zod": "^4.3.6"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "arktype": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "joi": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "valibot": {
+      "optional": true
+    },
+    "yup": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   },
   "files": [
     "dist",

@@ -5,9 +5,28 @@ import type { ProcedureProps } from "../types/procedure.js";
 
 export function normalizeInput(data: unknown) {
   if (data instanceof FormData) {
-    return Object.fromEntries(data.entries());
+    const obj: Record<string, any> = {};
+    for (const [key, value] of data.entries()) {
+      if (key in obj) {
+        if (!Array.isArray(obj[key])) {
+          obj[key] = [obj[key]];
+        }
+        obj[key].push(value);
+      } else {
+        obj[key] = value;
+      }
+    }
+    return obj;
   }
   return (data ?? {}) as Record<string, unknown>;
+}
+
+export function parseJson<T = unknown>(data: string) {
+  try {
+    return JSON.parse(data) as T;
+  } catch (e) {
+    return data as T;
+  }
 }
 
 export function mergeConfigs<TCtx, TEnrich>(

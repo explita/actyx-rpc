@@ -22,7 +22,7 @@ export function zodResolver<S extends z.ZodType>(
 ): SchemaResolver<z.infer<S>> {
   return {
     async parse(data) {
-      const result = schema.safeParse(data, options);
+      const result = await schema.safeParseAsync(data, options);
       if (!result.success) {
         const errors = result.error.issues.reduce(
           (acc, item) => {
@@ -38,6 +38,52 @@ export function zodResolver<S extends z.ZodType>(
       }
 
       return result;
+    },
+    toJsonSchema() {
+      const def = (schema as any)._def;
+      const shape = (schema as any).shape || def?.shape;
+
+      if (shape && typeof shape === "object") {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
+
+        for (const [key, value] of Object.entries(shape)) {
+          const v = value as any;
+          // Check multiple possible locations for the type name
+          const typeName = (v.type || v.def?.type || v._def?.typeName || "")
+            .replace("Zod", "")
+            .toLowerCase();
+
+          // If the object already has a toJSONSchema method, use it!
+          if (typeof v.toJSONSchema === "function") {
+            properties[key] = v.toJSONSchema();
+          } else {
+            properties[key] = {
+              type:
+                typeName === "number"
+                  ? "number"
+                  : typeName === "boolean"
+                    ? "boolean"
+                    : typeName === "array"
+                      ? "array"
+                      : typeName === "object"
+                        ? "object"
+                        : "string",
+            };
+          }
+
+          if (!v.isOptional()) {
+            required.push(key);
+          }
+        }
+
+        return {
+          type: "object",
+          properties,
+          required: required.length > 0 ? required : undefined,
+        };
+      }
+      return { type: "object" };
     },
   };
 }

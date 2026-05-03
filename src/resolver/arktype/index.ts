@@ -35,5 +35,42 @@ export function arktypeResolver<S extends Type<any, any>>(
       }
       return { success: true, data: result };
     },
+    toJsonSchema() {
+      const s = schema as any;
+      if (typeof s.toJSONSchema === "function") return s.toJSONSchema();
+
+      const arkJson = s.json;
+      if (arkJson && (arkJson.domain === "object" || arkJson.required || arkJson.optional)) {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
+
+        // Map required properties
+        if (Array.isArray(arkJson.required)) {
+          for (const prop of arkJson.required) {
+            properties[prop.key] = {
+              type: typeof prop.value === "string" ? prop.value : "string",
+            };
+            required.push(prop.key);
+          }
+        }
+
+        // Map optional properties
+        if (Array.isArray(arkJson.optional)) {
+          for (const prop of arkJson.optional) {
+            properties[prop.key] = {
+              type: typeof prop.value === "string" ? prop.value : "string",
+            };
+          }
+        }
+
+        return {
+          type: "object",
+          properties,
+          required: required.length > 0 ? required : undefined,
+        };
+      }
+
+      return { type: "object" };
+    },
   };
 }

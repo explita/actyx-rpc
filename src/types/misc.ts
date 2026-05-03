@@ -6,6 +6,7 @@ export type BaseError = {
   success: boolean;
   handlerName: string;
   statusCode: number;
+  [key: string]: unknown;
 };
 
 export type MergeMeta<T, U> = Prettify<
@@ -45,6 +46,7 @@ export type SchemaResolver<T = unknown> = {
   parse: (
     data: Record<string, unknown>,
   ) => Promise<ResolverResult<T>> | ResolverResult<T>;
+  toJsonSchema?: () => Record<string, unknown>;
 };
 
 export type InputMode = "strict" | "form" | "partial" | "patch";
@@ -128,3 +130,19 @@ export type FailureReason =
   | "CIRCUIT_OPEN"
   | "RATE_LIMITED"
   | (string & {});
+
+export type SSEEvent<T = any> = {
+  event?: string;
+  data: T;
+  id?: string;
+  retry?: number;
+};
+
+export type WSServerHandler<Ctx = any, I = any, In = any, Out = any> = (opts: {
+  ctx: Ctx;
+  input: I;
+  send: (data: Out) => void;
+  onMessage: (cb: (data: In) => void) => void;
+  onClose: (cb: () => void) => void;
+  onError: (cb: (err: any) => void) => void;
+}) => void | Promise<void>;

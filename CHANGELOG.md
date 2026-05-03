@@ -3,37 +3,52 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-05-03
+
+### Added
+
+- **Server-Sent Events (SSE)**: First-class support for streaming responses via the new `.sse()` procedure method. Includes a dedicated client utility for effortless consumption.
+- **Next.js Integration**: Introduced `nextAdapter()` (`adapters/next`) to seamlessly bind your Actyx router to Next.js App Router API routes.
+- **Automated OpenAPI Documentation**: Added `generateOpenApi()` to dynamically create OpenAPI (Swagger) specs from your router. Procedures can now be enriched with `.summary()`, `.description()`, and `.output()`.
+- **Runtime Output Contracts**: The `.output()` method enforces End-to-End type safety for client responses and provides runtime data sanitization by acting as a strict whitelist before transmission.
+
 ## [0.1.2] - 2026-04-26
 
 ### Added
+
 - **Strict Handler Naming**: The `.name("...")` method now strictly types `ctx.handlerName` in your query and mutation handlers (and hooks) as the exact string literal provided, rather than a generic `string`.
 - **Merged Metadata inheritance**: Calling `.extend` or `.meta` now correctly deeply merges and persists metadata types across the entire lifecycle (including `createContext`, `enrichInput`, `onError`, `middlewares`, and `plugins`).
 - **Client Abort Fallbacks**: The React `useMutation` hook now gracefully yields an error with `statusCode: 499` and `handlerName: "client"` when a request is aborted on the frontend.
 - **Reusable Middleware Generics**: Added `ExpectedInput` generic to `.middleware()` and `.plugin()` factories, allowing you to explicitly type the input shape your reusable logic depends on.
-- **Standardized Builder Ordering**: Enforced a strict sequence where all context and input setup (`.use`, `.input`, `.meta`, `.name`, `.extend`) must happen *before* configuring execution policies (`.cache`, `.retry`, `.rateLimit`, etc.). This ensures configuration hooks always have access to the fully enriched context and validated input types.
+- **Standardized Builder Ordering**: Enforced a strict sequence where all context and input setup (`.use`, `.input`, `.meta`, `.name`, `.extend`) must happen _before_ configuring execution policies (`.cache`, `.retry`, `.rateLimit`, etc.). This ensures configuration hooks always have access to the fully enriched context and validated input types.
 
 ### Changed (Breaking Types)
+
 - **Strict Error Signatures**: `BaseError` now strictly requires `handlerName` and `statusCode` fields (they are no longer optional).
 - **Core Generics**: `ProcedureInstance`, `ProcedureProps`, `ProcedureExtensionConfig`, and `BaseContext` now accept additional generics (`TName`, `TNextMeta`, `TTotalMeta`) to enable stricter type persistence. Custom type helpers depending on the old signatures will need to be updated.
 
 ## [0.1.1] - 2026-04-23
 
 ### Added
+
 - **Top-level Redirects**: Support for `_redirect` callback in error responses, enabling seamless framework redirects (e.g. Next.js `redirect()`) from within procedures.
 - **Metadata System**: New `.meta()` method for attaching arbitrary, type-safe data to procedures, accessible via `ctx.meta`.
 - **Enhanced Hooks**: `onSuccess` now receives the original `args` passed to the procedure, aiding in detailed audit logging.
 - **New `patch` Input Mode**: Added `patch` to `InputMode` for partial object shapes with strictly typed keys.
 
 ### Changed
+
 - **Default Input Mode**: The default `InputMode` has been changed from `form` to `strict` for better out-of-the-box type safety.
 
 ### Fixed
+
 - **Logging Refinement**: Procedure error stack traces are now suppressed in production (`NODE_ENV === "production"`) while remaining fully visible in development.
 - **Type safety**: Improved `onContextError` signature to include the `ctx` object for better error mapping.
 
 ## [0.1.0] - 2026-04-23
 
 ### Added
+
 - **Architectural Foundation**
   - **Type-Safe Builder**: A fluent API for creating procedures with inferred input/output types.
   - **Contextual Chaining**: Full context inheritance across middlewares and procedure extensions.
@@ -51,4 +66,3 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   - **Native OpenTelemetry**: Deep instrumentation for procedure lifecycle monitoring.
   - **Zero-Dependency Fallback**: Transparently degrades to no-op spans if OTel dependencies are absent.
   - **Audit Trails**: Built-in `onSuccess` and `onError` lifecycle hooks for custom logging and metrics.
-

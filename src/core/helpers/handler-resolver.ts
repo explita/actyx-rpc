@@ -16,7 +16,18 @@ export function handlerResolver<O, P = any>(
   config: ProcedureConfig<any, any>,
   cache: CacheAdapter,
 ) {
-  return async (payload?: Record<string, unknown> | FormData, ...args: P[]) => {
+  return async function (
+    this: any,
+    payload?: Record<string, unknown> | FormData,
+    ...args: P[]
+  ) {
+    // If a custom caller is provided (e.g. from a batcher), use it instead of running the handler
+    // We check both the config and the current function's metadata
+    const caller = (config as any).caller || (this as any)?._def?.caller;
+    if (caller) {
+      return caller(payload, ...args);
+    }
+
     const start = performance.now();
     let input: unknown = payload;
     let rootCtx: Awaited<ReturnType<typeof opts.createContext>> | null = null;
@@ -67,6 +78,26 @@ export function handlerResolver<O, P = any>(
         ...rootCtx.ctx,
       };
 
+      // 6. Authorize
+      if (config.authorize) {
+        const authResult = await config.authorize(currentCtx);
+        if (
+          authResult === false ||
+          (typeof authResult === "object" && authResult.success === false)
+        ) {
+          return [
+            null,
+            {
+              ...baseError,
+              message: "Forbidden",
+              reason: "FORBIDDEN",
+              statusCode: 403,
+              ...(typeof authResult === "object" ? authResult : {}),
+            },
+          ];
+        }
+      }
+
       if (config.rateLimit?.enabled) {
         const result = await checkRateLimit(
           cache,
@@ -77,7 +108,9 @@ export function handlerResolver<O, P = any>(
         if (!result.allowed) return [null, { ...baseError, ...result.error }]; // Rate limited
       }
 
-      if (config.resolver) {
+      let isMock = config.mock && process.env.ACTYX_MOCK === "true";
+
+      if (config.resolver && !isMock) {
         const rawData = normalizeInput(payload);
         const result = await config.resolver.parse(rawData);
         if (!result.success)
@@ -161,10 +194,10 @@ export function handlerResolver<O, P = any>(
         currentCtx = mwResult.ctx;
       }
 
-      const result = await handler(
-        { ctx: currentCtx, input: enrichedData },
-        ...args,
-      );
+      const result =
+        config.mock && process.env.ACTYX_MOCK === "true"
+          ? await config.mock(currentCtx)
+          : await handler({ ctx: currentCtx, input: enrichedData }, ...args);
 
       // Run plugin.onAfter() hooks
       for (const plugin of config.plugins ?? []) {
@@ -176,6 +209,17 @@ export function handlerResolver<O, P = any>(
       const isError = isErrorResponse(result);
 
       if (isError) {
+        // Run plugin.onError() hooks
+        for (const plugin of config.plugins ?? []) {
+          Promise.resolve(
+            plugin.onError?.({
+              error: result,
+              ctx: { ...currentCtx },
+              input: enrichedData,
+              args,
+            }),
+          ).catch((err) => console.error(err));
+        }
         if (opts.onError) {
           const onErrorRes = await opts.onError({
             error: result,
@@ -195,17 +239,6 @@ export function handlerResolver<O, P = any>(
             ];
           }
         }
-        // Run plugin.onError() hooks
-        for (const plugin of config.plugins ?? []) {
-          Promise.resolve(
-            plugin.onError?.({
-              error: result,
-              ctx: { ...currentCtx },
-              input: enrichedData,
-              args,
-            }),
-          ).catch((err) => console.error(err));
-        }
         return [null, result];
       }
 
@@ -218,7 +251,7 @@ export function handlerResolver<O, P = any>(
 
       Promise.resolve(
         opts.onSuccess?.({
-          ctx: { ...currentCtx },
+          ctx: { ...baseCtx, ...currentCtx },
           input: enrichedData,
           output: result,
           duration: end - start,
@@ -226,7 +259,28 @@ export function handlerResolver<O, P = any>(
         }),
       ).catch((err) => console.error(err));
 
-      return [result, null];
+      // 10. Validate Output
+      if (config.outputResolver && !isMock) {
+        const outputResult = await config.outputResolver.parse(
+          result as Record<string, unknown>,
+        );
+
+        if (!outputResult.success) {
+          return [
+            null,
+            {
+              ...baseError,
+              message: "Output validation failed",
+              reason: "UNEXPECTED_ERROR",
+              statusCode: 500,
+              errors: outputResult.errors,
+            },
+          ];
+        }
+        return [outputResult.data as any, null];
+      }
+
+      return [result as any, null];
     } catch (error: any) {
       // Run plugin.onError() hooks
       for (const plugin of config.plugins ?? []) {
@@ -275,7 +329,9 @@ export function handlerResolver<O, P = any>(
           ...baseError,
           message:
             error?.message ??
-            (typeof error === "string" ? error : "An unexpected error occurred"),
+            (typeof error === "string"
+              ? error
+              : "An unexpected error occurred"),
           reason: error?.reason ?? "UNEXPECTED_ERROR",
           statusCode: getFinalStatusCode(error),
           ...(typeof error === "object" && error !== null ? error : {}),

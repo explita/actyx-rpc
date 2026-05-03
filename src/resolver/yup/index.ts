@@ -49,5 +49,21 @@ export function yupResolver<S extends yup.Schema<any>>(
         throw error;
       }
     },
+    toJsonSchema() {
+      if (typeof (schema as any).toJSONSchema === "function")
+        return (schema as any).toJSONSchema();
+
+      const description = schema.describe();
+      if (description.type === "object") {
+        const properties: Record<string, any> = {};
+        for (const [key, value] of Object.entries(
+          (description as any).fields || {},
+        )) {
+          properties[key] = { type: (value as any).type };
+        }
+        return { type: "object", properties };
+      }
+      return { type: description.type };
+    },
   };
 }

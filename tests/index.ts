@@ -4,9 +4,17 @@ import { zodResolver } from "../src/resolver/zod/index.js";
 import { RedisCache } from "../src/index.js";
 import Redis from "ioredis";
 import { Compressor } from "../src/core/compression/compressor.js";
+import { arktypeResolver } from "../src/resolver/arktype/index.js";
+import { valibotResolver } from "../src/resolver/valibot/index.js";
+import { yupResolver } from "../src/resolver/yup/index.js";
+import { joiResolver } from "../src/resolver/joi/index.js";
+import * as v from "valibot";
+import * as yup from "yup";
+import Joi from "joi";
+import { type } from "arktype";
 
 const proc = createProcedure({
-  // inputMode: "form",
+  inputMode: "form",
   createContext: () => {
     return {
       ok: true,
@@ -20,13 +28,9 @@ const proc = createProcedure({
   },
   cache: new RedisCache(new Redis({}), { defaultTTL: "10m" }), // 10 minutes
   onContextError: async (reason) => {
-    // return {
-    //   message: "",
-    // //   reason,
-    // //   statusCode: 400,
-    //   success: false,
-    //   hello: "world",
-    // };
+    return {
+      _redirect: () => {},
+    };
   },
   compression: new Compressor({ level: 6 }),
   onError(params) {
@@ -39,6 +43,17 @@ const proc = createProcedure({
   meta: {
     globalName: "value",
   },
+  middlewares: [({ next }) => next({ fromRoot: "yes" })],
+  plugins: [
+    {
+      onBefore({ next, ctx, input }) {
+        return next({ fromRootPlugin: "yes" });
+      },
+      onError(error) {
+        console.log("error", error);
+      },
+    },
+  ],
 });
 
 const p2 = proc.extend({
@@ -47,11 +62,6 @@ const p2 = proc.extend({
       ok: true,
       ctx: {
         id: "me",
-        // role: "admin",
-        // user: {
-        //   name: "John Doe",
-        //   email: "[EMAIL_ADDRESS]",
-        // },
       },
     };
   },
@@ -102,8 +112,15 @@ const getData = proc
         id: z.string(),
       }),
     ),
-    // { mode: "patch" }
   )
+  // .authorize(async (ctx) => {
+  //   return {
+  //     success: false,
+  //     message: "unauthorized",
+  //     reason: "UNAUTHORIZED",
+  //     ok: true,
+  //   };
+  // })
   .use(md)
   // .use(async ({ next, input, ctx }) => {
   //   return {
@@ -114,29 +131,29 @@ const getData = proc
   .use({
     onError(params) {},
     onAfter(ctx, result) {
-      console.log("after", ctx, result);
+      // console.log("after", ctx, result);
     },
     onBefore({ ctx, input, next }) {
-      console.log("before", ctx, input);
+      // console.log("before", ctx, input);
       return next({ emi: "yes" });
     },
   })
   .use(({ next, ctx }) => {
-    console.log("use ctx", ctx);
+    // console.log("use ctx", ctx);
     return next({ yes: { next2: 2 } });
   })
   .compress({
     compressResponse: true,
     threshold: 64,
   })
-  .cache({
-    ttl: "1000m",
-    decompress: true,
-    key(ctx) {
-      console.log("cachekey", ctx);
-      return "";
-    },
-  })
+  // .cache({
+  //   ttl: "1000m",
+  //   decompress: true,
+  //   // key(ctx) {
+  //   //   console.log("cachekey", ctx);
+  //   //   return "";
+  //   // },
+  // })
   .retry({
     attempts: 3,
     initialDelay: 1000,
@@ -144,10 +161,10 @@ const getData = proc
       return error.statusCode === 400;
     },
     onFailed(error, attempts) {
-      console.log({ error, attempts });
+      // console.log({ error, attempts });
     },
     onRetry(error, attempt, delay) {
-      console.log({ error, attempt, delay });
+      // console.log({ error, attempt, delay });
     },
   })
   .timeout({
@@ -155,7 +172,7 @@ const getData = proc
     message: "Request timeout after 1000ms",
     reason: "TIMEOUT",
     onTimeout(timeoutMs) {
-      console.log("Request timeout after", timeoutMs, "ms");
+      // console.log("Request timeout after", timeoutMs, "ms");
     },
   })
   .rateLimit({
@@ -165,18 +182,27 @@ const getData = proc
       return `${ctx.id}`;
     },
   })
-  .circuitBreaker()
+  // .circuitBreaker()
+  // .mock(async (ctx) => {
+  //   return {
+  //     id: "asas",
+  //     name: "",
+  //   };
+  // })
+  .output(
+    zodResolver(
+      z.object({
+        id: z.coerce.string(),
+        name: z.string(),
+        date: z.string(),
+      }),
+    ),
+  )
   .query(async ({ ctx, input }, id: string, name: string) => {
-    // console.log("db calls", ctx, input, id, name);
     return {
-      //   success: false,
-      message: "testing",
-      ctx,
-      //   data: ctx,
-      //   data1: ctx,
-      //   data2: ctx,
-      //   data3: ctx,
-      //   data4: ctx,
+      id: 1,
+      name: "1",
+      date: new Date().toISOString(),
     };
   });
 
@@ -188,15 +214,104 @@ const postData = p3
   .use(({ next, ctx }) => next({ next: "yes", yes2: { next2: 2, yes3: 3 } }))
   .invalidate({ keys: ["getData"] })
   .mutation(({ ctx, input }, opts: { u: string; uu: string; uuu: number }) => {
-    console.log("ctx", ctx);
-    // console.log(u, uu, uuu);
-
     return {
       success: false,
-      // hello: "world",
-      // reason: "TEST",
-      // message: "nothing",
     };
   });
 
-getData({ name: "john", id: "" }).then(([res, err]) => console.log(res, err));
+const streamData = proc
+  .name("streamData")
+  .summary("Stream sample data")
+  .description(
+    "Yields a series of chunks with timestamps for testing purposes.",
+  )
+  .input(zodResolver(z.object({ count: z.number() })))
+  .stream(async function* ({ input }) {
+    for (let i = 0; i < input.count; i++) {
+      yield { index: i, time: new Date().toISOString() };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  });
+
+const arktypeData = proc
+  .name("arktypeData")
+  .input(arktypeResolver(type({ name: "string", age: "number" })))
+  .query(async ({ input }) => ({ success: true, input }));
+
+const valibotData = proc
+  .name("valibotData")
+  .input(valibotResolver(v.object({ title: v.string(), active: v.boolean() })))
+  .query(async ({ input }) => ({ success: true, input }));
+
+const yupData = proc
+  .name("yupData")
+  .input(
+    yupResolver(
+      yup.object({
+        email: yup.string().email().required(),
+        code: yup.number(),
+      }),
+    ),
+  )
+  .query(async ({ input }) => ({ success: true, input }));
+
+const joiData = proc
+  .name("joiData")
+  .input(
+    joiResolver(
+      Joi.object({
+        username: Joi.string().required(),
+        points: Joi.number().integer(),
+      }),
+    ),
+  )
+  .query(async ({ input }) => ({ success: true, input }));
+
+(async () => {
+  console.log("--- Starting Stream Test ---");
+  for await (const chunk of streamData({ count: 5 })) {
+    console.log("Stream Chunk:", chunk);
+  }
+  console.log("--- Stream Test Finished ---");
+
+  console.log("--- Testing Output Validation ---");
+  // We'll call getData. Since we are in mock mode (likely), we should check the result.
+  // Actually, let's call it manually.
+  const [res, err] = await getData({ name: "john", id: "1" }, "1", "name");
+  console.log("GetData Result:", res, "Error:", err);
+
+  const { generateOpenApi } = await import("../src/core/docs/generator.js");
+  const docs = generateOpenApi(
+    {
+      "get-data": getData,
+      "post-data": postData,
+      "stream-data": streamData,
+      "arktype-data": {
+        procedure: arktypeData,
+        method: "put",
+        tags: ["Experimental"],
+      },
+      "valibot-data": valibotData,
+      "yup-data": yupData,
+      "joi-data": {
+        procedure: joiData,
+        method: "patch",
+        summary: "Updated Joi Summary",
+      },
+    },
+    {
+      title: "Test API",
+      version: "1.0.0",
+      tags: ["API"],
+      baseUrl: "http://localhost:3000/api",
+      output: "./openapi.json",
+      security: {
+        apiKey: {
+          type: "apiKey",
+          in: "header",
+          name: "X-API-KEY",
+        },
+      },
+    },
+  );
+})();

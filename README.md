@@ -10,6 +10,7 @@ Actyx RPC lets you build server-side procedures with full type safety, minimal b
 - 🧠 Flexible input modes (strict, form, partial)
 - 🛡️ Resilience with Retries, Timeouts, and Circuit Breakers
 - 📊 Built-in OpenTelemetry instrumentation
+- 📝 Automated OpenAPI (Swagger) generation
 - 🔌 Works with optional Zod, Valibot, ArkType, Joi, Yup resolvers, and custom resolver of your choice.
 
 ---
@@ -359,45 +360,6 @@ const uploadImage = root
 
 #
 
-### `.circuitBreaker()`
-
-Protects your system from cascading failures by "tripping" when a procedure fails repeatedly. When open, subsequent calls fail fast with `CIRCUIT_OPEN`.
-
-| Option             | Type       | Default | Description                         |
-| :----------------- | :--------- | :------ | :---------------------------------- |
-| `failureThreshold` | `number`   | `5`     | Failures before opening the circuit |
-| `resetTimeout`     | `number`   | `30000` | Cooldown in ms before trying again  |
-| `onStateChange`    | `function` |         | Callback for state transitions      |
-
-```ts
-const fetchService = procedure
-  .name("inventory")
-  .circuitBreaker({
-    failureThreshold: 3,
-    resetTimeout: 60000, // 1 minute
-    onStateChange: (state, name) => console.log(`${name} is now ${state}`)
-  })
-  .query(async () => { ... });
-```
-
-#
-
-### `.telemetry()`
-
-Enables built-in OpenTelemetry instrumentation for the procedure. It automatically creates spans for the request lifecycle, recording successes and exceptions.
-
-> [!NOTE]
-> Requires `@opentelemetry/api` to be installed in your project. If the package is missing, `.telemetry()` will safely fall back to a no-op mode (no data emitted, no runtime errors).
-
-```ts
-const tracedProc = procedure
-  .name("processOrder")
-  .telemetry()
-  .mutation(async () => { ... });
-```
-
-#
-
 ### `.input()`
 
 Adds a schema resolver to validate and infer input types.
@@ -470,6 +432,8 @@ await partialAction({
 ```
 
 Use `strict` when the caller already has correctly typed data, `form` when values may still be raw strings or browser form entries, and `partial` when you want a looser patch-style caller API.
+
+**Multi-file Uploads**: When using `FormData` with multiple files under the same key, Actyx-RPC automatically detects the duplicates and provides them as an array in the `input` (e.g., `input.files` will be `File[]`).
 
 Input mode set by `createProcedure()` is the default, and the chosen mode only changes the caller-side input type. The handler still receives the resolver-parsed `input`.
 
@@ -557,39 +521,37 @@ const requirePostOwnership = procedure.middleware<{ postId: string }>(
     return next({ post });
   },
 );
-```
 
 const requireSession = procedure.middleware(({ ctx, next }) => {
-if (!ctx.userId) {
-return { userId: "You must be signed in" };
-}
+  if (!ctx.userId) {
+    return { userId: "You must be signed in" };
+  }
 
-return next();
+  return next();
 });
 
 const withTenant = procedure.middleware(async ({ ctx, next }) => {
-const tenant = await getTenantForUser(ctx.userId);
+  const tenant = await getTenantForUser(ctx.userId);
 
-if (!tenant) {
-return { tenant: "Tenant not found" };
-}
+  if (!tenant) {
+    return { tenant: "Tenant not found" };
+  }
 
-return next({
-tenantId: tenant.id,
-});
+  return next({
+    tenantId: tenant.id,
+  });
 });
 
 const [listProjects, error] = procedure
-.use(requireSession)
-.use(withTenant)
-.query(async ({ ctx }) => {
-return {
-tenantId: ctx.tenantId,
-items: [],
-};
-});
-
-````
+  .use(requireSession)
+  .use(withTenant)
+  .query(async ({ ctx }) => {
+    return {
+      tenantId: ctx.tenantId,
+      items: [],
+    };
+  });
+```
 
 #
 
@@ -618,7 +580,7 @@ const withAudit = procedure.plugin<{ postId: string }>({
     console.log("Procedure failed", props);
   },
 });
-````
+```
 
 #
 
@@ -745,12 +707,213 @@ Execution order is:
 > [!IMPORTANT]
 > To ensure your configuration hooks (like `.cache()` or `.rateLimit()`) have access to the fully enriched context and validated input types, always follow this order:
 >
-> 1. **Setup**: `.name()`, `.meta()`, `.input()`
+> 1. **Setup**: `.name()`, `.summary()`, `.description()`, `.meta()`, `.input()`, `.output()`
 > 2. **Middlewares**: `.use()`
-> 3. **Execution Policies**: `.cache()`, `.retry()`, `.timeout()`, `.rateLimit()`, `.circuitBreaker()`, `.telemetry()`
-> 4. **Terminal**: `.query()`, `.mutation()`
+> 3. **Execution Policies**: `.authorize()`, `.mock()`, `.cache()`, `.retry()`, `.timeout()`, `.rateLimit()`, `.circuitBreaker()`, `.telemetry()`
+> 4. **Terminal**: `.query()`, `.mutation()`, `.stream()`, `.sse()`
 >
 > Actyx RPC strictly enforces this order at the type level. Once you call an execution policy method, setup methods like `.use()` or `.input()` will no longer be available in the autocomplete for that chain.
+
+#
+
+`.authorize()`
+
+Add fine-grained authorization checks to your procedures. Unlike standard middleware, `.authorize()` is designed for simple boolean checks or permission lookups.
+
+```ts
+const deletePost = procedure
+  .authorize((ctx) => ctx.user.role === "admin")
+  .mutation(async ({ input }) => {
+    // Only runs if user is admin
+  });
+
+// You can also return a custom error
+const updateProject = procedure
+  .authorize((ctx) => {
+    if (ctx.user.isBanned) {
+      return { success: false, message: "Your account is restricted" };
+    }
+    return true;
+  })
+  .mutation(async () => { ... });
+```
+
+If the check fails, the procedure returns a `FORBIDDEN` error (403).
+
+#
+
+`.mock()`
+
+Actyx-RPC uses **Output Stubbing** for mocks. This allows you to simulate a successful backend response without actually executing the handler or hitting your database.
+
+```ts
+const getUser = procedure
+  .mock(({ ctx }) => ({
+    id: "user_123",
+    name: "John Doe (Mocked)",
+    role: "admin",
+  }))
+  .query(async ({ input }) => {
+    // This REAL handler will be SKIPPED if ACTYX_MOCK="true"
+    return await db.users.find(input.id);
+  });
+```
+
+### How it Works
+
+When `ACTYX_MOCK="true"` is set in your environment:
+
+1.  **Authorization** and **Middlewares** still run (to ensure the request is valid).
+2.  The **Resolver** still runs (to ensure the input shape is correct).
+3.  The **Real Handler** is skipped.
+4.  Your `.mock()` function provides the final result returned to the client.
+
+This allows you to build frontends against "perfect" data even if your backend logic isn't finished yet.
+
+> [!TIP]
+> When `.mock()` is used, the **input validation is skipped** at runtime, and the input argument becomes **optional** in TypeScript. This allows you to call procedures in development like `createUser()` without passing any data!
+
+### Testing Error States
+
+You can also throw inside a mock to test how your UI handles specific failure scenarios:
+
+```ts
+const getUser = procedure
+  .mock(() => {
+    throw { success: false, message: "Database is down!", reason: "DB_ERROR" };
+  })
+  .query(async () => { ... });
+```
+
+### Mocking File Uploads
+
+You can even mock binary data. This is extremely useful for testing file processing without manually selecting files in the browser every time:
+
+```ts
+const uploadAvatar = procedure
+  .mock(() => ({
+    userId: "user_1",
+    file: new Blob(["fake-image-content"], { type: "image/png" }),
+  }))
+  .mutation(async ({ input }) => {
+    // This handler receives the mocked Blob/File
+    await storage.upload(input.file);
+  });
+```
+
+#
+
+`.stream()`
+
+Terminal method for procedures that return an `AsyncIterable`. Perfect for AI streaming or long-running progress updates.
+
+```ts
+const generateContent = procedure
+  .input(z.object({ prompt: z.string() }))
+  .stream(async function* ({ input }) {
+    yield "Thinking...";
+    const stream = await ai.stream(input.prompt);
+    for await (const chunk of stream) {
+      yield chunk;
+    }
+  });
+
+// Consuming on the client
+for await (const chunk of generateContent({ prompt: "Hello" })) {
+  console.log(chunk);
+}
+```
+
+#
+
+### `.sse()`
+
+For real-time, one-way data streams (like notification feeds, stock tickers, or progress bars), use `.sse()`. This method specifically targets the **Server-Sent Events** protocol.
+
+On the server, you simply `yield` event objects. You can then use the `createSSEResponse` helper to turn that generator into a web-standard `Response`.
+
+```ts
+const watchStock = procedure
+  .input(z.object({ symbol: z.string() }))
+  .sse(async function* ({ input }) {
+    while (true) {
+      const price = await getLatestPrice(input.symbol);
+
+      yield {
+        event: "price-update",
+        data: { price, at: new Date() },
+      };
+
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  });
+
+// In a Next.js Route Handler:
+export async function GET(req: Request) {
+  const stream = watchStock({ symbol: "AAPL" });
+  return createSSEResponse(stream);
+}
+```
+
+On the client, use the `SSEClient` helper to open the connection. It handles the protocol parsing and yields typed events:
+
+```ts
+import { SSEClient } from "@explita/actyx-rpc";
+
+// In your component or useEffect:
+const stock = await SSEClient({
+  url: "/api/sse",
+  params: { symbol: "AAPL" },
+});
+
+for await (const { event, data } of stock) {
+  if (event === "price-update") {
+    console.log("New price:", data.price);
+  }
+}
+
+// To stop the stream manually:
+stock.close();
+```
+
+#
+
+### `.circuitBreaker()`
+
+Protects your system from cascading failures by "tripping" when a procedure fails repeatedly. When open, subsequent calls fail fast with `CIRCUIT_OPEN`.
+
+| Option             | Type       | Default | Description                         |
+| :----------------- | :--------- | :------ | :---------------------------------- |
+| `failureThreshold` | `number`   | `5`     | Failures before opening the circuit |
+| `resetTimeout`     | `number`   | `30000` | Cooldown in ms before trying again  |
+| `onStateChange`    | `function` |         | Callback for state transitions      |
+
+```ts
+const fetchService = procedure
+  .name("inventory")
+  .circuitBreaker({
+    failureThreshold: 3,
+    resetTimeout: 60000, // 1 minute
+    onStateChange: (state, name) => console.log(`${name} is now ${state}`)
+  })
+  .query(async () => { ... });
+```
+
+#
+
+### `.telemetry()`
+
+Enables built-in OpenTelemetry instrumentation for the procedure. It automatically creates spans for the request lifecycle, recording successes and exceptions.
+
+> [!NOTE]
+> Requires `@opentelemetry/api` to be installed in your project. If the package is missing, `.telemetry()` will safely fall back to a no-op mode (no data emitted, no runtime errors).
+
+```ts
+const tracedProc = procedure
+  .name("processOrder")
+  .telemetry()
+  .mutation(async () => { ... });
+```
 
 #
 
@@ -1387,6 +1550,100 @@ Therefore, input resolvers must always return an object schema. Primitive schema
 
 #
 
+## Automated Documentation
+
+Actyx RPC is designed to be self-documenting. By providing metadata to your procedures, you can automatically generate high-quality OpenAPI (Swagger) specifications without maintaining separate documentation files.
+
+### `.summary()` & `.description()`
+
+These methods allow you to add human-readable context to your procedures.
+
+- **`.summary(text)`**: A short, one-line summary of what the procedure does.
+- **`.description(text)`**: A detailed, multi-line explanation of the procedure's behavior, side effects, or business logic.
+
+```ts
+const createUser = procedure
+  .name("createUser")
+  .summary("Create a new system user")
+  .description("Registers a new user in the database and sends a welcome email. Requires admin privileges.")
+  .input(zodResolver(userSchema))
+  .mutation(async ({ input }) => { ... });
+```
+
+### `.output()`
+
+While `.output()` is essential for OpenAPI generation, its primary purpose is **Contract Enforcement** and **End-to-End Type Safety**. It acts as a strict boundary between your server logic and the client.
+
+- **Contract Enforcement**: It restricts the TypeScript return type of your procedure, ensuring your frontend receives exactly the type it expects—no more, no less.
+- **Runtime Sanitization**: It acts as a whitelist during execution, stripping away any extra or sensitive fields (like `passwordHash` or `internalFlags`) that your handler might accidentally return before the payload hits the network.
+- **Transformation**: You can use your resolver to format dates, round numbers, or transform data on the fly.
+- **Documentation**: It provides the exact schema of your response to the OpenAPI generator.
+
+
+```ts
+const getProfile = procedure
+  .output(
+    zodResolver(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+    ),
+  )
+  .query(async ({ input }) => {
+    const user = await db.user.find(input.id);
+    return user; // Even if 'user' has 50 fields, only 3 will be sent to the client.
+  });
+```
+
+### `generateOpenApi()`
+
+Once your procedures are defined, you can export your entire API as a standard OpenAPI 3.0 specification. While procedures carry their own metadata, you can **manually override** HTTP methods, tags, and summaries at the call site to fine-tune your documentation.
+
+```ts
+import { generateOpenApi } from "@explita/actyx-rpc";
+
+const openapi = generateOpenApi(
+  {
+    // Simple registration
+    "get-profile": getProfile,
+
+    // Registration with documentation overrides
+    "update-user": {
+      procedure: updateUser,
+      method: "put", // Force PUT instead of default POST
+      tags: ["Admin", "User"], // Custom grouping
+      summary: "Admin update", // Override summary
+    },
+
+    "delete-post": {
+      procedure: deletePost,
+      method: "delete",
+      tags: ["Posts"],
+    },
+  },
+  {
+    title: "My Awesome API",
+    version: "1.0.0",
+    baseUrl: "https://api.example.com/v1",
+    security: true, // Enables default Bearer Auth (JWT), or a Record for custom schemes
+    output: "./openapi.json",
+  },
+);
+```
+
+The generator automatically handles:
+
+- **Recursive Schema Mapping**: Works with Zod, ArkType, Valibot, Yup, and Joi.
+- **Smart Examples**: Automatically generates mock data for all inputs and parameters.
+- **Custom Security**: Injects JWT security schemes automatically when set to `true`, or custom schemes when provided as a Record.
+- **Method Overrides**: Explicitly map actions to `PUT`, `PATCH`, `DELETE`, etc.
+- **Tag Grouping**: Organize your procedures into logical sections in Swagger UI.
+- **Parameter Mapping**: Automatically converts Query inputs to URL parameters and Mutation inputs to Request Bodies.
+
+#
+
 ## React Helper
 
 The React entrypoint exports react hooks for handling async operation states on the client.
@@ -1508,6 +1765,98 @@ function PostsList() {
 - `@explita/actyx-rpc/resolver/valibot`
 - `@explita/actyx-rpc/resolver/yup`
 - `@explita/actyx-rpc/resolver/zod` -->
+
+#
+
+## Adapters
+
+### Next.js — `nextAdapter()`
+
+A ready-made context adapter for Next.js Server Actions and Route Handlers.
+
+```ts
+import { nextAdapter } from "@explita/actyx-rpc/adapters/next";
+```
+
+Use it inside `createContext` to populate your procedure context with request metadata:
+
+```ts
+import { createProcedure } from "@explita/actyx-rpc";
+import { nextAdapter } from "@explita/actyx-rpc/adapters/next";
+
+const procedure = createProcedure({
+  async createContext() {
+    const {
+      ip,
+      host,
+      pathname,
+      userAgent,
+      browser,
+      platform,
+      cookies,
+      ...rest
+    } = await nextAdapter();
+
+    return {
+      ok: true,
+      ctx: {
+        ip,
+        host,
+        pathname,
+        userAgent,
+        browser,
+        platform,
+      },
+    };
+  },
+});
+```
+
+#### Returned Fields
+
+| Field          | Source header(s)                          | Description                                                           |
+| -------------- | ----------------------------------------- | --------------------------------------------------------------------- |
+| `ip`           | `x-forwarded-for`                         | Client IP address                                                     |
+| `host`         | `x-forwarded-host` → `host`               | Public hostname                                                       |
+| `origin`       | `origin` → `proto://host`                 | Request origin, falls back to constructed value                       |
+| `referer`      | `referer`                                 | Referring page URL                                                    |
+| `pathname`     | `x-pathname` _(middleware-injected)_      | Current URL pathname — [requires middleware](#middleware-setup)       |
+| `searchParams` | `x-search-params` _(middleware-injected)_ | Parsed query params object — [requires middleware](#middleware-setup) |
+| `proto`        | `x-forwarded-proto`                       | `"http"` or `"https"`                                                 |
+| `userAgent`    | `user-agent`                              | Full user agent string                                                |
+| `browser`      | `sec-ch-ua`                               | Parsed browser name and version (e.g. `"Google Chrome/147"`)          |
+| `platform`     | `sec-ch-ua-platform`                      | OS platform (e.g. `"Windows"`, `"macOS"`)                             |
+| `locale`       | `accept-language`                         | First preferred locale (e.g. `"en-US"`)                               |
+| `contentType`  | `content-type`                            | Request content type                                                  |
+| `headers`      | —                                         | The raw `ReadonlyHeaders` object                                      |
+| `cookies`      | —                                         | The raw `ReadonlyRequestCookies` object                               |
+
+#### Middleware Setup
+
+`pathname` and `searchParams` are injected by your Next.js proxy. Without this, both fields will be empty strings / empty objects.
+
+Create or update your `proxy.ts` at the root of your project:
+
+```ts
+// proxy.ts
+import { NextRequest, NextResponse } from "next/server";
+
+export function proxy(request: NextRequest) {
+  const url = request.nextUrl;
+
+  const nextResponseConfig = {
+    headers: {
+      "x-pathname": url.pathname,
+      "x-search-params": JSON.stringify(Object.fromEntries(url.searchParams)),
+    },
+  };
+
+  return NextResponse.next(nextResponseConfig);
+}
+```
+
+> [!NOTE]
+> `next` must be installed in your consuming project. It is listed as an optional peer dependency of `@explita/actyx-rpc` and is not bundled.
 
 #
 

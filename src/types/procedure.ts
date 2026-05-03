@@ -34,6 +34,7 @@ import type {
   Prettify,
   QueryResult,
   SchemaResolver,
+  SSEEvent,
 } from "./misc.js";
 
 export type ProcedureConfig<
@@ -41,7 +42,8 @@ export type ProcedureConfig<
   TEnrich,
   TMeta extends Record<string, any> = {},
 > = {
-  name?: string;
+  name: string;
+  type?: "mutation" | "query" | "stream" | "sse" | "ws";
   resolver?: SchemaResolver<any>;
   middlewares?: Middleware<TCtx, TEnrich, any, any, TMeta>[];
   plugins?: Plugin<TCtx, TEnrich, any, any, TMeta>[];
@@ -54,6 +56,16 @@ export type ProcedureConfig<
   rateLimit?: RateLimitConfig;
   telemetry?: boolean;
   meta?: TMeta;
+  authorize?: (
+    ctx: MergeMeta<TCtx, BaseContext<TMeta>>,
+  ) => MaybePromise<boolean | Partial<ErrorResponse>>;
+  mock?: (opts: {
+    ctx: MergeMeta<TCtx, BaseContext<TMeta>>;
+    input: TEnrich;
+  }) => unknown;
+  summary?: string;
+  description?: string;
+  outputResolver?: SchemaResolver<any>;
 };
 
 export type ProcedureInstance<
@@ -64,11 +76,12 @@ export type ProcedureInstance<
   ICtx extends InputCtx = InputCtx,
   GIM extends InputMode = InputMode, //Global Input Mode
   TName extends string = string,
+  TMocked extends boolean = false,
 > = {
   name: <const Name extends string>(
     name: Name,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, Name>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, Name, TMocked>,
     "extend" | "name"
   >;
   meta: <NextMeta extends Record<string, any>>(
@@ -81,14 +94,15 @@ export type ProcedureInstance<
       I,
       ICtx,
       GIM,
-      TName
+      TName,
+      TMocked
     >,
     "extend" | "meta"
   >;
   circuitBreaker: (
     options?: CircuitBreakerOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -98,9 +112,13 @@ export type ProcedureInstance<
     | "compress"
     | "rateLimit"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
   telemetry: () => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -110,6 +128,10 @@ export type ProcedureInstance<
     | "compress"
     | "rateLimit"
     | "circuitBreaker"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
   use: (<NextCtx = Ctx>(
     mw: Middleware<
@@ -128,7 +150,8 @@ export type ProcedureInstance<
       I,
       ICtx,
       GIM,
-      TName
+      TName,
+      TMocked
     >,
     "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
   >) &
@@ -149,7 +172,8 @@ export type ProcedureInstance<
         I,
         ICtx,
         GIM,
-        TName
+        TName,
+        TMocked
       >,
       "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
     >);
@@ -184,7 +208,7 @@ export type ProcedureInstance<
     resolver: SchemaResolver<T>,
     options?: NextICtx,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, T, NextICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, T, NextICtx, GIM, TName, TMocked>,
     "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
   >;
 
@@ -200,10 +224,15 @@ export type ProcedureInstance<
     ? // No input - just pass through args
       (...args: P) => Promise<MutationResult<Awaited<T>>>
     : // Has input - first arg is input, then optional args
-      (
-        input: InputParams<I, ICtx, GIM>,
-        ...args: P
-      ) => Promise<MutationResult<Awaited<T>>>;
+      [TMocked] extends [true]
+      ? (
+          input?: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => Promise<MutationResult<Awaited<T>>>
+      : (
+          input: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => Promise<MutationResult<Awaited<T>>>;
 
   query: <T, P extends unknown[]>(
     handler: (
@@ -217,10 +246,75 @@ export type ProcedureInstance<
     ? // No input - just pass through args
       (...args: P) => Promise<QueryResult<Awaited<T>>>
     : // Has input - first arg is input, then optional args
-      (
-        input: InputParams<I, ICtx, GIM>,
-        ...args: P
-      ) => Promise<QueryResult<Awaited<T>>>;
+      [TMocked] extends [true]
+      ? (
+          input?: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => Promise<QueryResult<Awaited<T>>>
+      : (
+          input: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => Promise<QueryResult<Awaited<T>>>;
+
+  stream: <T, P extends unknown[]>(
+    handler: (
+      opts: {
+        ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+        input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
+      },
+      ...args: P
+    ) => AsyncIterable<T>,
+  ) => [I] extends [void]
+    ? (...args: P) => AsyncIterable<T>
+    : [TMocked] extends [true]
+      ? (input?: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>
+      : (input: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>;
+
+  sse: <O = any, P extends unknown[] = []>(
+    handler: (
+      opts: {
+        ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+        input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
+      },
+      ...args: P
+    ) => AsyncIterable<SSEEvent<O>>,
+  ) => [I] extends [void]
+    ? // No input - just pass through args
+      (...args: P) => AsyncIterable<SSEEvent<O>> & { close: () => void }
+    : // Has input - first arg is input, then optional args
+      [TMocked] extends [true]
+      ? (
+          input?: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => AsyncIterable<SSEEvent<O>> & { close: () => void }
+      : (
+          input: InputParams<I, ICtx, GIM>,
+          ...args: P
+        ) => AsyncIterable<SSEEvent<O>> & { close: () => void };
+
+  // ws: <In = any, Out = any, P extends unknown[] = []>(
+  //   handler: (
+  //     opts: {
+  //       ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+  //       input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
+  //       send: (data: Out) => void;
+  //       onMessage: (cb: (data: In) => void) => void;
+  //       onClose: (cb: () => void) => void;
+  //       onError: (cb: (err: any) => void) => void;
+  //     },
+  //     ...args: P
+  //   ) => MaybePromise<void>,
+  // ) => [I] extends [void]
+  //   ? (...args: P) => (wsContext: any) => Promise<void>
+  //   : [TMocked] extends [true]
+  //     ? (
+  //         input?: InputParams<I, ICtx, GIM>,
+  //         ...args: P
+  //       ) => (wsContext: any) => Promise<void>
+  //     : (
+  //         input: InputParams<I, ICtx, GIM>,
+  //         ...args: P
+  //       ) => (wsContext: any) => Promise<void>;
 
   extend: <NextCtx = Ctx, NextEnrich = TEnrich, NextMeta = unknown>(
     config: Omit<
@@ -244,7 +338,8 @@ export type ProcedureInstance<
     I,
     ICtx,
     GIM,
-    TName
+    TName,
+    TMocked
   >;
 
   cache: (
@@ -253,7 +348,7 @@ export type ProcedureInstance<
       [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
     >,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "invalidate"
@@ -263,6 +358,10 @@ export type ProcedureInstance<
     | "rateLimit"
     | "circuitBreaker"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
 
   invalidate: (
@@ -271,14 +370,14 @@ export type ProcedureInstance<
       [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
     >,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     "mutation"
   >;
 
   retry: (
     options?: RetryOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -288,12 +387,16 @@ export type ProcedureInstance<
     | "rateLimit"
     | "circuitBreaker"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
 
   timeout: (
     options?: TimeoutOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -303,12 +406,16 @@ export type ProcedureInstance<
     | "rateLimit"
     | "circuitBreaker"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
 
   compress: (
     options?: CompressionOptions,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -318,12 +425,16 @@ export type ProcedureInstance<
     | "rateLimit"
     | "circuitBreaker"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
   >;
 
   rateLimit: (
     options?: RateLimitOptions<Ctx, TMeta, TName>,
   ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName>,
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
     | "mutation"
     | "cache"
@@ -333,6 +444,47 @@ export type ProcedureInstance<
     | "compress"
     | "circuitBreaker"
     | "telemetry"
+    | "authorize"
+    | "mock"
+    | "stream"
+    | "output"
+  >;
+
+  authorize: (
+    checker: (
+      ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+    ) => MaybePromise<boolean | Partial<ErrorResponse>>,
+  ) => Omit<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+    "input" | "extend" | "middleware" | "plugin" | "name" | "meta" | "authorize"
+  >;
+
+  mock: <T = unknown>(
+    handler: (
+      ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+    ) => MaybePromise<T>,
+  ) => Omit<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, true>,
+    "input" | "extend" | "middleware" | "plugin" | "name" | "meta" | "mock"
+  >;
+
+  summary: (
+    text: string,
+  ) => Omit<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+    "summary"
+  >;
+  description: (
+    text: string,
+  ) => Omit<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+    "description" | "summary"
+  >;
+  output: (
+    resolver: SchemaResolver<any>,
+  ) => Omit<
+    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+    "output" | "description" | "summary"
   >;
 };
 
@@ -367,25 +519,27 @@ export type ProcedureProps<
   onContextError?: (options: {
     reason: FailureReason;
     ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
-  }) => MaybePromise<Partial<ErrorResponse> | void>;
+  }) => MaybePromise<Prettify<
+    Partial<ErrorResponse> & { _redirect: () => void }
+  > | void>;
   enrichInput?: (
     ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>,
   ) => MaybePromise<TEnrich>;
   onError?: (props: {
     error: any;
-    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
-    input: any;
+    ctx: MergeMeta<TCtx, BaseContext<TTotalMeta>>;
+    input: unknown;
     args: any[];
   }) => MaybePromise<Partial<ErrorResponse> | void>;
   onSuccess?: (props: {
-    ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
+    ctx: MergeMeta<TCtx, BaseContext<TTotalMeta>>;
     input: any;
     output: any;
     duration: number;
     args: any[];
   }) => MaybePromise<void>;
-  middlewares?: Middleware<any, any, any, any, TTotalMeta>[];
-  plugins?: Plugin<any, any, any, any, TTotalMeta>[];
+  middlewares?: Middleware<TCtx, TEnrich, any, any, TTotalMeta>[];
+  plugins?: Plugin<TCtx, TEnrich, any, any, TTotalMeta>[];
   inputMode?: GIM;
   cache?: CacheAdapter;
   compression?: Compressor;

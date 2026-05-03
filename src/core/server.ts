@@ -19,6 +19,7 @@ import type { CircuitBreakerOptions } from "./circuit-breaker/types.js";
 import type { CompressionOptions } from "./compression/types.js";
 import { Compressor } from "./compression/compressor.js";
 import { withCompression } from "./compression/with-compression.js";
+import type { Middleware, Plugin } from "../types/middleware.js";
 import type {
   ProcedureConfig,
   ProcedureInstance,
@@ -38,8 +39,12 @@ export function createProcedure<
   TMeta extends Record<string, any> = {},
   GIM extends InputMode = InputMode,
 >(opts: ProcedureProps<TCtx, TEnrich, GIM, TMeta>) {
+  opts = opts ?? {};
   const globalCache = opts.cache ?? new MemoryCache();
   const globalCompressor = opts.compression ?? new Compressor();
+
+  // Default implementations
+  opts.createContext ??= (async () => ({ ok: true, ctx: {} as any })) as any;
 
   function procedureBuilder<
     I = undefined,
@@ -48,9 +53,11 @@ export function createProcedure<
     TICtx extends InputCtx = {},
     TName extends string = string,
   >(
-    config: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {},
+    config: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
+      name: "unnamed",
+    },
   ): ProcedureInstance<Ctx, TEnrich, TLocalMeta, I, TICtx, GIM, TName> {
-    const nextConfig = { ...config, name: config.name ?? "unnamed" };
+    const nextConfig = { ...config };
 
     return {
       name(name) {
@@ -159,6 +166,42 @@ export function createProcedure<
         });
       },
 
+      authorize: (checker) => {
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
+          ...nextConfig,
+          authorize: checker as any,
+        });
+      },
+
+      //@ts-ignore
+      mock: (handler) => {
+        return procedureBuilder({
+          ...nextConfig,
+          mock: handler as any,
+        });
+      },
+
+      summary: (text) => {
+        return procedureBuilder({
+          ...nextConfig,
+          summary: text,
+        });
+      },
+
+      description: (text) => {
+        return procedureBuilder({
+          ...nextConfig,
+          description: text,
+        });
+      },
+
+      output: (resolver) => {
+        return procedureBuilder({
+          ...nextConfig,
+          outputResolver: resolver,
+        });
+      },
+
       middleware(mw) {
         return mw;
       },
@@ -207,6 +250,7 @@ export function createProcedure<
 
       //@ts-ignore
       mutation(handler) {
+        const nextConfig = { ...config, type: "mutation" };
         let exec = handler;
 
         // Apply invalidation after mutation
@@ -230,10 +274,9 @@ export function createProcedure<
         //@ts-ignore
         const resolvedFn = this.resolve(exec);
 
-        // Return the actual handler function
-        return async (...args: any[]) => {
-          // Call the resolved function to get the tuple
-          const [result, error] = await resolvedFn(...args);
+        const terminal = async function (this: any, ...args: any[]) {
+          // Call the resolved function to get the tuple with this context
+          const [result, error] = await resolvedFn.apply(this, args);
 
           // Handle redirect response
           if (
@@ -246,10 +289,14 @@ export function createProcedure<
 
           return [result, error];
         };
+
+        (terminal as any)._def = nextConfig;
+        return terminal;
       },
 
       //@ts-ignore
       query(handler) {
+        const nextConfig = { ...config, type: "query" };
         let exec = handler;
 
         if (nextConfig.compression?.enabled) {
@@ -288,10 +335,9 @@ export function createProcedure<
         //@ts-ignore
         const resolvedFn = this.resolve(exec);
 
-        // Return the actual handler function
-        return async (...args: any[]) => {
-          // Call the resolved function to get the tuple
-          const [result, error] = await resolvedFn(...args);
+        const terminal = async function (this: any, ...args: any[]) {
+          // Call the resolved function to get the tuple with this context
+          const [result, error] = await resolvedFn.apply(this, args);
 
           // Handle redirect response
           if (
@@ -304,9 +350,119 @@ export function createProcedure<
 
           return [result, error];
         };
+
+        (terminal as any)._def = nextConfig;
+        return terminal;
       },
+
+      //@ts-ignore
+      stream(handler) {
+        //@ts-ignore
+        const resolvedFn = this.resolve(handler);
+
+        const terminal = async function* (...args: any[]) {
+          const [result, error] = await resolvedFn(...args);
+          if (error) {
+            yield { error };
+            return;
+          }
+
+          if (
+            result &&
+            typeof result === "object" &&
+            (Symbol.asyncIterator in result || Symbol.iterator in result)
+          ) {
+            yield* result;
+          } else {
+            yield result;
+          }
+        };
+
+        (terminal as any)._def = { ...config, type: "stream" };
+        return terminal;
+      },
+
+      //@ts-ignore
+      sse(handler) {
+        //@ts-ignore
+        const resolvedFn = this.resolve(handler);
+
+        const terminal = async function* (...args: any[]) {
+          const [result, error] = await resolvedFn(...args);
+          if (error) {
+            yield { event: "error", data: error };
+            return;
+          }
+
+          if (
+            result &&
+            typeof result === "object" &&
+            (Symbol.asyncIterator in result || Symbol.iterator in result)
+          ) {
+            yield* result;
+          } else {
+            yield result;
+          }
+        };
+
+        (terminal as any)._def = { ...config, type: "sse" };
+        return terminal;
+      },
+
+      //@ts-ignore
+      ws(handler) {
+        // WS doesn't execute as a standard resolve because it's asynchronous and interactive.
+        // But we still want to run our middlewares and plugins before attaching!
+        const resolveContext = async (payload: any) => {
+          // This matches our standard createContext, enrichInput, authorize, middlewares
+          const rootCtx = await opts.createContext({
+            handlerName: config.name,
+            meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
+          });
+          if (!rootCtx.ok) {
+            throw new Error(rootCtx.reason || "Unauthorized");
+          }
+          return {
+            ...opts.meta,
+            ...config.meta,
+            ...rootCtx.ctx,
+          };
+        };
+
+        const terminal = function (payload?: any, ...args: any[]) {
+          return async (wsContext: {
+            send: (data: any) => void;
+            onMessage: (cb: (data: any) => void) => void;
+            onClose: (cb: () => void) => void;
+            onError: (cb: (err: any) => void) => void;
+          }) => {
+            try {
+              const ctx = await resolveContext(payload);
+              await (handler as any)({
+                ctx,
+                input: payload,
+                send: wsContext.send,
+                onMessage: wsContext.onMessage,
+                onClose: wsContext.onClose,
+                onError: wsContext.onError,
+              });
+            } catch (err: any) {
+              wsContext.onError?.(err);
+            }
+          };
+        };
+
+        (terminal as any)._def = { ...config, type: "ws" };
+        return terminal;
+      },
+
     };
   }
 
-  return procedureBuilder({ meta: opts.meta });
+  return procedureBuilder({
+    meta: opts.meta,
+    middlewares: opts.middlewares,
+    plugins: opts.plugins,
+    name: "unnamed",
+  });
 }

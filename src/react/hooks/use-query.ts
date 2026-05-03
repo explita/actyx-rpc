@@ -1,29 +1,6 @@
 import type { ErrorResponse } from "../../types/misc.js";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-type UseQueryOpts<TOutput> = {
-  enabled?: boolean;
-  initialData?: Omit<TOutput, "success">;
-  onSuccess?: (data: TOutput) => void;
-  onError?: (error: ErrorResponse) => void;
-  onSettled?: (data: TOutput | null, error: ErrorResponse | null) => void;
-  refetchInterval?: number;
-  refetchOnWindowFocus?: boolean;
-};
-
-// Conditional return type based on initialData presence
-type QueryResult<TOutput, TInitialData> = {
-  data: TInitialData extends undefined ? TOutput | undefined : TOutput;
-  error: ErrorResponse | undefined;
-  isLoading: boolean;
-  isFetching: boolean;
-  isError: boolean;
-  isSuccess: boolean;
-  refetch: TInitialData extends undefined
-    ? () => Promise<TOutput | undefined>
-    : () => Promise<TOutput>;
-  reset: () => void;
-};
+import { QueryResult, UseQueryOpts } from "../types.js";
 
 export function useQuery<TOutput, TInitialData = undefined>(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,

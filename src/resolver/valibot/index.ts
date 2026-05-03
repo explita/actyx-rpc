@@ -22,7 +22,7 @@ export function valibotResolver<S extends v.ObjectSchema<any, any>>(
 ): SchemaResolver<v.InferOutput<S>> {
   return {
     async parse(data) {
-      const result = v.safeParse(schema, data, {
+      const result = await v.safeParseAsync(schema, data, {
         abortEarly: false,
         ...options,
       });
@@ -42,6 +42,28 @@ export function valibotResolver<S extends v.ObjectSchema<any, any>>(
       }
 
       return { success: true, data: result.output };
+    },
+    toJsonSchema() {
+      if (typeof (schema as any).toJSONSchema === "function")
+        return (schema as any).toJSONSchema();
+
+      // Basic introspection for Valibot objects
+      if (schema.type === "object" && (schema as any).entries) {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
+
+        for (const [key, value] of Object.entries((schema as any).entries)) {
+          const v = value as any;
+          properties[key] = {
+            type: v.type === "number" ? "number" : v.type === "boolean" ? "boolean" : "string",
+          };
+          // Valibot marks optional/null in its own way, simplified here
+        }
+
+        return { type: "object", properties };
+      }
+
+      return { type: "object" };
     },
   };
 }
