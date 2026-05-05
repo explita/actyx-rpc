@@ -1,6 +1,6 @@
 {
   "name": "@explita/actyx-rpc",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "author": "Explita",
   "license": "MIT",
   "type": "module",
@@ -32,35 +32,35 @@
       "require": "./dist/react/index.js",
       "types": "./dist/react/index.d.ts"
     },
-    "./resolver": {
-      "import": "./dist/resolver/index.js",
-      "require": "./dist/resolver/index.js",
-      "types": "./dist/resolver/index.d.ts"
+    "./resolvers": {
+      "import": "./dist/resolvers/index.js",
+      "require": "./dist/resolvers/index.js",
+      "types": "./dist/resolvers/index.d.ts"
     },
-    "./resolver/arktype": {
-      "import": "./dist/resolver/arktype/index.js",
-      "require": "./dist/resolver/arktype/index.js",
-      "types": "./dist/resolver/arktype/index.d.ts"
+    "./resolvers/arktype": {
+      "import": "./dist/resolvers/arktype/index.js",
+      "require": "./dist/resolvers/arktype/index.js",
+      "types": "./dist/resolvers/arktype/index.d.ts"
     },
-    "./resolver/joi": {
-      "import": "./dist/resolver/joi/index.js",
-      "require": "./dist/resolver/joi/index.js",
-      "types": "./dist/resolver/joi/index.d.ts"
+    "./resolvers/joi": {
+      "import": "./dist/resolvers/joi/index.js",
+      "require": "./dist/resolvers/joi/index.js",
+      "types": "./dist/resolvers/joi/index.d.ts"
     },
-    "./resolver/valibot": {
-      "import": "./dist/resolver/valibot/index.js",
-      "require": "./dist/resolver/valibot/index.js",
-      "types": "./dist/resolver/valibot/index.d.ts"
+    "./resolvers/valibot": {
+      "import": "./dist/resolvers/valibot/index.js",
+      "require": "./dist/resolvers/valibot/index.js",
+      "types": "./dist/resolvers/valibot/index.d.ts"
     },
-    "./resolver/yup": {
-      "import": "./dist/resolver/yup/index.js",
-      "require": "./dist/resolver/yup/index.js",
-      "types": "./dist/resolver/yup/index.d.ts"
+    "./resolvers/yup": {
+      "import": "./dist/resolvers/yup/index.js",
+      "require": "./dist/resolvers/yup/index.js",
+      "types": "./dist/resolvers/yup/index.d.ts"
     },
-    "./resolver/zod": {
-      "import": "./dist/resolver/zod/index.js",
-      "require": "./dist/resolver/zod/index.js",
-      "types": "./dist/resolver/zod/index.d.ts"
+    "./resolvers/zod": {
+      "import": "./dist/resolvers/zod/index.js",
+      "require": "./dist/resolvers/zod/index.js",
+      "types": "./dist/resolvers/zod/index.d.ts"
     },
     "./package.json": "./package.json"
   },
@@ -84,6 +84,7 @@
     "@types/react": "^19.2.14",
     "next": "^16.2.4",
     "rimraf": "^6.1.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.3",
     "vitest": "^3.0.7"
   },
@@ -128,8 +129,5 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
-  ],
-  "dependencies": {
-    "tsx": "^4.21.0"
-  }
+  ]
 }

@@ -30,6 +30,7 @@ export type {
   MutationResult,
   FailureReason,
   SSEEvent,
+  ErrorResponse,
 } from "./types/misc.js";
 export type { CacheAdapter, CacheOptions } from "./core/cache/types.js";
 export type {

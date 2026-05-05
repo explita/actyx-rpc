@@ -28,7 +28,7 @@ export async function runMiddlewares(
         shouldContinue: false,
         errorResponse: {
           ...baseError,
-          message: parsed.message || "Middleware validation failed",
+          message: parsed.message || "Validation failed",
           reason: parsed.reason || "VALIDATION_ERROR",
           statusCode: Number(parsed.statusCode) || 400,
           errors: mwResult,

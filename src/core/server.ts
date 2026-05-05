@@ -279,12 +279,14 @@ export function createProcedure<
           const [result, error] = await resolvedFn.apply(this, args);
 
           // Handle redirect response
-          if (
-            error &&
-            "_redirect" in error &&
-            typeof error._redirect === "function"
-          ) {
-            error._redirect();
+          if (error) {
+            if (
+              "_redirect" in error &&
+              typeof error._redirect === "function"
+            ) {
+              error._redirect();
+            }
+            delete error._redirect;
           }
 
           return [result, error];
@@ -340,12 +342,14 @@ export function createProcedure<
           const [result, error] = await resolvedFn.apply(this, args);
 
           // Handle redirect response
-          if (
-            error &&
-            "_redirect" in error &&
-            typeof error._redirect === "function"
-          ) {
-            error._redirect();
+          if (error) {
+            if (
+              "_redirect" in error &&
+              typeof error._redirect === "function"
+            ) {
+              error._redirect();
+            }
+            delete error._redirect;
           }
 
           return [result, error];
@@ -363,6 +367,14 @@ export function createProcedure<
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
           if (error) {
+            if (
+              "_redirect" in error &&
+              typeof error._redirect === "function"
+            ) {
+              error._redirect();
+            }
+            delete error._redirect;
+
             yield { error };
             return;
           }
@@ -390,6 +402,14 @@ export function createProcedure<
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
           if (error) {
+            if (
+              "_redirect" in error &&
+              typeof error._redirect === "function"
+            ) {
+              error._redirect();
+            }
+            delete error._redirect;
+
             yield { event: "error", data: error };
             return;
           }
@@ -447,6 +467,12 @@ export function createProcedure<
                 onError: wsContext.onError,
               });
             } catch (err: any) {
+              if (err && typeof err === "object") {
+                if ("_redirect" in err && typeof err._redirect === "function") {
+                  err._redirect();
+                }
+                delete err._redirect;
+              }
               wsContext.onError?.(err);
             }
           };
@@ -455,7 +481,6 @@ export function createProcedure<
         (terminal as any)._def = { ...config, type: "ws" };
         return terminal;
       },
-
     };
   }
 

@@ -519,9 +519,9 @@ export type ProcedureProps<
   onContextError?: (options: {
     reason: FailureReason;
     ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>;
-  }) => MaybePromise<Prettify<
-    Partial<ErrorResponse> & { _redirect: () => void }
-  > | void>;
+  }) => MaybePromise<
+    Prettify<Partial<ErrorResponse> & { _redirect?: () => void }>
+  >;
   enrichInput?: (
     ctx: MergeMeta<TCtx, PlusMeta<TTotalMeta>>,
   ) => MaybePromise<TEnrich>;

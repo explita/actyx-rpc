@@ -10,7 +10,7 @@ import type { SchemaResolver } from "../../types/misc.js";
  * @example
  * ```ts
  * import * as v from "valibot";
- * import { valibotResolver } from "@explita/actyx-rpc/resolver/valibot";
+ * import { valibotResolver } from "@explita/actyx-rpc/resolvers/valibot";
  *
  * const schema = v.object({ name: v.string() });
  * procedure.input(valibotResolver(schema)).mutation(...)
@@ -55,7 +55,12 @@ export function valibotResolver<S extends v.ObjectSchema<any, any>>(
         for (const [key, value] of Object.entries((schema as any).entries)) {
           const v = value as any;
           properties[key] = {
-            type: v.type === "number" ? "number" : v.type === "boolean" ? "boolean" : "string",
+            type:
+              v.type === "number"
+                ? "number"
+                : v.type === "boolean"
+                  ? "boolean"
+                  : "string",
           };
           // Valibot marks optional/null in its own way, simplified here
         }

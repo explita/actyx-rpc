@@ -10,7 +10,7 @@ import type { SchemaResolver } from "../../types/misc.js";
  * @example
  * ```ts
  * import { z } from "zod";
- * import { zodResolver } from "@explita/actyx-rpc/resolver/zod";
+ * import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
  *
  * const schema = z.object({ name: z.string().min(1) });
  * procedure.input(zodResolver(schema)).mutation(...)

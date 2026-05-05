@@ -46,7 +46,7 @@ Install the resolver library you want to use as a peer dependency: zod, valibot,
 ```ts
 import { createProcedure } from "@explita/actyx-rpc";
 import { z } from "zod";
-import { zodResolver } from "@explita/actyx-rpc/resolver/zod";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
 
 const procedure = createProcedure({
   async createContext() {
@@ -1412,7 +1412,7 @@ Known failure reasons include:
 
 ```ts
 import { z } from "zod";
-import { zodResolver } from "@explita/actyx-rpc/resolver/zod";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -1430,7 +1430,7 @@ const action = procedure
 
 ```ts
 import * as v from "valibot";
-import { valibotResolver } from "@explita/actyx-rpc/resolver/valibot";
+import { valibotResolver } from "@explita/actyx-rpc/resolvers/valibot";
 
 const schema = v.object({
   name: v.pipe(v.string(), v.minLength(1, "Name is required")),
@@ -1448,7 +1448,7 @@ const action = procedure
 
 ```ts
 import { type } from "arktype";
-import { arktypeResolver } from "@explita/actyx-rpc/resolver/arktype";
+import { arktypeResolver } from "@explita/actyx-rpc/resolvers/arktype";
 
 const schema = type({
   name: "string > 1",
@@ -1466,7 +1466,7 @@ const action = procedure
 
 ```ts
 import Joi from "joi";
-import { joiResolver } from "@explita/actyx-rpc/resolver/joi";
+import { joiResolver } from "@explita/actyx-rpc/resolvers/joi";
 
 const schema = Joi.object({
   name: Joi.string().min(1, "Name is required"),
@@ -1484,7 +1484,7 @@ const action = procedure
 
 ```ts
 import * as yup from "yup";
-import { yupResolver } from "@explita/actyx-rpc/resolver/yup";
+import { yupResolver } from "@explita/actyx-rpc/resolvers/yup";
 
 const schema = yup.object({
   name: yup.string().min(1, "Name is required"),
@@ -1501,7 +1501,7 @@ const action = procedure
 ### Custom Resolver
 
 ```ts
-import { resolver } from "@explita/actyx-rpc/resolver";
+import { resolver } from "@explita/actyx-rpc/resolvers";
 
 const customResolver = resolver<{ slug: string }>((data) => {
   if (typeof data.slug !== "string" || data.slug.length === 0) {
@@ -1578,7 +1578,6 @@ While `.output()` is essential for OpenAPI generation, its primary purpose is **
 - **Runtime Sanitization**: It acts as a whitelist during execution, stripping away any extra or sensitive fields (like `passwordHash` or `internalFlags`) that your handler might accidentally return before the payload hits the network.
 - **Transformation**: You can use your resolver to format dates, round numbers, or transform data on the fly.
 - **Documentation**: It provides the exact schema of your response to the OpenAPI generator.
-
 
 ```ts
 const getProfile = procedure
@@ -1759,12 +1758,12 @@ function PostsList() {
 
 - `@explita/actyx-rpc`
 - `@explita/actyx-rpc/react`
-- `@explita/actyx-rpc/resolver`
-- `@explita/actyx-rpc/resolver/arktype`
-- `@explita/actyx-rpc/resolver/joi`
-- `@explita/actyx-rpc/resolver/valibot`
-- `@explita/actyx-rpc/resolver/yup`
-- `@explita/actyx-rpc/resolver/zod` -->
+- `@explita/actyx-rpc/resolvers`
+- `@explita/actyx-rpc/resolvers/arktype`
+- `@explita/actyx-rpc/resolvers/joi`
+- `@explita/actyx-rpc/resolvers/valibot`
+- `@explita/actyx-rpc/resolvers/yup`
+- `@explita/actyx-rpc/resolvers/zod` -->
 
 #
 

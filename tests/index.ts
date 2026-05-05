@@ -1,13 +1,13 @@
 import z from "zod";
 import { createProcedure } from "../src/core/server.js";
-import { zodResolver } from "../src/resolver/zod/index.js";
+import { zodResolver } from "../src/resolvers/zod/index.js";
 import { RedisCache } from "../src/index.js";
 import Redis from "ioredis";
 import { Compressor } from "../src/core/compression/compressor.js";
-import { arktypeResolver } from "../src/resolver/arktype/index.js";
-import { valibotResolver } from "../src/resolver/valibot/index.js";
-import { yupResolver } from "../src/resolver/yup/index.js";
-import { joiResolver } from "../src/resolver/joi/index.js";
+import { arktypeResolver } from "../src/resolvers/arktype/index.js";
+import { valibotResolver } from "../src/resolvers/valibot/index.js";
+import { yupResolver } from "../src/resolvers/yup/index.js";
+import { joiResolver } from "../src/resolvers/joi/index.js";
 import * as v from "valibot";
 import * as yup from "yup";
 import Joi from "joi";
@@ -206,7 +206,7 @@ const getData = proc
     };
   });
 
-const postData = p3
+const postData = proc
   .name("postData")
   .meta({ globalNamesss: "Hello", next: { next2: 2 } })
   .input(zodResolver(z.object({ name: z.string().min(2) })))

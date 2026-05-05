@@ -10,7 +10,7 @@ import type { SchemaResolver } from "../../types/misc.js";
  * @example
  * ```ts
  * import { type } from "arktype";
- * import { arktypeResolver } from "@explita/actyx-rpc/resolver/arktype";
+ * import { arktypeResolver } from "@explita/actyx-rpc/resolvers/arktype";
  *
  * const schema = type({ name: "string > 1", description: "string?" });
  * procedure.input(arktypeResolver(schema)).mutation(...)
@@ -40,7 +40,10 @@ export function arktypeResolver<S extends Type<any, any>>(
       if (typeof s.toJSONSchema === "function") return s.toJSONSchema();
 
       const arkJson = s.json;
-      if (arkJson && (arkJson.domain === "object" || arkJson.required || arkJson.optional)) {
+      if (
+        arkJson &&
+        (arkJson.domain === "object" || arkJson.required || arkJson.optional)
+      ) {
         const properties: Record<string, any> = {};
         const required: string[] = [];
 

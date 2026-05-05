@@ -11,7 +11,7 @@ import type { ResolverResult, SchemaResolver } from "../types/misc.js";
  * @example ArkType
  * ```ts
  * import { type } from "arktype";
- * import { resolver } from "@explita/actyx-rpc/resolver";
+ * import { resolver } from "@explita/actyx-rpc/resolvers";
  *
  * const schema = type({ name: "string" });
  *

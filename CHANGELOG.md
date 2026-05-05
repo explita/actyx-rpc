@@ -3,6 +3,22 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-05-05
+
+### Added
+
+- **Exported Types**: The `ErrorResponse` type is now exported from the main entry point.
+
+### Changed (Breaking Paths)
+
+- **Resolver Import Paths**: The schema resolver import paths have been pluralized. You must now import from `@explita/actyx-rpc/resolvers/*` instead of `@explita/actyx-rpc/resolver/*`.
+
+### Fixed
+
+- **Client Component Serialization**: The `_redirect` function is now explicitly stripped from all error responses before returning to the client, preventing Next.js "cannot pass functions to client component" serialization errors.
+- **Dependency Cleanup**: Moved `tsx` from `dependencies` to `devDependencies`.
+- **Validation Messages**: Standardized the default middleware validation error message from "Middleware validation failed" to "Validation failed".
+
 ## [0.1.3] - 2026-05-03
 
 ### Added

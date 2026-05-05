@@ -1,5 +1,7 @@
-import * as yup from "yup";
+import Joi from "joi";
 import type { SchemaResolver } from "../../types/misc.js";
+
+type JoiInfer<T> = T extends Joi.Schema<infer U> ? U : never;
 
 /**
  * Wraps a Yup object schema into a procedure resolver.
@@ -9,36 +11,38 @@ import type { SchemaResolver } from "../../types/misc.js";
  *
  * @example
  * ```ts
- * import * as yup from "yup";
- * import { yupResolver } from "@explita/actyx-rpc/resolver/yup";
+ * import Joi from 'joi';
+ * import { yupResolver } from "@explita/actyx-rpc/resolvers/yup";
  *
  * const schema = yup.object({ name: yup.string().min(1) });
  * procedure.input(yupResolver(schema)).mutation(...)
  * ```
  */
-export function yupResolver<S extends yup.Schema<any>>(
-  schema: S,
-  options?: yup.ValidateOptions,
-): SchemaResolver<yup.InferType<S>> {
+export function joiResolver<
+  T extends Record<string, unknown>,
+  S extends Joi.Schema<any> = Joi.Schema<T>,
+>(schema: S, options?: Joi.ValidationOptions): SchemaResolver<T> {
   return {
     async parse(data: unknown) {
       try {
-        // Validate and return typed data
-        const validatedData = await schema.validate(data, {
-          abortEarly: false, // Return all validation errors
+        const value = await schema.validateAsync(data, {
+          abortEarly: false, // Return all errors
           stripUnknown: true, // Remove unknown properties
+          convert: true, // Convert types (e.g., "1" to 1)
           ...options,
         });
 
-        return { success: true, data: validatedData };
+        return {
+          success: true,
+          data: value,
+        };
       } catch (error) {
-        if (error instanceof yup.ValidationError) {
-          // Format Yup validation errors
-          const errors = error.inner.reduce(
-            (acc, err) => {
-              if (err.path) {
-                acc[err.path || "root"] = err.message;
-              }
+        // Format Joi validation errors
+        if (error instanceof Joi.ValidationError) {
+          const errors = error.details.reduce(
+            (acc, detail) => {
+              const path = detail.path.join(".") || "root";
+              acc[path] = detail.message;
               return acc;
             },
             {} as Record<string, string>,
@@ -46,6 +50,7 @@ export function yupResolver<S extends yup.Schema<any>>(
 
           return { success: false, errors };
         }
+
         throw error;
       }
     },
@@ -56,9 +61,7 @@ export function yupResolver<S extends yup.Schema<any>>(
       const description = schema.describe();
       if (description.type === "object") {
         const properties: Record<string, any> = {};
-        for (const [key, value] of Object.entries(
-          (description as any).fields || {},
-        )) {
+        for (const [key, value] of Object.entries(description.keys || {})) {
           properties[key] = { type: (value as any).type };
         }
         return { type: "object", properties };

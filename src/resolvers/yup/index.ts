@@ -1,7 +1,5 @@
-import Joi from "joi";
+import * as yup from "yup";
 import type { SchemaResolver } from "../../types/misc.js";
-
-type JoiInfer<T> = T extends Joi.Schema<infer U> ? U : never;
 
 /**
  * Wraps a Yup object schema into a procedure resolver.
@@ -11,38 +9,36 @@ type JoiInfer<T> = T extends Joi.Schema<infer U> ? U : never;
  *
  * @example
  * ```ts
- * import Joi from 'joi';
- * import { yupResolver } from "@explita/actyx-rpc/resolver/yup";
+ * import * as yup from "yup";
+ * import { yupResolver } from "@explita/actyx-rpc/resolvers/yup";
  *
  * const schema = yup.object({ name: yup.string().min(1) });
  * procedure.input(yupResolver(schema)).mutation(...)
  * ```
  */
-export function joiResolver<
-  T extends Record<string, unknown>,
-  S extends Joi.Schema<any> = Joi.Schema<T>,
->(schema: S, options?: Joi.ValidationOptions): SchemaResolver<T> {
+export function yupResolver<S extends yup.Schema<any>>(
+  schema: S,
+  options?: yup.ValidateOptions,
+): SchemaResolver<yup.InferType<S>> {
   return {
     async parse(data: unknown) {
       try {
-        const value = await schema.validateAsync(data, {
-          abortEarly: false, // Return all errors
+        // Validate and return typed data
+        const validatedData = await schema.validate(data, {
+          abortEarly: false, // Return all validation errors
           stripUnknown: true, // Remove unknown properties
-          convert: true, // Convert types (e.g., "1" to 1)
           ...options,
         });
 
-        return {
-          success: true,
-          data: value,
-        };
+        return { success: true, data: validatedData };
       } catch (error) {
-        // Format Joi validation errors
-        if (error instanceof Joi.ValidationError) {
-          const errors = error.details.reduce(
-            (acc, detail) => {
-              const path = detail.path.join(".") || "root";
-              acc[path] = detail.message;
+        if (error instanceof yup.ValidationError) {
+          // Format Yup validation errors
+          const errors = error.inner.reduce(
+            (acc, err) => {
+              if (err.path) {
+                acc[err.path || "root"] = err.message;
+              }
               return acc;
             },
             {} as Record<string, string>,
@@ -50,7 +46,6 @@ export function joiResolver<
 
           return { success: false, errors };
         }
-
         throw error;
       }
     },
@@ -61,7 +56,9 @@ export function joiResolver<
       const description = schema.describe();
       if (description.type === "object") {
         const properties: Record<string, any> = {};
-        for (const [key, value] of Object.entries(description.keys || {})) {
+        for (const [key, value] of Object.entries(
+          (description as any).fields || {},
+        )) {
           properties[key] = { type: (value as any).type };
         }
         return { type: "object", properties };
