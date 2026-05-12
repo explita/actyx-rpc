@@ -16,7 +16,7 @@ export async function runMiddlewares(
 
     if (mwResult && typeof mwResult === "object" && "_isNext" in mwResult) {
       // Continue to next middleware
-      currentCtx = { ...currentCtx, ...mwResult.ctx };
+      Object.assign(currentCtx, mwResult.ctx);
     } else if (mwResult && typeof mwResult === "object") {
       // Early return or error from middleware
       const parsed = parseMiddlewareResponse(

@@ -4,9 +4,12 @@ import type { CacheEntry } from "../core/cache/types.js";
 import type { ProcedureProps } from "../types/procedure.js";
 
 export function normalizeInput(data: unknown) {
-  if (data instanceof FormData) {
+  if (!data) return {};
+  
+  // Robust FormData check
+  if (data instanceof FormData || (typeof data === "object" && "entries" in data && typeof (data as any).entries === "function")) {
     const obj: Record<string, any> = {};
-    for (const [key, value] of data.entries()) {
+    for (const [key, value] of (data as any).entries()) {
       if (key in obj) {
         if (!Array.isArray(obj[key])) {
           obj[key] = [obj[key]];
@@ -18,7 +21,7 @@ export function normalizeInput(data: unknown) {
     }
     return obj;
   }
-  return (data ?? {}) as Record<string, unknown>;
+  return data as Record<string, unknown>;
 }
 
 export function parseJson<T = unknown>(data: string) {

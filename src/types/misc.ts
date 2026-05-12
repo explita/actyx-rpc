@@ -19,9 +19,25 @@ export type MergeMeta<T, U> = Prettify<
   } & U
 >;
 
+import { PubSubAdapter } from "../lib/pubsub.js";
+
 export type BaseContext<TMeta, TName extends string = string> = {
   handlerName: TName;
   meta: TMeta;
+  /**
+   * Call another procedure internally without a network request.
+   * The current context will be passed to the target procedure.
+   */
+  // call: <T, I, A extends any[]>(
+  //   proc: (input: I, ...args: A) => Promise<T>,
+  //   input?: I,
+  //   ...args: A
+  // ) => Promise<T>;
+  /**
+   * Topic-based event distribution.
+   * Uses Redis if configured, otherwise falls back to in-memory.
+   */
+  // pubsub: PubSubAdapter;
 };
 
 export type PlusMeta<T> = {
@@ -137,6 +153,10 @@ export type SSEEvent<T = any> = {
   id?: string;
   retry?: number;
 };
+
+export type SubscriptionEmit<T> = (data: T) => void;
+export type SubscriptionCleanup = () => void | Promise<void>;
+export type SubscriptionResult<T> = MaybePromise<SubscriptionCleanup>;
 
 export type WSServerHandler<Ctx = any, I = any, In = any, Out = any> = (opts: {
   ctx: Ctx;

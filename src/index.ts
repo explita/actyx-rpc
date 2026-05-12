@@ -1,7 +1,9 @@
 export { createProcedure } from "./core/server.js";
 export { generateOpenApi } from "./core/docs/generator.js";
 export { createSSEResponse } from "./core/helpers/sse.js";
+export { observabilityPlugin } from "./plugins/observability.js";
 export { SSEClient } from "./client/sse.js";
+export { progressFetch } from "./client/progress-fetch.js";
 // export { applyWSHandler } from "./adapters/ws.js";
 // export { WSClient } from "./client/ws.js";
 // export { createBatchHandler } from "./core/batch/handler.js";
@@ -11,6 +13,7 @@ export { SSEClient } from "./client/sse.js";
 //   BatchRequestItem,
 //   BatchResponseItem,
 // } from "./core/batch/handler.js";
+export type { ProgressOptions } from "./client/progress-fetch.js";
 export { MemoryCache } from "./core/cache/memory-cache.js";
 export { RedisCache } from "./core/cache/redis-cache.js";
 export type {

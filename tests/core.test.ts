@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createProcedure } from "../src/core/server.js";
-import { zodResolver } from "../src/resolver/zod/index.js";
+import { zodResolver } from "../src/resolvers/zod/index.js";
 import { z } from "zod";
 
 describe("Core: Procedure Basics", () => {

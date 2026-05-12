@@ -2,49 +2,55 @@ import type { ErrorResponse } from "../types/misc.js";
 
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
-export type UseMutationOpts<TOutput, TInput = any, TContext = unknown> = {
+export type UseMutationOpts<
+  TOutput,
+  TArgs extends any[] = any[],
+  TContext = unknown,
+> = {
   /**
    * Callback function to be executed when the procedure is successful.
    * @param data The data returned by the procedure.
    */
-  onSuccess?: (data: TOutput, input: TInput, context?: TContext) => void;
+  onSuccess?: (data: TOutput, ...args: TArgs) => void;
   /**
    * Callback function to be executed when the procedure fails.
    * @param error The error message.
    */
-  onError?: (error: string, input: TInput, context?: TContext) => void;
+  onError?: (error: string, ...args: TArgs) => void;
   /**
    * Callback function to be executed when the procedure fails due to validation errors.
    * @param errors The validation errors.
    */
-  onValidationErrors?: (errors: Partial<Record<keyof TInput, string>>) => void;
+  onValidationErrors?: (
+    errors: Partial<Record<keyof TArgs[0], string>>,
+  ) => void;
+  /**
+   * Callback function to be executed when the procedure progress changes.
+   * @param progress The progress percentage (0-100).
+   */
+  onProgress?: (progress: number) => void;
   /**
    * Callback function to be executed when the procedure is settled.
    */
-  onSettled?: (
-    data?: TOutput,
-    error?: string,
-    input?: TInput,
-    context?: TContext,
-  ) => void;
+  onSettled?: (data?: TOutput, error?: string, ...args: TArgs) => void;
   /**
    * Callback function to be executed before the procedure is mutated.
-   * @param input The input for the procedure.
+   * @param args The arguments for the procedure.
    * @returns The context for the procedure.
    */
-  onMutate?: (input: TInput) => Promise<TContext> | TContext;
+  onMutate?: (...args: TArgs) => Promise<TContext> | TContext;
 
   /**
    * Optimistic update function.
-   * @param input The input for the procedure.
+   * @param args The arguments for the procedure.
    * @returns The optimistic update for the procedure.
    */
   optimisticUpdate?: (
-    input: TInput,
-  ) => (
+    ...args: TArgs
+  ) =>
     | Omit<TOutput, "message" | "success">
     | Promise<Omit<TOutput, "message" | "success">>
-  ) & { message?: string; success?: boolean };
+    | TOutput;
   /**
    * Debounce time in milliseconds.
    */
@@ -106,26 +112,68 @@ export type UseInfiniteQueryReturn<TPage, TContext> = {
   context: TContext | undefined;
 };
 
-export type UseQueryOpts<TOutput> = {
+export type UseQueryOpts<TOutput, TUnwrap extends boolean = false> = {
   enabled?: boolean;
-  initialData?: Omit<TOutput, "success">;
+  initialData?: Omit<Unwrap<TOutput, TUnwrap>, "success">;
   onSuccess?: (data: TOutput) => void;
   onError?: (error: ErrorResponse) => void;
   onSettled?: (data: TOutput | null, error: ErrorResponse | null) => void;
   refetchInterval?: number;
   refetchOnWindowFocus?: boolean;
+  /**
+   * Automatically unwrap the 'data' field from standard RPC success responses.
+   * @default false
+   */
+  unwrap?: TUnwrap;
+  /**
+   * Unique key for this query. If provided, simultaneous requests for the same key will be deduplicated.
+   */
+  queryKey?: QueryKey[] | readonly QueryKey[];
 };
 
+type QueryKey = number | string;
+
+/**
+ * Automatically unwrap the 'data' field from standard RPC success responses.
+ */
+export type Unwrap<T, DoUnwrap extends boolean = false> = DoUnwrap extends true
+  ? T extends { data: infer D }
+    ? D
+    : T
+  : T;
+
 // Conditional return type based on initialData presence
-export type QueryResult<TOutput, TInitialData> = {
-  data: TInitialData extends undefined ? TOutput | undefined : TOutput;
+export type QueryResult<
+  TOutput,
+  TInitialData,
+  TUnwrap extends boolean = false,
+> = {
+  data: TInitialData extends undefined
+    ? Unwrap<TOutput, TUnwrap> | undefined
+    : Unwrap<TOutput, TUnwrap>;
   error: ErrorResponse | undefined;
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
   isSuccess: boolean;
   refetch: TInitialData extends undefined
-    ? () => Promise<TOutput | undefined>
-    : () => Promise<TOutput>;
+    ? () => Promise<Unwrap<TOutput, TUnwrap> | undefined>
+    : () => Promise<Unwrap<TOutput, TUnwrap>>;
   reset: () => void;
+};
+
+export type UseSubscriptionOpts<TOutput> = {
+  wsUrl: string;
+  enabled?: boolean;
+  onData?: (data: TOutput) => void;
+  onError?: (error: ErrorResponse) => void;
+  onSubscribed?: () => void;
+  onUnsubscribed?: () => void;
+};
+
+export type UseSubscriptionReturn<TOutput> = {
+  data: TOutput | undefined;
+  status: "idle" | "connecting" | "connected" | "error";
+  error: ErrorResponse | undefined;
+  unsubscribe: () => void;
 };

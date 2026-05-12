@@ -20,7 +20,7 @@ export function zodResolver<S extends z.ZodType>(
   schema: S,
   options?: z.core.ParseContext<z.core.$ZodIssue>,
 ): SchemaResolver<z.infer<S>> {
-  return {
+  const resolver: SchemaResolver<z.infer<S>> = {
     async parse(data) {
       const result = await schema.safeParseAsync(data, options);
       if (!result.success) {
@@ -61,7 +61,7 @@ export function zodResolver<S extends z.ZodType>(
             properties[key] = {
               type:
                 typeName === "number"
-                  ? "number"
+                   ? "number"
                   : typeName === "boolean"
                     ? "boolean"
                     : typeName === "array"
@@ -86,4 +86,8 @@ export function zodResolver<S extends z.ZodType>(
       return { type: "object" };
     },
   };
+
+  (resolver as any)._def = { schema };
+
+  return resolver;
 }

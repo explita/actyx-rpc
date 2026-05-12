@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   getFinalStatusCode,
   isErrorResponse,
@@ -9,20 +10,26 @@ import { checkRateLimit } from "../cache/rate-limit.js";
 import type { CacheAdapter } from "../cache/types.js";
 import { startSpan, recordError } from "../telemetry/tracer.js";
 import { runMiddlewares } from "./run-middlewares.js";
+import { PubSubAdapter } from "../../lib/pubsub.js";
+
+/**
+ * Global storage to track the current RPC context across nested calls.
+ * This enables automatic bypass of context creation.
+ */
+const rpcStorage = new AsyncLocalStorage<any>();
 
 export function handlerResolver<O, P = any>(
   handler: (opts: { ctx: any; input: any }, ...args: P[]) => Promise<O>,
   opts: ProcedureProps<any, any, any>,
   config: ProcedureConfig<any, any>,
   cache: CacheAdapter,
+  pubsub: PubSubAdapter,
 ) {
   return async function (
     this: any,
     payload?: Record<string, unknown> | FormData,
     ...args: P[]
   ) {
-    // If a custom caller is provided (e.g. from a batcher), use it instead of running the handler
-    // We check both the config and the current function's metadata
     const caller = (config as any).caller || (this as any)?._def?.caller;
     if (caller) {
       return caller(payload, ...args);
@@ -49,8 +56,18 @@ export function handlerResolver<O, P = any>(
       meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
     };
 
+    let currentCtx: any = baseCtx;
+
     try {
-      rootCtx = await opts.createContext(baseCtx);
+      // 1. Context Creation Bypass
+      // We reuse existing context from AsyncLocalStorage if available
+      const existingCtx = (this as any)?.ctx || rpcStorage.getStore();
+
+      if (existingCtx) {
+        rootCtx = { ok: true, ctx: existingCtx };
+      } else {
+        rootCtx = await opts.createContext(baseCtx);
+      }
 
       if (!rootCtx.ok) {
         const customError = await opts.onContextError?.({
@@ -73,12 +90,14 @@ export function handlerResolver<O, P = any>(
         ];
       }
 
-      let currentCtx: any = {
+      currentCtx = {
         ...baseCtx,
         ...rootCtx.ctx,
       };
 
-      // 6. Authorize
+      currentCtx.pubsub = pubsub;
+
+      // 2. Authorize (Runs even on bypass to ensure permission integrity)
       if (config.authorize) {
         const authResult = await config.authorize(currentCtx);
         if (
@@ -98,6 +117,7 @@ export function handlerResolver<O, P = any>(
         }
       }
 
+      // 3. Rate Limit (Runs even on bypass)
       if (config.rateLimit?.enabled) {
         const result = await checkRateLimit(
           cache,
@@ -105,11 +125,12 @@ export function handlerResolver<O, P = any>(
           currentCtx,
         );
 
-        if (!result.allowed) return [null, { ...baseError, ...result.error }]; // Rate limited
+        if (!result.allowed) return [null, { ...baseError, ...result.error }];
       }
 
       let isMock = config.mock && process.env.ACTYX_MOCK === "true";
 
+      // 4. Validation
       if (config.resolver && !isMock) {
         const rawData = normalizeInput(payload);
         const result = await config.resolver.parse(rawData);
@@ -128,7 +149,9 @@ export function handlerResolver<O, P = any>(
         input = result.data;
       } else {
         input = {};
-        args = [payload as any, ...args];
+        if (payload !== undefined && payload !== null) {
+          args = [payload as any, ...args];
+        }
       }
 
       const enrichment =
@@ -181,7 +204,7 @@ export function handlerResolver<O, P = any>(
 
       const mwResult = await runMiddlewares(
         allMiddlewares,
-        { ...currentCtx },
+        currentCtx,
         enrichedData,
         next,
         args,
@@ -194,15 +217,17 @@ export function handlerResolver<O, P = any>(
         currentCtx = mwResult.ctx;
       }
 
-      const result =
-        config.mock && process.env.ACTYX_MOCK === "true"
-          ? await config.mock(currentCtx)
+      // Execute handler within the AsyncLocalStorage context
+      const result = await rpcStorage.run(currentCtx, async () => {
+        return config.mock && process.env.ACTYX_MOCK === "true"
+          ? await config.mock({ ctx: currentCtx, input: enrichedData })
           : await handler({ ctx: currentCtx, input: enrichedData }, ...args);
+      });
 
       // Run plugin.onAfter() hooks
       for (const plugin of config.plugins ?? []) {
-        Promise.resolve(plugin.onAfter?.({ ...currentCtx }, result)).catch(
-          (err) => console.error(err),
+        Promise.resolve(plugin.onAfter?.(currentCtx, result)).catch((err) =>
+          console.error(err),
         );
       }
 
@@ -214,7 +239,7 @@ export function handlerResolver<O, P = any>(
           Promise.resolve(
             plugin.onError?.({
               error: result,
-              ctx: { ...currentCtx },
+              ctx: currentCtx,
               input: enrichedData,
               args,
             }),
@@ -287,8 +312,7 @@ export function handlerResolver<O, P = any>(
         Promise.resolve(
           plugin.onError?.({
             error,
-            //@ts-ignore
-            ctx: { ...baseCtx, ...rootCtx?.ctx },
+            ctx: currentCtx,
             input,
             args,
           }),

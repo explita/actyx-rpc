@@ -43,7 +43,7 @@ export type ProcedureConfig<
   TMeta extends Record<string, any> = {},
 > = {
   name: string;
-  type?: "mutation" | "query" | "stream" | "sse" | "ws";
+  type?: "mutation" | "query" | "stream" | "sse" | "ws" | "subscription";
   resolver?: SchemaResolver<any>;
   middlewares?: Middleware<TCtx, TEnrich, any, any, TMeta>[];
   plugins?: Plugin<TCtx, TEnrich, any, any, TMeta>[];
@@ -292,6 +292,27 @@ export type ProcedureInstance<
           ...args: P
         ) => AsyncIterable<SSEEvent<O>> & { close: () => void };
 
+  // subscription: <T, P extends unknown[] = []>(
+  //   handler: (
+  //     opts: {
+  //       ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+  //       input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
+  //       emit: SubscriptionEmit<T>;
+  //     },
+  //     ...args: P
+  //   ) => SubscriptionResult<T>,
+  // ) => [I] extends [void]
+  //   ? (...args: P) => (wsContext: any) => Promise<void>
+  //   : [TMocked] extends [true]
+  //     ? (
+  //         input?: InputParams<I, ICtx, GIM>,
+  //         ...args: P
+  //       ) => (wsContext: any) => Promise<void>
+  //     : (
+  //         input: InputParams<I, ICtx, GIM>,
+  //         ...args: P
+  //       ) => (wsContext: any) => Promise<void>;
+
   // ws: <In = any, Out = any, P extends unknown[] = []>(
   //   handler: (
   //     opts: {
@@ -460,9 +481,10 @@ export type ProcedureInstance<
   >;
 
   mock: <T = unknown>(
-    handler: (
-      ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>,
-    ) => MaybePromise<T>,
+    handler: (opts: {
+      ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
+      input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
+    }) => MaybePromise<T>,
   ) => Omit<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, true>,
     "input" | "extend" | "middleware" | "plugin" | "name" | "meta" | "mock"

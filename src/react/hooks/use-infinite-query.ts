@@ -44,6 +44,21 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Store callbacks in a ref to avoid re-creating stable functions when they change
+  const callbacksRef = useRef({
+    onSuccess,
+    onError,
+    onSettled,
+  });
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onSuccess,
+      onError,
+      onSettled,
+    };
+  });
+
   // Track fetched cursors to prevent duplicate fetches
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
 
@@ -113,17 +128,17 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
       });
 
       setIsFetchingNext(false);
-      onSuccess?.({
+      callbacksRef.current.onSuccess?.({
         pages: [...pages, newPage],
         pageParams: [...pageParams, nextCursor],
       });
-      onSettled?.();
+      callbacksRef.current.onSettled?.();
 
       return newPage;
     } catch (err) {
       setIsFetchingNext(false);
-      onError?.(err as ErrorResponse);
-      onSettled?.();
+      callbacksRef.current.onError?.(err as ErrorResponse);
+      callbacksRef.current.onSettled?.();
       return undefined;
     }
   }, [
@@ -134,9 +149,6 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
     fetchPage,
     getNextPageParam,
     maxPages,
-    onSuccess,
-    onError,
-    onSettled,
   ]);
 
   const refetch = useCallback(async () => {
@@ -148,18 +160,18 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
       const firstPage = await fetchPage(initialPageParam);
       setPages([firstPage]);
       setPageParams([initialPageParam].filter(Boolean) as (number | string)[]);
-      onSuccess?.({
+      callbacksRef.current.onSuccess?.({
         pages: [firstPage],
         pageParams: [initialPageParam].filter(Boolean) as (string | number)[],
       });
     } catch (err) {
       setError(err as ErrorResponse);
-      onError?.(err as ErrorResponse);
+      callbacksRef.current.onError?.(err as ErrorResponse);
     } finally {
       setIsFetchingNext(false);
-      onSettled?.();
+      callbacksRef.current.onSettled?.();
     }
-  }, [fetchPage, initialPageParam, onSuccess, onError, onSettled]);
+  }, [fetchPage, initialPageParam]);
 
   const reset = useCallback(() => {
     setPages(initialData?.pages || []);

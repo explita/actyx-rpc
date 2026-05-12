@@ -3,6 +3,25 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-12
+
+### Added
+
+- **Automatic Context Inheritance**: Introduced `AsyncLocalStorage` to support direct procedure calls. Child procedures now automatically inherit the execution context from their parent, skipping redundant context creation.
+- **Nested Call Metrics**: The `observabilityPlugin` now uses a stack-based approach to accurately track durations for nested procedure calls.
+- **Unified Progress Tracking**: Centralized progress tracking logic to URL-based mutations, enabling consistent real-time updates across different adapter environments.
+
+### Changed (Breaking Changes)
+
+- **WebSocket Adapter Signature**: The `applyWSHandler` signature has changed from an options object to `(procedure, options)`. The procedure must now be pre-bound (e.g., `applyWSHandler(onRoomEvent({ roomId }), { ws })`).
+- **Subscription Status**: The `status` returned by `useSubscription` has been renamed from `subscribed` to `connected` to better reflect the connection state.
+- **Procedure Composition**: Removed `ctx.call()` in favor of calling procedures directly as regular functions. Context is now handled implicitly via `AsyncLocalStorage`.
+
+### Fixed
+
+- **Next.js Proxy Handling**: Improved `nextAdapter` logic to better handle `pathname` and `searchParams` injection for proxied requests.
+- **Documentation Cleanup**: Synchronized the Table of Contents in `README.md` and updated all examples to the new v0.3 patterns.
+
 ## [0.2.0] - 2026-05-05
 
 ### Added

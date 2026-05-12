@@ -1,5 +1,6 @@
 import { mergeConfigs } from "../lib/utils.js";
 import { MemoryCache } from "./cache/memory-cache.js";
+import { MemoryPubSub, RedisPubSub } from "../lib/pubsub.js";
 import type {
   CacheInvalidationOptions,
   RateLimitOptions,
@@ -32,6 +33,7 @@ import type {
   SchemaResolver,
   Prettify,
 } from "../types/misc.js";
+import { RedisCache } from "./cache/redis-cache.js";
 
 export function createProcedure<
   TCtx extends Record<string, unknown>,
@@ -42,6 +44,12 @@ export function createProcedure<
   opts = opts ?? {};
   const globalCache = opts.cache ?? new MemoryCache();
   const globalCompressor = opts.compression ?? new Compressor();
+
+  // Reuse Redis instance from cache if available for PubSub
+  const redisInstance = (globalCache as RedisCache).redis;
+  const globalPubSub = redisInstance
+    ? new RedisPubSub(redisInstance)
+    : new MemoryPubSub();
 
   // Default implementations
   opts.createContext ??= (async () => ({ ok: true, ctx: {} as any })) as any;
@@ -174,10 +182,10 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      mock: (handler) => {
+      mock: (handlers) => {
         return procedureBuilder({
           ...nextConfig,
-          mock: handler as any,
+          mock: handlers as any,
         });
       },
 
@@ -245,6 +253,7 @@ export function createProcedure<
           opts,
           config,
           globalCache,
+          globalPubSub,
         );
       },
 
@@ -280,10 +289,7 @@ export function createProcedure<
 
           // Handle redirect response
           if (error) {
-            if (
-              "_redirect" in error &&
-              typeof error._redirect === "function"
-            ) {
+            if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
             delete error._redirect;
@@ -343,10 +349,7 @@ export function createProcedure<
 
           // Handle redirect response
           if (error) {
-            if (
-              "_redirect" in error &&
-              typeof error._redirect === "function"
-            ) {
+            if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
             delete error._redirect;
@@ -367,10 +370,7 @@ export function createProcedure<
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
           if (error) {
-            if (
-              "_redirect" in error &&
-              typeof error._redirect === "function"
-            ) {
+            if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
             delete error._redirect;
@@ -402,10 +402,7 @@ export function createProcedure<
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
           if (error) {
-            if (
-              "_redirect" in error &&
-              typeof error._redirect === "function"
-            ) {
+            if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
             delete error._redirect;
@@ -430,24 +427,8 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      ws(handler) {
-        // WS doesn't execute as a standard resolve because it's asynchronous and interactive.
-        // But we still want to run our middlewares and plugins before attaching!
-        const resolveContext = async (payload: any) => {
-          // This matches our standard createContext, enrichInput, authorize, middlewares
-          const rootCtx = await opts.createContext({
-            handlerName: config.name,
-            meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
-          });
-          if (!rootCtx.ok) {
-            throw new Error(rootCtx.reason || "Unauthorized");
-          }
-          return {
-            ...opts.meta,
-            ...config.meta,
-            ...rootCtx.ctx,
-          };
-        };
+      subscription(handler) {
+        const nextConfig = { ...config, type: "subscription" };
 
         const terminal = function (payload?: any, ...args: any[]) {
           return async (wsContext: {
@@ -456,29 +437,86 @@ export function createProcedure<
             onClose: (cb: () => void) => void;
             onError: (cb: (err: any) => void) => void;
           }) => {
-            try {
-              const ctx = await resolveContext(payload);
-              await (handler as any)({
-                ctx,
-                input: payload,
-                send: wsContext.send,
-                onMessage: wsContext.onMessage,
-                onClose: wsContext.onClose,
-                onError: wsContext.onError,
-              });
-            } catch (err: any) {
-              if (err && typeof err === "object") {
-                if ("_redirect" in err && typeof err._redirect === "function") {
-                  err._redirect();
+            // We reuse the resolve logic to get context and input
+            // But since subscription is a long-running process, we need a custom executor
+            const resolvedFn = handlerResolver(
+              async ({ ctx, input }, ...args) => {
+                // This is the "setup" phase of the subscription
+                const emit = (data: any) => {
+                  wsContext.send({ type: "event", data });
+                };
+
+                //@ts-ignore
+                const cleanup = await handler({ ctx, input, emit }, ...args);
+
+                if (typeof cleanup === "function") {
+                  wsContext.onClose(cleanup);
                 }
-                delete err._redirect;
-              }
-              wsContext.onError?.(err);
+
+                return { subscribed: true };
+              },
+              //@ts-ignore
+              opts,
+              nextConfig,
+              globalCache,
+              globalPubSub,
+            );
+
+            const [result, error] = await resolvedFn(payload, ...args);
+
+            if (error) {
+              wsContext.send({ type: "error", error });
+              wsContext.onError?.(error);
+            } else {
+              wsContext.send({ type: "subscribed", data: result });
             }
           };
         };
 
-        (terminal as any)._def = { ...config, type: "ws" };
+        (terminal as any)._def = nextConfig;
+        return terminal;
+      },
+
+      //@ts-ignore
+      ws(handler) {
+        const nextConfig = { ...config, type: "ws" };
+
+        const terminal = function (payload?: any, ...args: any[]) {
+          return async (wsContext: {
+            send: (data: any) => void;
+            onMessage: (cb: (data: any) => void) => void;
+            onClose: (cb: () => void) => void;
+            onError: (cb: (err: any) => void) => void;
+          }) => {
+            const resolvedFn = handlerResolver(
+              async ({ ctx, input }) => {
+                return await handler({
+                  ctx,
+                  input,
+                  send: wsContext.send,
+                  onMessage: wsContext.onMessage,
+                  onClose: wsContext.onClose,
+                  onError: wsContext.onError,
+                });
+              },
+              //@ts-ignore
+              opts,
+              nextConfig,
+              globalCache,
+              globalPubSub,
+            );
+
+            const [result, error] = await resolvedFn(payload, ...args);
+
+            if (error) {
+              wsContext.onError?.(error);
+            }
+
+            return [result, error];
+          };
+        };
+
+        (terminal as any)._def = nextConfig;
         return terminal;
       },
     };

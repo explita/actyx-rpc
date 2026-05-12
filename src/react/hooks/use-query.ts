@@ -1,42 +1,92 @@
 import type { ErrorResponse } from "../../types/misc.js";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { QueryResult, UseQueryOpts } from "../types.js";
+import { globalRequestManager } from "../lib/request-manager.js";
+import { QueryResult, Unwrap, UseQueryOpts } from "../types.js";
 
-export function useQuery<TOutput, TInitialData = undefined>(
+export function useQuery<
+  TOutput,
+  TInitialData = undefined,
+  TUnwrap extends boolean = false,
+>(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
-  opts: UseQueryOpts<TOutput> & { initialData?: TInitialData } = {
+  opts: UseQueryOpts<TOutput, TUnwrap> & {
+    initialData?: TInitialData;
+  } = {
     enabled: true,
     refetchOnWindowFocus: false,
     refetchInterval: 0,
-  },
-): QueryResult<TOutput, TInitialData> {
+    unwrap: false as any,
+  } as any,
+): QueryResult<TOutput, TInitialData, TUnwrap> {
   //@ts-ignore
-  const [data, setData] = useState<TOutput | undefined>(opts?.initialData);
+  const [data, setData] = useState<Unwrap<TOutput, TUnwrap> | undefined>(
+    opts?.initialData as any,
+  );
   const [error, setError] = useState<ErrorResponse | undefined>();
   const [isFetching, setIsFetching] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Store callbacks in a ref to avoid re-creating fetchData when they change
+  const callbacksRef = useRef({
+    onSuccess: opts?.onSuccess,
+    onError: opts?.onError,
+    onSettled: opts?.onSettled,
+    initialData: opts?.initialData,
+  });
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onSuccess: opts?.onSuccess,
+      onError: opts?.onError,
+      onSettled: opts?.onSettled,
+      initialData: opts?.initialData,
+    };
+  });
+
+  const queryKey = opts.queryKey?.join(":") ?? "";
+
   const fetchData = useCallback(async () => {
     setIsFetching(true);
 
-    const [result, err] = await proc();
+    let resultTuple: [TOutput, null] | [null, ErrorResponse];
+
+    // Wrap proc to pass progress if it supports it
+    const fetcher = async () => {
+      return await proc();
+    };
+
+    if (queryKey) {
+      resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
+    } else {
+      resultTuple = await fetcher();
+    }
+
+    const [result, err] = resultTuple;
 
     if (err) {
       setError(err);
       //@ts-ignore
-      setData(opts?.initialData);
-      opts?.onError?.(err);
+      setData(callbacksRef.current.initialData);
+      callbacksRef.current.onError?.(err);
     } else {
-      setData(result);
+      const unwrapped =
+        opts.unwrap === true &&
+        result &&
+        //@ts-ignore
+        "data" in result
+          ? //@ts-ignore
+            result.data
+          : result;
+      setData(unwrapped as any);
       setError(undefined);
-      opts?.onSuccess?.(result);
+      callbacksRef.current.onSuccess?.(result);
     }
 
     setIsFetching(false);
-    opts?.onSettled?.(result, err);
+    callbacksRef.current.onSettled?.(result, err);
 
     return result;
-  }, [proc]);
+  }, [proc, queryKey]); // Only depend on stable parts of opts
 
   const refetch = useCallback(fetchData, [fetchData]);
 
@@ -59,7 +109,7 @@ export function useQuery<TOutput, TInitialData = undefined>(
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [opts?.enabled]);
+  }, [opts?.enabled, fetchData, queryKey]);
 
   // Refetch interval (only if data exists or initialData provided)
   useEffect(() => {
@@ -88,5 +138,5 @@ export function useQuery<TOutput, TInitialData = undefined>(
     refetch,
     reset,
     data,
-  } as QueryResult<TOutput, TInitialData>;
+  } as QueryResult<TOutput, TInitialData, TUnwrap>;
 }

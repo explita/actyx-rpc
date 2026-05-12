@@ -15,6 +15,87 @@ Actyx RPC lets you build server-side procedures with full type safety, minimal b
 
 ---
 
+## Table of Contents
+
+- [Why Actyx?](#why-actyx)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+  - [`createProcedure()`](#createprocedure)
+  - [Global Error Mapping](#global-error-mapping)
+  - [`.extend()`](#extend)
+  - [`.name()`](#name)
+  - [`.meta()`](#meta)
+  - [`.input()`](#input)
+  - [`.mutation()` and `.query()`](#mutation-and-query)
+  - [`.middleware()`](#middleware)
+  - [`.plugin()`](#plugin)
+  - [`.use()`](#use)
+  - [Plugin Lifecycle](#plugin-lifecycle)
+  - [Builder Ordering](#builder-ordering)
+- [`.authorize()`](#authorize)
+- [`.mock()`](#mock)
+- [`.stream()`](#stream)
+- [`.sse()`](#sse)
+- [`.circuitBreaker()`](#circuitbreaker)
+- [`.telemetry()`](#telemetry)
+- [`.cache()`](#cache)
+  - [Basic Usage](#basic-usage)
+  - [Cache Options](#cache-options)
+  - [Redis Cache](#redis-cache)
+  - [Custom Cache Adapter](#custom-cache-adapter)
+- [`.invalidate()`](#invalidate)
+  - [Invalidation Options](#invalidation-options)
+- [`.rateLimit()`](#ratelimit)
+  - [Basic Usage](#basic-usage-1)
+  - [Rate Limit Options](#rate-limit-options)
+- [`.retry()`](#retry)
+  - [Basic Usage](#basic-usage-2)
+  - [Backoff Strategies](#backoff-strategies)
+  - [Conditional Retry](#conditional-retry)
+  - [Retry Options](#retry-options)
+  - [Combining Cache and Retry](#combining-cache-and-retry)
+- [Execution Flow](#execution-flow)
+  - [Normal Request (Cache Hit)](#normal-request-cache-hit)
+  - [Normal Request (Cache Miss)](#normal-request-cache-miss)
+  - [Stale Cache (Revalidation Case)](#stale-cache-revalidation-case)
+- [`.timeout()`](#timeout)
+  - [Basic Usage](#basic-usage-3)
+  - [Timeout Options](#timeout-options)
+- [`.compress()`](#compress)
+  - [Basic Usage](#basic-usage-4)
+  - [Compression Options](#compression-options)
+- [Result Shape](#result-shape)
+- [RPC Handler Pattern](#rpc-handler-pattern)
+- [Input Resolvers](#input-resolvers)
+  - [Zod](#zod)
+  - [Valibot](#valibot)
+  - [ArkType](#arktype)
+  - [Joi](#joi)
+  - [Yup](#yup)
+  - [Custom Resolver](#custom-resolver)
+- [Why input resolvers do not allow primitives?](#why-input-resolvers-do-not-allow-primitives)
+- [Mocking](#mocking)
+- [Automated Documentation](#automated-documentation)
+  - [`.summary()` & `.description()`](#summary--description)
+  - [`.output()`](#output)
+  - [`generateOpenApi()`](#generateopenapi)
+- [Inter-Procedure Calling](#inter-procedure-calling)
+- [Observability](#observability)
+- [React Helper](#react-helper)
+  - [`useQuery`](#usequery)
+    - [Automatic Response Unwrapping](#automatic-response-unwrapping)
+  - [`useInfiniteQuery`](#useinfinitequery)
+  - [Progress Tracking](#progress-tracking)
+- [Adapters](#adapters)
+  - [Next.js — `nextAdapter()`](#nextjs--nextadapter)
+    - [Returned Fields](#returned-fields)
+    - [Middleware Setup](#middleware-setup)
+- [💖 Support the Mission](#-support-the-mission)
+- [License](#license)
+
+---
+
 ## Why Actyx?
 
 Traditional APIs force you to choose between flexibility and type safety.
@@ -80,11 +161,11 @@ const createPost = procedure
     // Your db operations here.
     // For example:
     // const post = await db.posts.create({
-    //   data: {
-    //     title: input.title,
-    //     body: input.body,
-    //     authorId: ctx.userId,
-    //   },
+    // data: {
+    // title: input.title,
+    // body: input.body,
+    // authorId: ctx.userId,
+    // },
     // });
 
     return {
@@ -115,12 +196,12 @@ const getPost = procedure
     // Your db operations here.
     // For example:
     // const post = await db.posts.findUnique({
-    //   where: {
-    //     id: input.id,
-    //   },
-    //   include: {
-    //     author: true,
-    //   },
+    // where: {
+    // id: input.id,
+    // },
+    // include: {
+    // author: true,
+    // },
     // });
 
     return {
@@ -716,7 +797,7 @@ Execution order is:
 
 #
 
-`.authorize()`
+### `.authorize()`
 
 Add fine-grained authorization checks to your procedures. Unlike standard middleware, `.authorize()` is designed for simple boolean checks or permission lookups.
 
@@ -742,7 +823,7 @@ If the check fails, the procedure returns a `FORBIDDEN` error (403).
 
 #
 
-`.mock()`
+### `.mock()`
 
 Actyx-RPC uses **Output Stubbing** for mocks. This allows you to simulate a successful backend response without actually executing the handler or hitting your database.
 
@@ -803,7 +884,7 @@ const uploadAvatar = procedure
 
 #
 
-`.stream()`
+### `.stream()`
 
 Terminal method for procedures that return an `AsyncIterable`. Perfect for AI streaming or long-running progress updates.
 
@@ -876,6 +957,109 @@ for await (const { event, data } of stock) {
 stock.close();
 ```
 
+<!-- #
+
+### `.subscription()`
+
+Terminal method for creating type-safe, topic-based subscriptions over WebSockets. Perfect for chat, live notifications, or dashboards.
+
+When Redis is configured, subscriptions work across multiple server instances (distributed PubSub).
+
+```typescript
+// 1. Define a subscription
+export const onRoomEvent = procedure
+  .input(z.object({ roomId: z.string() }))
+  .subscription(async ({ ctx, input, emit }) => {
+    // Subscribe to a topic using the built-in pubsub
+    // Uses Redis if configured in createProcedure, otherwise Memory
+    const unsubscribe = await ctx.pubsub.subscribe(
+      `room:${input.roomId}`,
+      (data) => {
+        emit(data); // Push data to the client
+      },
+    );
+
+    return unsubscribe; // Return the cleanup function
+  });
+
+// 2. Trigger events from any other procedure
+export const sendEvent = procedure
+  .input(z.object({ roomId: z.string(), message: z.string() }))
+  .mutation(async ({ ctx, input }) => {
+    await ctx.pubsub.publish(`room:${input.roomId}`, {
+      text: input.message,
+      sender: "System",
+    });
+    return { success: true };
+  });
+```
+
+#
+
+#### Distributed PubSub (Redis)
+
+When your application scales across multiple servers, you can use Redis to synchronize subscriptions. Actyx RPC automatically handles this if you provide a `RedisCache` instance to `createProcedure`.
+
+```typescript
+import { createProcedure, RedisCache } from "@explita/actyx-rpc";
+import Redis from "ioredis";
+
+const redis = new Redis();
+
+const procedure = createProcedure({
+  // PubSub will automatically reuse this Redis instance
+  cache: new RedisCache(redis),
+});
+```
+
+#
+
+#### Client Usage (React)
+
+```tsx
+import { useSubscription } from "@explita/actyx-rpc/react";
+import { onRoomEvent } from "./procedures";
+
+function Room({ id }) {
+  // Automatically handles connection, cleanup, and state updates
+  const { data, status } = useSubscription(onRoomEvent({ roomId: id }), {
+    wsUrl: "ws://localhost:3001/rpc",
+  });
+
+  return (
+    <div>
+      Status: {status}
+      {data && <p>New Message: {data.text}</p>}
+    </div>
+  );
+}
+```
+
+#### WebSocket Server Setup
+
+To handle WebSocket subscriptions, you need a running WebSocket server. You can use the `applyWSHandler` adapter to connect your Actyx procedures to a standard WebSocket instance (e.g., using the `ws` library).
+
+```typescript
+import { WebSocketServer } from "ws";
+import { applyWSHandler } from "@explita/actyx-rpc/adapters/ws";
+import { onRoomEvent } from "./procedures";
+
+const wss = new WebSocketServer({ port: 3001 });
+
+wss.on("connection", (ws) => {
+  // Attach the procedure to the websocket
+  // We pass the pre-bound procedure (executor) as the first argument
+  applyWSHandler(onRoomEvent({ roomId: "main-lobby" }), {
+    ws: ws,
+  });
+});
+
+console.log("WebSocket RPC server running on ws://localhost:3001");
+```
+
+> [!TIP]
+> **Next.js Integration**: Since standard Next.js route handlers do not support WebSockets, you can either run a standalone server (as shown above) or use a **Custom Next.js Server** (`server.js`) to host both your Next.js app and your WebSocket RPC handlers on the same port. -->
+
 #
 
 ### `.circuitBreaker()`
@@ -917,7 +1101,7 @@ const tracedProc = procedure
 
 #
 
-`.cache()`
+### `.cache()`
 
 Add intelligent caching to your procedures with configurable TTL, stale-while-revalidate, and multiple backends.
 
@@ -1005,7 +1189,7 @@ interface CacheAdapter {
 
 #
 
-`.invalidate()`
+### `.invalidate()`
 
 Automatically invalidate cache entries after a successful mutation.
 
@@ -1033,7 +1217,7 @@ const updatePost = procedure
 
 #
 
-`.rateLimit()`
+### `.rateLimit()`
 
 Protect your procedures from abuse by limiting the number of requests from a specific user or IP.
 Rate limit uses the cache adapter passed to `createProcedure` to store the rate limit data. If you dont provide a key, we will check for `ctx.id` then `ctx.userId` then `ctx.ip` and use that as the key. If none are found, we will use `anonymous` as the key.
@@ -1064,7 +1248,7 @@ const sendMessage = procedure
 
 #
 
-`.retry()`
+### `.retry()`
 
 Automatically retry failed operations with configurable backoff strategies.
 
@@ -1174,7 +1358,7 @@ The cache wraps the retry layer, meaning it acts as a short-circuit gate: if a v
 
 ## Execution Flow
 
-### 🚀 Normal Request (Cache Hit)
+### Normal Request (Cache Hit)
 
 request
 ↓
@@ -1190,7 +1374,7 @@ cache lookup
 ↓
 END (retry + handler are NEVER reached)
 
-### 🔄 Normal Request (Cache Miss)
+### Normal Request (Cache Miss)
 
 request
 ↓
@@ -1233,7 +1417,7 @@ retry → timeout → handler → compression → refresh cache
 
 #
 
-`.timeout()`
+### `.timeout()`
 
 Set a maximum execution time for your procedures. If the procedure takes longer than the specified time, it will be aborted and return a timeout error.
 
@@ -1258,7 +1442,7 @@ const fetchLargeData = procedure
 
 #
 
-`.compress()`
+### `.compress()`
 
 Enable response compression to reduce payload size. It also automatically handles decompression of incoming Buffer inputs.
 
@@ -1596,6 +1780,47 @@ const getProfile = procedure
   });
 ```
 
+#
+
+## Inter-Procedure Calling
+
+Actyx RPC allows procedures to call each other directly as regular functions. This is extremely efficient because it **automatically shares the same context** and skips redundant context creation if a call is already in progress.
+
+### Example: Direct Calls
+
+```typescript
+const getAuditLog = procedure
+  .input(z.object({ userId: z.string() }))
+  .query(async ({ input }) => {
+    return await db.auditLog.findMany({ where: { userId: input.userId } });
+  });
+
+export const getUserDetails = procedure
+  .input(z.object({ id: z.string() }))
+  .query(async ({ input }) => {
+    // 1. Fetch the user normally
+    const user = await db.user.findUnique({ where: { id: input.id } });
+
+    // 2. Call another procedure directly!
+    // The target procedure automatically inherits 'ctx' and skips re-authentication
+    const [logs, err] = await getAuditLog({ userId: input.id });
+
+    if (err) throw err;
+
+    return { ...user, logs };
+  });
+```
+
+### How it Works
+
+Actyx RPC uses `AsyncLocalStorage` (Node.js) to track the current execution context. When one procedure calls another:
+
+1.  **Context Bypass**: The child procedure detects the existing context and skips `createContext()`.
+2.  **Authorization Integrity**: Even with context bypass, the child's `.authorize()` and middlewares still run to ensure security is never compromised.
+3.  **Zero Overhead**: No network requests, no re-serialization, just direct function execution.
+
+#
+
 ### `generateOpenApi()`
 
 Once your procedures are defined, you can export your entire API as a standard OpenAPI 3.0 specification. While procedures carry their own metadata, you can **manually override** HTTP methods, tags, and summaries at the call site to fine-tune your documentation.
@@ -1695,6 +1920,90 @@ function CreatePostForm() {
 
 #
 
+## Progress Tracking
+
+Actyx RPC provides native support for real-time upload progress tracking. While standard Next.js Server Actions encapsulate the request body and don't provide progress events, you can use **URL-based mutations** to bypass this limitation.
+
+### 1. Setup the Route Handler
+
+Create a dedicated Route Handler (e.g., `api/rpc/test-upload/route.ts`) using the `createNextHandler` adapter.
+
+```ts
+import { createNextHandler } from "@explita/actyx-rpc/adapters/next";
+import { testUpload } from "@/backend/controllers/test/upload";
+
+export const POST = createNextHandler(testUpload);
+```
+
+### 2. Use `useMutation` with a URL
+
+Instead of passing the procedure directly, pass the URL of your Route Handler.
+
+> [!IMPORTANT]
+> When using a URL-based mutation, the `mutate` function **only supports a single argument**, which becomes the request body. Variadic arguments are only supported for direct procedure calls (Server Actions).
+
+```tsx
+function UploadComponent() {
+  const upload = useMutation("/api/rpc/test-upload", {
+    onProgress: (p) => {
+      console.log(`Upload progress: ${p}%`);
+    },
+    onSuccess: (data) => {
+      console.log("Upload complete!", data);
+    },
+  });
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // You can pass the File directly...
+    await upload.mutate(file);
+
+    // ...or an object containing files. Actyx will automatically
+    // convert it to FormData and handle nested fields!
+    await upload.mutate({
+      name: "Profile Picture",
+      file: file,
+      metadata: { size: file.size },
+    });
+  };
+
+  return (
+    <input type="file" onChange={handleFile} disabled={upload.isPending} />
+  );
+}
+```
+
+### How it Works
+
+- **Binary Mode**: If you pass a `File` or `Blob` directly, Actyx sends it as `application/octet-stream`. This is the most efficient way to stream huge files (800MB+) as it avoids all parsing overhead on the server.
+- **Auto-FormData**: If you pass an object containing `File`/`Blob` instances, Actyx automatically converts it to a `multipart/form-data` request.
+- **Universal Ingestion**: The `createNextHandler` and your procedure handlers are smart enough to recover the file data regardless of how it was sent.
+
+### Receiving Files in Procedures
+
+In your procedure, the file data can be accessed either from the `input` (for object/FormData) or from the second argument (for direct binary streams).
+
+```ts
+export const testUpload = procedure
+  .input(z.object({ file: z.instanceof(File) }))
+  .mutation(async ({ input, ctx }, fileDataArg: File) => {
+    // Robust file recovery logic
+    const fileData = fileDataArg || (input as any)?.file;
+
+    if (!fileData) throw new Error("No file provided");
+
+    // Use standard Node/Web streams to save the file
+    const stream =
+      typeof fileData.stream === "function" ? fileData.stream() : fileData;
+
+    // ... process stream
+  });
+```
+
+#
+
 ### useQuery
 
 ```tsx
@@ -1719,6 +2028,37 @@ function UserProfile({ userId }) {
   );
 }
 ```
+
+> [!NOTE]
+> Unlike TanStack Query, `useQuery` in Actyx RPC does not require a `queryKey` for basic usage. However, you can provide an optional `queryKey` in the options if you need to deduplicate simultaneous requests across multiple components.
+
+#### Automatic Response Unwrapping
+
+If your procedures return a standardized response object (for example, a `{ data: ... }` wrapper), `useQuery` can automatically strip this for you to reduce boilerplate in your components.
+
+When `unwrap: true` is set:
+
+1.  The `data` returned by the hook is the **inner payload** directly.
+2.  `initialData` (if provided) also expects the **unwrapped shape**.
+3.  Type inference automatically adjusts to the inner payload type.
+
+```tsx
+function CompanyProfile() {
+  const { data } = useQuery(getSettings, {
+    unwrap: true, // Enable automatic stripping
+    initialData: {
+      name: "Explita",
+      branches: [],
+    },
+  });
+
+  // data is now the unwrapped payload!
+  return <h1>{data?.name}</h1>;
+}
+```
+
+> [!TIP]
+> This feature is currently only available for `useQuery` to keep data retrieval clean while maintaining full control over `useMutation` and `useInfiniteQuery` results.
 
 #
 
@@ -1754,6 +2094,25 @@ function PostsList() {
 }
 ```
 
+<!-- #
+
+### useSubscription
+
+```tsx
+function Room({ id }) {
+  const { data, status } = useSubscription(onRoomEvent({ roomId: id }), {
+    wsUrl: "ws://localhost:3000/api/rpc",
+  });
+
+  return (
+    <div>
+      Status: {status}
+      {data && <p>New Message: {data.text}</p>}
+    </div>
+  );
+}
+``` -->
+
 <!-- ## Package Exports
 
 - `@explita/actyx-rpc`
@@ -1764,6 +2123,27 @@ function PostsList() {
 - `@explita/actyx-rpc/resolvers/valibot`
 - `@explita/actyx-rpc/resolvers/yup`
 - `@explita/actyx-rpc/resolvers/zod` -->
+
+#
+
+## Observability
+
+Track procedure latency, success rates, and errors using the `observabilityPlugin`.
+
+```ts
+import { createProcedure, observabilityPlugin } from "@explita/actyx-rpc";
+
+const procedure = createProcedure({
+  plugins: [
+    observabilityPlugin({
+      onCall: ({ name, duration, success, error }) => {
+        console.log(`${name} took ${duration}ms (Success: ${success})`);
+        if (error) reportToSentry(error);
+      },
+    }),
+  ],
+});
+```
 
 #
 
@@ -1856,6 +2236,33 @@ export function proxy(request: NextRequest) {
 
 > [!NOTE]
 > `next` must be installed in your consuming project. It is listed as an optional peer dependency of `@explita/actyx-rpc` and is not bundled.
+
+#
+
+## 💖 Support the Mission
+
+Actyx RPC is built to simplify building type-safe, distributed systems with minimal boilerplate. If it has helped you build better APIs faster, please consider supporting the project to ensure its continued growth and maintenance!
+
+<p align="left">
+  <a href="https://github.com/sponsors/explita">
+    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" />
+  </a>
+  <a href="https://ko-fi.com/explita">
+    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" />
+  </a>
+</p>
+
+### 🚀 Ways to Contribute
+
+- **Give us a ⭐**: It helps others discover the project.
+- **Join the Discussion**: Report [bugs](https://github.com/explita/actyx-rpc/issues) or suggest new [features](https://github.com/explita/actyx-rpc/discussions).
+- **Spread the Word**: Share your experience with Actyx RPC on social media.
+
+### 🙏 Our Amazing Supporters
+
+_A huge thank you to everyone helping us build the future of type-safe server actions!_
+
+[![Contributors](https://contrib.rocks/image?repo=explita/actyx-rpc)](https://github.com/explita/actyx-rpc/graphs/contributors)
 
 #
 

@@ -8,7 +8,7 @@ import type {
 import { getStaleAt, isStale, parseWindow } from "../../lib/utils.js";
 
 export class RedisCache implements CacheAdapter {
-  private redis: Redis;
+  public redis: Redis;
   private prefix: string;
   private defaultTTL: number;
   private defaultStaleTime: number;
