@@ -16,7 +16,7 @@ export type UseMutationOpts<
    * Callback function to be executed when the procedure fails.
    * @param error The error message.
    */
-  onError?: (error: string, ...args: TArgs) => void;
+  onError?: (error: ErrorResponse, ...args: TArgs) => void;
   /**
    * Callback function to be executed when the procedure fails due to validation errors.
    * @param errors The validation errors.
@@ -32,7 +32,7 @@ export type UseMutationOpts<
   /**
    * Callback function to be executed when the procedure is settled.
    */
-  onSettled?: (data?: TOutput, error?: string, ...args: TArgs) => void;
+  onSettled?: (data?: TOutput, error?: ErrorResponse, ...args: TArgs) => void;
   /**
    * Callback function to be executed before the procedure is mutated.
    * @param args The arguments for the procedure.
@@ -112,7 +112,11 @@ export type UseInfiniteQueryReturn<TPage, TContext> = {
   context: TContext | undefined;
 };
 
-export type UseQueryOpts<TOutput, TUnwrap extends boolean = false> = {
+export type UseQueryOpts<
+  TOutput,
+  TQueryKey extends unknown[] = unknown[],
+  TUnwrap extends boolean = false,
+> = {
   enabled?: boolean;
   initialData?: Omit<Unwrap<TOutput, TUnwrap>, "success">;
   onSuccess?: (data: TOutput) => void;
@@ -128,10 +132,8 @@ export type UseQueryOpts<TOutput, TUnwrap extends boolean = false> = {
   /**
    * Unique key for this query. If provided, simultaneous requests for the same key will be deduplicated.
    */
-  queryKey?: QueryKey[] | readonly QueryKey[];
+  queryKey?: TQueryKey;
 };
-
-type QueryKey = number | string;
 
 /**
  * Automatically unwrap the 'data' field from standard RPC success responses.

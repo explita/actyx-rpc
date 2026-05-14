@@ -3,6 +3,16 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-14
+
+### Added
+
+- **`InferContext` Utility**: Added a new helper type to extract the fully enriched and prettified context from any procedure instance.
+
+### Changed
+
+- **Query Key Formatting**: Updated `useQuery` to use `|` as the default separator for complex query keys (previously `:`). This improves compatibility with certain backend caching systems and prevents collision with common ID patterns.
+
 ## [0.3.0] - 2026-05-12
 
 ### Added

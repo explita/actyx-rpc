@@ -262,6 +262,12 @@ export function createProcedure<
         const nextConfig = { ...config, type: "mutation" };
         let exec = handler;
 
+        if (nextConfig.timeout?.enabled) {
+          console.warn(
+            `\x1b[33m[Actyx RPC] Warning: Timeout is configured but will be ignored in mutation procedure "${nextConfig.name}". Mutations do not support timeouts to prevent partial executions.\x1b[0m`,
+          );
+        }
+
         // Apply invalidation after mutation
         if (nextConfig.invalidate?.enabled && nextConfig.invalidate.options) {
           exec = withInvalidation(

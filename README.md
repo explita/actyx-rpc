@@ -81,6 +81,8 @@ Actyx RPC lets you build server-side procedures with full type safety, minimal b
   - [`.output()`](#output)
   - [`generateOpenApi()`](#generateopenapi)
 - [Inter-Procedure Calling](#inter-procedure-calling)
+- [Type Inference](#type-inference)
+  - [`InferContext<T>`](#infercontextt)
 - [Observability](#observability)
 - [React Helper](#react-helper)
   - [`useQuery`](#usequery)
@@ -1421,6 +1423,9 @@ retry → timeout → handler → compression → refresh cache
 
 Set a maximum execution time for your procedures. If the procedure takes longer than the specified time, it will be aborted and return a timeout error.
 
+> [!NOTE]
+> **Mutation Safety**: The `.timeout()` method is **disabled for mutations**. Applying a timeout to a mutation is unsafe as it can lead to partial data creation (the client aborts, but the database transaction might still commit). Timeouts are only available for `.query()` and `.subscription()` procedures.
+
 #### Basic Usage
 
 ```ts
@@ -1818,6 +1823,26 @@ Actyx RPC uses `AsyncLocalStorage` (Node.js) to track the current execution cont
 1.  **Context Bypass**: The child procedure detects the existing context and skips `createContext()`.
 2.  **Authorization Integrity**: Even with context bypass, the child's `.authorize()` and middlewares still run to ensure security is never compromised.
 3.  **Zero Overhead**: No network requests, no re-serialization, just direct function execution.
+
+#
+
+## Type Inference
+
+### `InferContext<T>`
+
+Extract the exact context shape from any procedure instance. This works identically to `z.infer<T>`, but for extracting the merged output of `createContext` and any added `meta` properties of your procedure.
+
+```ts
+import { InferContext } from "@explita/actyx-rpc";
+import { myProcedure } from "./procedures";
+
+// Extracts the fully typed context
+type MyContext = InferContext<typeof myProcedure>;
+
+function doSomethingWithContext(ctx: MyContext) {
+  console.log(ctx.userId, ctx.tenantId);
+}
+```
 
 #
 

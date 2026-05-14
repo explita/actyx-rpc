@@ -6,21 +6,22 @@ import { QueryResult, Unwrap, UseQueryOpts } from "../types.js";
 export function useQuery<
   TOutput,
   TInitialData = undefined,
+  TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
 >(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
-  opts: UseQueryOpts<TOutput, TUnwrap> & {
+  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap> & {
     initialData?: TInitialData;
   } = {
     enabled: true,
     refetchOnWindowFocus: false,
     refetchInterval: 0,
-    unwrap: false as any,
-  } as any,
+    unwrap: false as TUnwrap,
+  },
 ): QueryResult<TOutput, TInitialData, TUnwrap> {
   //@ts-ignore
   const [data, setData] = useState<Unwrap<TOutput, TUnwrap> | undefined>(
-    opts?.initialData as any,
+    opts?.initialData as Unwrap<TOutput, TUnwrap>,
   );
   const [error, setError] = useState<ErrorResponse | undefined>();
   const [isFetching, setIsFetching] = useState(false);
@@ -43,7 +44,7 @@ export function useQuery<
     };
   });
 
-  const queryKey = opts.queryKey?.join(":") ?? "";
+  const queryKey = opts.queryKey?.map((i) => String(i)).join("|") ?? "";
 
   const fetchData = useCallback(async () => {
     setIsFetching(true);

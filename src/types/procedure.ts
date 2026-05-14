@@ -419,7 +419,6 @@ export type ProcedureInstance<
   ) => Pick<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
-    | "mutation"
     | "cache"
     | "invalidate"
     | "retry"
@@ -567,3 +566,46 @@ export type ProcedureProps<
   compression?: Compressor;
   meta?: TMeta;
 };
+
+/**
+ * Infers the context type from a procedure instance.
+ * Works exactly like Zod's `z.infer`.
+ *
+ * @example
+ * type MyContext = InferContext<typeof myProcedure>;
+ */
+export type InferContext<T> =
+  T extends ProcedureInstance<
+    infer Ctx,
+    any,
+    infer Meta,
+    any,
+    any,
+    any,
+    infer Name,
+    any
+  >
+    ? MergeMeta<Ctx, BaseContext<Meta, Name>>
+    : unknown;
+/**
+ * Infers the final merged input type from a procedure instance.
+ * (Includes both Zod input and enriched context fields)
+ *
+ * @example
+ * type MyInput = InferInput<typeof myProcedure>;
+ */
+export type InferInput<T> =
+  T extends ProcedureInstance<
+    any,
+    infer TEnrich,
+    any,
+    infer I,
+    any,
+    any,
+    any,
+    any
+  >
+    ? [I] extends [void]
+      ? TEnrich
+      : Prettify<I & TEnrich>
+    : unknown;

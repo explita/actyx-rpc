@@ -14,7 +14,7 @@ export function useMutation<
 ) {
   const [status, setStatus] = useState<MutationStatus>("idle");
   const [data, setData] = useState<TOutput | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorResponse | null>(null);
   const [validationErrors, setValidationErrors] = useState<Partial<
     Record<keyof TArgs[0], string>
   > | null>(null);
@@ -195,7 +195,11 @@ export function useMutation<
         if (err) {
           setStatus("error");
           const message = err?.message || "An unexpected error occurred";
-          setError(message);
+          const error =
+            typeof err === "object"
+              ? { ...err, success: false, message }
+              : { message, reason: "", handlerName: "", statusCode: 500 };
+          setError(error);
 
           if (err.reason === "VALIDATION_ERROR" && err.errors) {
             const errors = err.errors as Partial<
@@ -205,7 +209,7 @@ export function useMutation<
             callbacksRef.current.onValidationErrors?.(errors);
           }
 
-          callbacksRef.current.onError?.(message, ...args);
+          callbacksRef.current.onError?.(error, ...args);
           callbacksRef.current.onSettled?.(undefined, message, ...args);
 
           if (opts?.throwOnError) throw err;
@@ -240,9 +244,18 @@ export function useMutation<
         setStatus("error");
         const message =
           err instanceof Error ? err.message : "An unexpected error occurred";
-        setError(message);
-        callbacksRef.current.onError?.(message, ...args);
-        callbacksRef.current.onSettled?.(undefined, message, ...args);
+
+        const error = {
+          success: false,
+          message,
+          reason: "CLIENT_ERROR",
+          handlerName: "client",
+          statusCode: 500,
+        };
+
+        setError(error);
+        callbacksRef.current.onError?.(error, ...args);
+        callbacksRef.current.onSettled?.(undefined, error, ...args);
         throw err;
       } finally {
         abortControllerRef.current = null;
@@ -287,7 +300,7 @@ export function useMutation<
       if (err) {
         throw err;
       }
-      return result!;
+      return result;
     },
     [executeImmediately, opts?.debounceMs],
   );

@@ -1,14 +1,15 @@
+import { DEFAULT_TIMEOUT } from "../../lib/constants.js";
 import type { ErrorResponse } from "../../types/misc.js";
 import type { TimeoutOptions } from "./types.js";
 
 export function withTimeout<TInput, TOutput>(
   handler: (
     opts: { ctx: any; input: TInput },
-    ...args: any[]
+    ...args: unknown[]
   ) => Promise<TOutput>,
   options: TimeoutOptions = {},
-): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
-  const timeoutMs = options.ms ?? 5000;
+): (opts: { ctx: any; input: TInput }, ...args: unknown[]) => Promise<TOutput> {
+  const timeoutMs = options.ms ?? DEFAULT_TIMEOUT;
   const message = options.message ?? `Request timeout after ${timeoutMs}ms`;
   const reason = options.reason ?? "TIMEOUT";
   const onTimeout = options.onTimeout;

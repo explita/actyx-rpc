@@ -1,3 +1,4 @@
+import { CIRCUIT_BREAKER } from "../../lib/constants.js";
 import type { CircuitBreakerOptions, CircuitState } from "./types.js";
 
 export type CircuitBreakerState = {
@@ -15,8 +16,9 @@ export function withCircuitBreaker<TInput, TOutput>(
   options: CircuitBreakerOptions,
   handlerName: string,
 ): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
-  const threshold = options.failureThreshold ?? 5;
-  const timeout = options.resetTimeout ?? 30000;
+  const threshold =
+    options.failureThreshold ?? CIRCUIT_BREAKER.FAILURE_THRESHOLD;
+  const timeout = options.resetTimeout ?? CIRCUIT_BREAKER.RESET_TIMEOUT;
 
   return async (opts, ...args) => {
     const now = Date.now();

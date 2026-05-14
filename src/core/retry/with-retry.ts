@@ -1,20 +1,21 @@
+import { RETRY } from "../../lib/constants.js";
 import { calculateDelay } from "../../lib/retry-backoff.js";
 import { isErrorResponse } from "../../lib/utils.js";
 import type { ErrorResponse } from "../../types/misc.js";
-import type { RetryOptions } from "./types.js";
+import type { RetryBackoff, RetryOptions } from "./types.js";
 
 export function withRetry<TInput, TOutput>(
   handler: (
     opts: { ctx: any; input: TInput },
-    ...args: any[]
+    ...args: unknown[]
   ) => Promise<TOutput>,
   options: RetryOptions = {},
-): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
-  const attempts = options.attempts ?? 3;
-  const backoff = options.backoff ?? "exponential";
-  const initialDelay = options.initialDelay ?? 100;
-  const maxDelay = options.maxDelay ?? 10000;
-  const factor = options.factor ?? 2;
+): (opts: { ctx: any; input: TInput }, ...args: unknown[]) => Promise<TOutput> {
+  const attempts = options.attempts ?? RETRY.ATTEMPTS;
+  const backoff = options.backoff ?? (RETRY.BACKOFF as RetryBackoff);
+  const initialDelay = options.initialDelay ?? RETRY.INITIAL_DELAY;
+  const maxDelay = options.maxDelay ?? RETRY.MAX_DELAY;
+  const factor = options.factor ?? RETRY.FACTOR;
   const retryIf = options.if ?? (() => true);
   const onRetry = options.onRetry;
   const onFailed = options.onFailed;

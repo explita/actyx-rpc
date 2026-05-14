@@ -1,6 +1,7 @@
 import zlib from "zlib";
 import { promisify } from "util";
 import type { CompressionOptions } from "./types.js";
+import { COMPRESSOR } from "../../lib/constants.js";
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -14,9 +15,9 @@ export class Compressor {
 
   constructor(options?: CompressionOptions) {
     this.options = {
-      algorithm: options?.algorithm ?? "gzip",
-      threshold: options?.threshold ?? 1024, // 1kb
-      level: options?.level ?? 6,
+      algorithm: options?.algorithm ?? COMPRESSOR.ALGORITHM,
+      threshold: options?.threshold ?? COMPRESSOR.THRESHOLD,
+      level: options?.level ?? COMPRESSOR.LEVEL,
       compressResponse: options?.compressResponse ?? false,
       onCompress: options?.onCompress ?? (() => {}),
     };

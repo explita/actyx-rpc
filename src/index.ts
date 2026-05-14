@@ -20,6 +20,8 @@ export type {
   ProcedureConfig,
   ProcedureInstance,
   ProcedureProps,
+  InferContext,
+  // InferInput,
 } from "./types/procedure.js";
 export type { Middleware, Plugin } from "./types/middleware.js";
 export type {
