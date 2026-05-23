@@ -4,9 +4,12 @@ import { zodResolver } from "../src/resolvers/zod/index.js";
 import { z } from "zod";
 
 describe("Core: Inter-Procedure Calling", () => {
-  it("should allow calling another procedure via ctx.call and share context", async () => {
-    const contextSpy = vi.fn(() => ({ ok: true as const, ctx: { userId: "user_1" } }));
-    
+  it("should allow calling another procedure directly and share context", async () => {
+    const contextSpy = vi.fn(() => ({
+      ok: true as const,
+      ctx: { userId: "user_1" },
+    }));
+
     const procedure = createProcedure({
       createContext: contextSpy,
     });
@@ -16,26 +19,26 @@ describe("Core: Inter-Procedure Calling", () => {
     });
 
     const getDashboard = procedure.query(async ({ ctx }) => {
-      // Call getProfile internally
-      const [profile, error] = await ctx.call(getProfile, undefined);
-      
+      // Call getProfile internally directly
+      const [profile, error] = await getProfile();
+
       if (error) throw error;
-      
-      return { 
-        dashboard: true, 
+
+      return {
+        dashboard: true,
         profile,
         // Verify we can access our own context too
-        currentUserId: ctx.userId 
+        currentUserId: ctx.userId,
       };
     });
 
     const [result, error] = await getDashboard();
-    
+
     expect(error).toBeNull();
     expect(result?.dashboard).toBe(true);
     expect(result?.profile?.id).toBe("user_1");
     expect(result?.currentUserId).toBe("user_1");
-    
+
     // CRITICAL: createContext should only be called ONCE for the entire chain
     expect(contextSpy).toHaveBeenCalledTimes(1);
   });
@@ -47,12 +50,12 @@ describe("Core: Inter-Procedure Calling", () => {
 
     const procC = procedure.query(async ({ ctx }) => ctx.val + 2);
     const procB = procedure.query(async ({ ctx }) => {
-        const [res] = await ctx.call(procC, undefined);
-        return (res || 0) + 10;
+      const [res] = await procC();
+      return (res || 0) + 10;
     });
     const procA = procedure.query(async ({ ctx }) => {
-        const [res] = await ctx.call(procB, undefined);
-        return (res || 0) + 100;
+      const [res] = await procB();
+      return (res || 0) + 100;
     });
 
     const [result] = await procA();
@@ -61,7 +64,7 @@ describe("Core: Inter-Procedure Calling", () => {
 
   it("should pass input correctly to internal calls", async () => {
     const procedure = createProcedure({
-        createContext: () => ({ ok: true, ctx: {} }),
+      createContext: () => ({ ok: true, ctx: {} }),
     });
 
     const multiply = procedure
@@ -71,8 +74,8 @@ describe("Core: Inter-Procedure Calling", () => {
       });
 
     const calculate = procedure.query(async ({ ctx }) => {
-        const [res] = await ctx.call(multiply, { a: 5, b: 10 });
-        return res;
+      const [res] = await multiply({ a: 5, b: 10 });
+      return res;
     });
 
     const [result] = await calculate();

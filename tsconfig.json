@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "jsx": "react-jsx"
   },
   "include": ["src/**/*"]
 }

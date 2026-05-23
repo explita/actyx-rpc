@@ -3,15 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ErrorResponse, MutationResult } from "../../types/misc.js";
 import type { MutationStatus, UseMutationOpts } from "../types.js";
+import { useQueryClient } from "../provider.js";
 
 export function useMutation<
   TOutput,
   TArgs extends any[] = any[],
   TContext = unknown,
+  TMutationKey extends unknown[] = unknown[],
 >(
   action: ((...args: TArgs) => Promise<MutationResult<TOutput>>) | string,
-  opts?: UseMutationOpts<TOutput, TArgs, TContext>,
+  opts?: UseMutationOpts<TOutput, TArgs, TContext, TMutationKey>,
 ) {
+  const queryClient = useQueryClient();
   const [status, setStatus] = useState<MutationStatus>("idle");
   const [data, setData] = useState<TOutput | null>(null);
   const [error, setError] = useState<ErrorResponse | null>(null);
@@ -67,6 +70,7 @@ export function useMutation<
 
   const executeImmediately = useCallback(
     async (...args: TArgs): Promise<MutationResult<TOutput>> => {
+      queryClient.startMutation(opts?.mutationKey);
       const input = args[0];
       // Cancel previous request
       abortControllerRef.current?.abort();
@@ -209,8 +213,8 @@ export function useMutation<
             callbacksRef.current.onValidationErrors?.(errors);
           }
 
-          callbacksRef.current.onError?.(error, ...args);
-          callbacksRef.current.onSettled?.(undefined, message, ...args);
+          callbacksRef.current.onError?.(error, mutationContext, ...args);
+          callbacksRef.current.onSettled?.(undefined, error, mutationContext, ...args);
 
           if (opts?.throwOnError) throw err;
           return [null, err];
@@ -219,8 +223,8 @@ export function useMutation<
         setStatus("success");
         setData(result);
         setValidationErrors(null);
-        callbacksRef.current.onSuccess?.(result, ...args);
-        callbacksRef.current.onSettled?.(result, undefined, ...args);
+        callbacksRef.current.onSuccess?.(result, mutationContext, ...args);
+        callbacksRef.current.onSettled?.(result, undefined, mutationContext, ...args);
         return [result, null];
       } catch (err) {
         // Don't treat abort as error
@@ -254,14 +258,15 @@ export function useMutation<
         };
 
         setError(error);
-        callbacksRef.current.onError?.(error, ...args);
-        callbacksRef.current.onSettled?.(undefined, error, ...args);
+        callbacksRef.current.onError?.(error, mutationContext, ...args);
+        callbacksRef.current.onSettled?.(undefined, error, mutationContext, ...args);
         throw err;
       } finally {
+        queryClient.endMutation(opts?.mutationKey);
         abortControllerRef.current = null;
       }
     },
-    [action, opts?.throwOnError],
+    [action, opts?.throwOnError, opts?.mutationKey, queryClient],
   );
 
   const mutateAsync = useCallback(

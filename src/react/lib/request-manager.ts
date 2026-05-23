@@ -4,6 +4,10 @@
 class RequestManager {
   private pending = new Map<string, Promise<any>>();
 
+  getActivePromise<T = any>(key: string): Promise<T> | undefined {
+    return this.pending.get(key);
+  }
+
   async fetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
     const existing = this.pending.get(key);
     if (existing) {

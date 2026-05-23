@@ -1,6 +1,6 @@
 {
   "name": "@explita/actyx-rpc",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "author": "Explita",
   "license": "MIT",
   "type": "module",
@@ -36,6 +36,16 @@
       "import": "./dist/react/index.js",
       "require": "./dist/react/index.js",
       "types": "./dist/react/index.d.ts"
+    },
+    "./client": {
+      "import": "./dist/client/index.js",
+      "require": "./dist/client/index.js",
+      "types": "./dist/client/index.d.ts"
+    },
+    "./client/*": {
+      "import": "./dist/client/*.js",
+      "require": "./dist/client/*.js",
+      "types": "./dist/client/*.d.ts"
     },
     "./resolvers": {
       "import": "./dist/resolvers/index.js",
@@ -79,7 +89,8 @@
   "homepage": "https://github.com/explita/actyx-rpc#readme",
   "scripts": {
     "clean": "rimraf dist",
-    "build": "npm run clean && tsc",
+    "copy-dist": "node scripts/copy-dist.js",
+    "build": "npm run clean && tsc && npm run copy-dist",
     "dev": "tsc --watch",
     "test": "vitest run",
     "prepublishOnly": "npm run build"

@@ -4,6 +4,7 @@ export type SSEConnectionOptions = {
   url: string;
   params?: Record<string, any>;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 /**
@@ -17,6 +18,16 @@ export async function SSEClient<T = any>(
 ): Promise<AsyncIterable<SSEEvent<T>> & { close: () => void }> {
   let controller = new AbortController();
   let isClosed = false;
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      isClosed = true;
+    }
+    options.signal.addEventListener("abort", () => {
+      isClosed = true;
+      controller.abort();
+    });
+  }
 
   const onOnline = () => {
     if (!isClosed) {

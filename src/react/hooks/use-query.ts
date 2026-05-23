@@ -1,31 +1,41 @@
 import type { ErrorResponse } from "../../types/misc.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useSyncExternalStore,
+  useId,
+  useMemo,
+} from "react";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { QueryResult, Unwrap, UseQueryOpts } from "../types.js";
+import { useQueryClient } from "../provider.js";
+import { QueryState } from "../lib/query-client.js";
 
 export function useQuery<
   TOutput,
   TInitialData = undefined,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
-  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap> & {
+  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
     initialData?: TInitialData;
   } = {
     enabled: true,
     refetchOnWindowFocus: false,
-    refetchInterval: 0,
-    unwrap: false as TUnwrap,
-  },
-): QueryResult<TOutput, TInitialData, TUnwrap> {
-  //@ts-ignore
-  const [data, setData] = useState<Unwrap<TOutput, TUnwrap> | undefined>(
-    opts?.initialData as Unwrap<TOutput, TUnwrap>,
-  );
-  const [error, setError] = useState<ErrorResponse | undefined>();
-  const [isFetching, setIsFetching] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+    staleTime: 0,
+    refetchOnMount: true,
+  } as any,
+): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData> {
+  const queryClient = useQueryClient();
+
+  const localId = useId();
+
+  const queryKey = opts.queryKey
+    ? opts.queryKey.map((i) => String(i)).join("|")
+    : `__local__${localId}`;
 
   // Store callbacks in a ref to avoid re-creating fetchData when they change
   const callbacksRef = useRef({
@@ -33,6 +43,8 @@ export function useQuery<
     onError: opts?.onError,
     onSettled: opts?.onSettled,
     initialData: opts?.initialData,
+    select: opts?.select,
+    proc,
   });
 
   useEffect(() => {
@@ -41,22 +53,54 @@ export function useQuery<
       onError: opts?.onError,
       onSettled: opts?.onSettled,
       initialData: opts?.initialData,
+      select: opts?.select,
+      proc,
     };
   });
 
-  const queryKey = opts.queryKey?.map((i) => String(i)).join("|") ?? "";
+  // Ensure initial state exists in cache before subscribing
+  if (!queryClient.getQueryState(queryKey)) {
+    queryClient.setQueryState(
+      queryKey,
+      {
+        data: opts?.initialData as Unwrap<TOutput, TUnwrap> | undefined,
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: opts?.initialData !== undefined,
+      },
+      { silent: true },
+    );
+  }
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) =>
+      queryClient.subscribe(queryKey, onStoreChange, opts?.gcTime),
+    [queryClient, queryKey, opts?.gcTime],
+  );
+
+  const getSnapshot = useCallback(() => {
+    // we guaranteed it exists above
+    return queryClient.getQueryState(queryKey) as QueryState<
+      Unwrap<TOutput, TUnwrap>,
+      ErrorResponse
+    >;
+  }, [queryClient, queryKey]);
+
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = useCallback(async () => {
-    setIsFetching(true);
+    queryClient.setQueryState(queryKey, { isFetching: true });
 
     let resultTuple: [TOutput, null] | [null, ErrorResponse];
 
-    // Wrap proc to pass progress if it supports it
     const fetcher = async () => {
-      return await proc();
+      return await callbacksRef.current.proc();
     };
 
-    if (queryKey) {
+    if (!queryKey.startsWith("__local__")) {
       resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
     } else {
       resultTuple = await fetcher();
@@ -65,39 +109,56 @@ export function useQuery<
     const [result, err] = resultTuple;
 
     if (err) {
-      setError(err);
-      //@ts-ignore
-      setData(callbacksRef.current.initialData);
+      queryClient.setQueryState(queryKey, {
+        error: err,
+        isError: true,
+        isSuccess: false,
+        isFetching: false,
+        data: callbacksRef.current.initialData as any,
+      });
       callbacksRef.current.onError?.(err);
     } else {
       const unwrapped =
         opts.unwrap === true &&
         result &&
-        //@ts-ignore
+        typeof result === "object" &&
         "data" in result
-          ? //@ts-ignore
-            result.data
+          ? (result as any).data
           : result;
-      setData(unwrapped as any);
-      setError(undefined);
-      callbacksRef.current.onSuccess?.(result);
+
+      queryClient.setQueryState(queryKey, {
+        data: unwrapped,
+        error: undefined,
+        isError: false,
+        isSuccess: true,
+        isFetching: false,
+        updatedAt: Date.now(),
+      });
+      
+      const finalData = callbacksRef.current.select ? callbacksRef.current.select(unwrapped) : (unwrapped as unknown as TSelectData);
+      callbacksRef.current.onSuccess?.(finalData);
+      callbacksRef.current.onSettled?.(finalData, null);
     }
 
-    setIsFetching(false);
-    callbacksRef.current.onSettled?.(result, err);
+    if (err) {
+      callbacksRef.current.onSettled?.(null, err);
+    }
 
     return result;
-  }, [proc, queryKey]); // Only depend on stable parts of opts
+  }, [queryKey, queryClient, opts.unwrap]);
 
   const refetch = useCallback(fetchData, [fetchData]);
 
   const reset = useCallback(() => {
-    //@ts-ignore
-    setData(opts?.initialData);
-    setError(undefined);
-    setIsFetching(false);
+    queryClient.setQueryState(queryKey, {
+      data: opts?.initialData as any,
+      error: undefined,
+      isFetching: false,
+      isError: false,
+      isSuccess: opts?.initialData !== undefined,
+    });
     if (intervalRef.current) clearInterval(intervalRef.current);
-  }, [opts?.initialData]);
+  }, [queryClient, queryKey, opts?.initialData]);
 
   // Initial fetch
   useEffect(() => {
@@ -105,14 +166,34 @@ export function useQuery<
       return;
     }
 
-    fetchData();
+    const state = queryClient.getQueryState(queryKey);
+    const staleTime = opts?.staleTime ?? 0;
+    const refetchOnMount = opts?.refetchOnMount ?? true;
+
+    let shouldFetch = true;
+
+    if (state?.isSuccess && state?.updatedAt) {
+      if (refetchOnMount === false) {
+        shouldFetch = false;
+      } else if (refetchOnMount !== "always") {
+        // Check if data is stale
+        const isStale = Date.now() - state.updatedAt >= staleTime;
+        if (!isStale) {
+          shouldFetch = false;
+        }
+      }
+    }
+
+    if (shouldFetch) {
+      fetchData();
+    }
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [opts?.enabled, fetchData, queryKey]);
+  }, [opts?.enabled, opts?.staleTime, opts?.refetchOnMount, fetchData, queryKey, queryClient]);
 
-  // Refetch interval (only if data exists or initialData provided)
+  // Refetch interval
   useEffect(() => {
     if (opts?.refetchInterval && opts.enabled !== false) {
       intervalRef.current = setInterval(() => refetch(), opts.refetchInterval);
@@ -120,7 +201,7 @@ export function useQuery<
         if (intervalRef.current) clearInterval(intervalRef.current);
       };
     }
-  }, [opts?.refetchInterval, opts?.enabled, data, refetch]);
+  }, [opts?.refetchInterval, opts?.enabled, refetch]);
 
   // Refetch on window focus
   useEffect(() => {
@@ -131,13 +212,53 @@ export function useQuery<
     return () => window.removeEventListener("focus", handleFocus);
   }, [opts?.refetchOnWindowFocus, refetch]);
 
+  // Refetch on network reconnect
+  useEffect(() => {
+    const refetchOnReconnect = opts?.refetchOnReconnect ?? true;
+    if (!refetchOnReconnect) return;
+
+    const handleOnline = () => {
+      if (opts?.enabled === false) return;
+      const currentState = queryClient.getQueryState(queryKey);
+      const staleTime = opts?.staleTime ?? 0;
+      if (
+        refetchOnReconnect === "always" ||
+        !currentState?.updatedAt ||
+        Date.now() - currentState.updatedAt >= staleTime
+      ) {
+        refetch();
+      }
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [opts?.refetchOnReconnect, opts?.enabled, opts?.staleTime, refetch, queryKey, queryClient]);
+
+  // Listen for query invalidation
+  useEffect(() => {
+    if (opts?.enabled === false) return;
+
+    return queryClient.onInvalidate(queryKey, () => {
+      refetch();
+    });
+  }, [queryClient, queryKey, refetch, opts?.enabled]);
+
+  const isRefetching = state.isFetching && state.data !== undefined;
+
+  const data = state.data;
+  const selectedData = useMemo(() => {
+    if (data === undefined) return undefined;
+    if (opts?.select) return opts.select(data as Unwrap<TOutput, TUnwrap>);
+    return data as unknown as TSelectData;
+  }, [data, opts?.select]);
+
   return {
-    error,
-    isFetching,
-    isError: !!error,
-    isSuccess: !!data && !error && !isFetching,
-    refetch,
+    error: state.error,
+    isFetching: state.isFetching,
+    isRefetching,
+    isError: state.isError,
+    isSuccess: state.isSuccess,
+    refetch: refetch as any,
     reset,
-    data,
-  } as QueryResult<TOutput, TInitialData, TUnwrap>;
+    data: selectedData,
+  } as QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 }

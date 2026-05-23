@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useId,
+  useSyncExternalStore,
+} from "react";
 import type { ErrorResponse, QueryResult } from "../../types/misc.js";
 import type {
   InfiniteQueryPage,
@@ -6,16 +12,34 @@ import type {
   UseInfiniteQueryReturn,
   WithoutCursor,
 } from "../types.js";
+import { useQueryClient } from "../provider.js";
+import { globalRequestManager } from "../lib/request-manager.js";
 
-export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
+type InfData<TPage> = {
+  pages: InfiniteQueryPage<TPage>[];
+  pageParams: (string | number)[];
+};
+
+export function useInfiniteQuery<
+  TInput,
+  TPage,
+  TQueryKey extends unknown[] = unknown[],
+>(
   proc: (
     input: WithoutCursor<TInput>,
   ) => Promise<QueryResult<InfiniteQueryPage<TPage>>>,
-  opts: UseInfiniteQueryOpts<TInput, TPage>,
+  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey>,
 ): Omit<
-  UseInfiniteQueryReturn<TPage, TContext>,
+  UseInfiniteQueryReturn<TPage>,
   "fetchPrevious" | "hasPrevious" | "isFetchingPrevious" | "previousCursor"
 > {
+  const queryClient = useQueryClient();
+  const localId = useId();
+
+  const queryKey = opts.queryKey
+    ? opts.queryKey.map(String).join("|")
+    : `__local_inf__${localId}`;
+
   const {
     initialInput,
     enabled = true,
@@ -30,39 +54,47 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
     onSettled,
   } = opts;
 
-  // Store pages as a simple array
-  const [pages, setPages] = useState<InfiniteQueryPage<TPage>[]>(
-    initialData?.pages || [],
-  );
-  const [pageParams, setPageParams] = useState<(string | number)[]>(
-    initialData?.pageParams ||
-      ([initialPageParam].filter(Boolean) as (number | string)[]),
-  );
-  const [error, setError] = useState<ErrorResponse | undefined>();
-  const [isFetchingNext, setIsFetchingNext] = useState(false);
-  const [context, setContext] = useState<TContext | undefined>();
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // Store callbacks in a ref to avoid re-creating stable functions when they change
-  const callbacksRef = useRef({
-    onSuccess,
-    onError,
-    onSettled,
-  });
-
+  const callbacksRef = useRef({ onSuccess, onSettled, proc, initialInput });
   useEffect(() => {
-    callbacksRef.current = {
-      onSuccess,
-      onError,
-      onSettled,
-    };
+    callbacksRef.current = { onSuccess, onSettled, proc, initialInput };
   });
 
-  // Track fetched cursors to prevent duplicate fetches
+  // Initialize cache
+  if (!queryClient.getQueryState(queryKey)) {
+    queryClient.setQueryState(
+      queryKey,
+      {
+        data: initialData || {
+          pages: [],
+          pageParams: [initialPageParam].filter(Boolean),
+        },
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: !!initialData,
+      },
+      { silent: true },
+    );
+  }
+
+  const subscribe = useCallback(
+    (onChange: () => void) =>
+      queryClient.subscribe(queryKey, onChange, opts?.gcTime),
+    [queryClient, queryKey, opts?.gcTime],
+  );
+  const getSnapshot = useCallback(
+    () => queryClient.getQueryState(queryKey)!,
+    [queryClient, queryKey],
+  );
+
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const data = (state.data as InfData<TPage>) || { pages: [], pageParams: [] };
+  const pages = data.pages;
+  const pageParams = data.pageParams;
+
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
 
-  // Computed values
   const flattenedData = pages.flatMap((page) => page.data);
   const hasNext =
     pages.length > 0
@@ -74,126 +106,163 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<InfiniteQueryPage<TPage>> => {
-      const abortController = new AbortController();
-      abortControllerRef.current?.abort();
-      abortControllerRef.current = abortController;
+      const fetcher = async () =>
+        await callbacksRef.current.proc({
+          ...callbacksRef.current.initialInput,
+          cursor,
+        } as WithoutCursor<TInput>);
 
-      const [result, err] = await proc({ ...initialInput, cursor });
+      const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
+      let resultTuple: [InfiniteQueryPage<TPage>, null] | [null, ErrorResponse];
 
-      if (abortController.signal.aborted) {
-        throw new Error("Aborted");
+      if (!queryKey.startsWith("__local__")) {
+        resultTuple = await globalRequestManager.fetch(subKey, fetcher);
+      } else {
+        resultTuple = await fetcher();
       }
 
-      if (err) {
-        setError(err);
-        throw err;
-      }
+      const [result, err] = resultTuple;
 
-      return result;
+      if (err) throw err;
+      return result as InfiniteQueryPage<TPage>;
     },
-    [proc, initialInput],
+    [queryKey],
   );
 
   const fetchNext = useCallback(async () => {
-    if (!hasNext) return undefined;
-    if (isFetchingNext) return undefined;
-
-    setIsFetchingNext(true);
+    if (!hasNext || state.isFetching) return undefined;
+    queryClient.setQueryState(queryKey, { isFetching: true });
 
     const lastPage = pages[pages.length - 1];
     const nextCursor = getNextPageParam?.(lastPage) ?? lastPage?.nextCursor;
 
-    if (!nextCursor) {
-      setIsFetchingNext(false);
+    if (!nextCursor || fetchedCursorsRef.current.has(nextCursor)) {
+      queryClient.setQueryState(queryKey, { isFetching: false });
       return undefined;
     }
 
     try {
       const newPage = await fetchPage(nextCursor);
+      fetchedCursorsRef.current.add(nextCursor);
 
-      setPages((prev) => {
-        let newPages = [...prev, newPage];
-        if (maxPages && newPages.length > maxPages) {
-          newPages = newPages.slice(-maxPages);
-        }
-        return newPages;
-      });
+      let newPages = [...pages, newPage];
+      let newParams = [...pageParams, nextCursor];
+      if (maxPages && newPages.length > maxPages) {
+        newPages = newPages.slice(-maxPages);
+        newParams = newParams.slice(-maxPages);
+      }
 
-      setPageParams((prev) => {
-        let newParams = [...prev, nextCursor];
-        if (maxPages && newParams.length > maxPages) {
-          newParams = newParams.slice(-maxPages);
-        }
-        return newParams;
+      const newData = { pages: newPages, pageParams: newParams };
+      queryClient.setQueryState(queryKey, {
+        data: newData,
+        isFetching: false,
+        isError: false,
+        isSuccess: true,
+        error: undefined,
+        updatedAt: Date.now(),
       });
-
-      setIsFetchingNext(false);
-      callbacksRef.current.onSuccess?.({
-        pages: [...pages, newPage],
-        pageParams: [...pageParams, nextCursor],
-      });
+      callbacksRef.current.onSuccess?.(newData);
       callbacksRef.current.onSettled?.();
-
       return newPage;
     } catch (err) {
-      setIsFetchingNext(false);
-      callbacksRef.current.onError?.(err as ErrorResponse);
+      queryClient.setQueryState(queryKey, {
+        isFetching: false,
+        error: err as ErrorResponse,
+        isError: true,
+      });
       callbacksRef.current.onSettled?.();
       return undefined;
     }
   }, [
+    hasNext,
+    state.isFetching,
     pages,
     pageParams,
-    hasNext,
-    isFetchingNext,
     fetchPage,
     getNextPageParam,
     maxPages,
+    queryClient,
+    queryKey,
   ]);
 
   const refetch = useCallback(async () => {
-    setIsFetchingNext(true);
-    setError(undefined);
+    queryClient.setQueryState(queryKey, {
+      isFetching: true,
+      error: undefined,
+    });
     fetchedCursorsRef.current.clear();
 
     try {
       const firstPage = await fetchPage(initialPageParam);
-      setPages([firstPage]);
-      setPageParams([initialPageParam].filter(Boolean) as (number | string)[]);
-      callbacksRef.current.onSuccess?.({
+      if (initialPageParam !== undefined)
+        fetchedCursorsRef.current.add(initialPageParam);
+
+      const newData = {
         pages: [firstPage],
         pageParams: [initialPageParam].filter(Boolean) as (string | number)[],
+      };
+
+      queryClient.setQueryState(queryKey, {
+        data: newData,
+        isFetching: false,
+        isError: false,
+        isSuccess: true,
+        updatedAt: Date.now(),
       });
+      callbacksRef.current.onSuccess?.(newData);
     } catch (err) {
-      setError(err as ErrorResponse);
-      callbacksRef.current.onError?.(err as ErrorResponse);
+      queryClient.setQueryState(queryKey, {
+        error: err as ErrorResponse,
+        isError: true,
+        isFetching: false,
+      });
     } finally {
-      setIsFetchingNext(false);
       callbacksRef.current.onSettled?.();
     }
-  }, [fetchPage, initialPageParam]);
+  }, [fetchPage, initialPageParam, queryClient, queryKey]);
 
   const reset = useCallback(() => {
-    setPages(initialData?.pages || []);
-    setPageParams(
-      initialData?.pageParams ||
-        ([initialPageParam].filter(Boolean) as (number | string)[]),
-    );
-    setError(undefined);
-    setIsFetchingNext(false);
-    setContext(undefined);
+    queryClient.setQueryState(queryKey, {
+      data: initialData || {
+        pages: [],
+        pageParams: [initialPageParam].filter(Boolean),
+      },
+      isFetching: false,
+      error: undefined,
+      isError: false,
+      isSuccess: !!initialData,
+    });
     fetchedCursorsRef.current.clear();
-    if (intervalRef.current) clearInterval(intervalRef.current);
-  }, [initialData, initialPageParam]);
+  }, [initialData, initialPageParam, queryClient, queryKey]);
 
-  // Initial fetch
   useEffect(() => {
-    if (enabled === false) {
-      return;
+    if (enabled === false) return;
+
+    // Invalidate listener
+    const unsubscribe = queryClient.onInvalidate(queryKey, () => {
+      refetch();
+    });
+
+    const currentState = queryClient.getQueryState(queryKey);
+    const staleTime = opts?.staleTime ?? 0;
+    let shouldFetch = true;
+    if (currentState?.isSuccess && currentState?.updatedAt) {
+      if (Date.now() - currentState.updatedAt < staleTime) {
+        shouldFetch = false;
+      }
     }
 
-    refetch();
-  }, [enabled, refetch]);
+    const data = currentState?.data as InfData<TPage> | undefined;
+    const currentPagesLength = data?.pages?.length || 0;
+
+    if (currentPagesLength === 0 && !initialData) {
+      shouldFetch = true;
+    }
+
+    if (shouldFetch) refetch();
+
+    return unsubscribe;
+  }, [enabled, queryClient, queryKey, refetch, opts?.staleTime, initialData]);
 
   // Refetch interval
   useEffect(() => {
@@ -208,21 +277,43 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
   // Refetch on window focus
   useEffect(() => {
     if (!refetchOnWindowFocus) return;
-
     const handleFocus = () => {
-      if (enabled !== false) {
-        refetch();
-      }
+      if (enabled !== false) refetch();
     };
-
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
   }, [refetchOnWindowFocus, enabled, refetch]);
 
-  // Cleanup
+  // Refetch on network reconnect
+  useEffect(() => {
+    const refetchOnReconnect = opts?.refetchOnReconnect ?? true;
+    if (!refetchOnReconnect) return;
+
+    const handleOnline = () => {
+      if (enabled === false) return;
+      const currentState = queryClient.getQueryState(queryKey);
+      const staleTime = opts?.staleTime ?? 0;
+      if (
+        refetchOnReconnect === "always" ||
+        !currentState?.updatedAt ||
+        Date.now() - currentState.updatedAt >= staleTime
+      ) {
+        refetch();
+      }
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [
+    opts?.refetchOnReconnect,
+    enabled,
+    opts?.staleTime,
+    refetch,
+    queryKey,
+    queryClient,
+  ]);
+
   useEffect(() => {
     return () => {
-      abortControllerRef.current?.abort();
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, []);
@@ -233,12 +324,11 @@ export function useInfiniteQuery<TInput, TPage, TContext = unknown>(
     pageParams,
     fetchNext,
     hasNext,
-    isFetching: isFetchingNext,
-    isError: !!error,
-    isSuccess: !error && pages.length > 0,
-    error,
+    isFetching: state.isFetching,
+    isError: state.isError,
+    isSuccess: state.isSuccess,
+    error: state.error,
     refetch,
     reset,
-    context,
   };
 }

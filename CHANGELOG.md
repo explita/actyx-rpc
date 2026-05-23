@@ -3,6 +3,23 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-23
+
+### Added
+
+- **`QueryClient` and `ActyxProvider`**: Introduced a lightweight, zero-dependency caching and state management system for React client-side caching, request deduplication, prefix-based invalidation, and mutation tracking.
+- **`useSSE` Hook**: Introduced a reactive Server-Sent Events hook supporting accumulated message history, history size trimming (`maxHistory`), automatic reconnection on network restore, and abort signal synchronization.
+- **`useSuspenseQuery` Hook**: Added a React Suspense-compatible query hook for streamlined data loading layouts.
+- **`useIsMutating` Hook**: Added support for global/filtered progress indicators of active mutations.
+- **Client-Only exports (`./client/*`)**: Added wildcard exports for `@explita/actyx-rpc/client/sse` and `@explita/actyx-rpc/client/ws` to reduce client bundle overhead and resolve `fs`/Node dependency errors in Next.js Turbopack builds.
+- **Expanded Hook Features**: Upgraded core hooks (`useQuery`, `useMutation`, `useInfiniteQuery`, and `usePaginatedQuery`) with support for caching options: `staleTime`, `gcTime`, `refetchOnMount`, `refetchOnWindowFocus`, and `refetchOnReconnect`.
+- **QueryClient Unit Tests**: Added a comprehensive unit test suite to test caching, subscriptions, prefix-based invalidations, and active mutation counts.
+
+### Changed
+
+- **Mock Tests**: Simplified mock tests to align with single-function mocking (`ACTYX_MOCK = "true"`).
+- **Inter-Call Tests**: Refactored tests to use direct procedure calls (`proc(...)`) to align with AsyncLocalStorage context inheritance, removing legacy `ctx.call` usage.
+
 ## [0.3.1] - 2026-05-14
 
 ### Added

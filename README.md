@@ -85,9 +85,16 @@ Actyx RPC lets you build server-side procedures with full type safety, minimal b
   - [`InferContext<T>`](#infercontextt)
 - [Observability](#observability)
 - [React Helper](#react-helper)
+  - [Why a Built-in Query Client? (vs. TanStack Query)](#why-a-built-in-query-client-vs-tanstack-query)
+  - [`ActyxProvider` & `useQueryClient`](#actyxprovider--usequeryclient)
   - [`useQuery`](#usequery)
     - [Automatic Response Unwrapping](#automatic-response-unwrapping)
+  - [`useMutation`](#usemutation)
   - [`useInfiniteQuery`](#useinfinitequery)
+  - [`useSuspenseQuery`](#usesuspensequery)
+  - [`useIsMutating`](#useismutating)
+  - [`useSSE`](#usesse)
+  - [Client-Only Subpaths](#client-only-subpaths)
   - [Progress Tracking](#progress-tracking)
 - [Adapters](#adapters)
   - [Next.js — `nextAdapter()`](#nextjs--nextadapter)
@@ -1897,8 +1904,59 @@ The generator automatically handles:
 
 The React entrypoint exports react hooks for handling async operation states on the client.
 
-```ts
-import { useMutation } from "@explita/actyx-rpc/react";
+### Why a Built-in Query Client? (vs. TanStack Query)
+
+While libraries like TanStack Query (React Query) are excellent, Actyx RPC includes its own lightweight, zero-dependency caching and state management system for two main reasons:
+
+1. **Seamless Procedure Integration (Tuple Return):** Actyx RPC procedures return a standardized `[data, error]` tuple to ensure type-safe and runtime-safe error handling without `try/catch` boilerplate. TanStack Query is designed around thrown errors and rejected promises. Our built-in `QueryClient` natively understands the tuple format, allowing you to drop procedure handlers directly into hooks (e.g. `useQuery(getUserProfile)`) with full type safety and zero boilerplate wrapper functions.
+2. **Zero-Dependency Essentials:** You shouldn't have to install, configure, and maintain a heavy external library for basic caching capabilities. Out of the box, Actyx RPC provides request deduplication, cache invalidation, optimistic updates, prefetching, and network reconnect/window focus refetching without needing any additional packages.
+
+#
+
+### `ActyxProvider` & `useQueryClient`
+
+To enable global query caching, query invalidation, and mutation tracking, wrap your application in the `ActyxProvider` and pass it a `QueryClient` instance.
+
+```tsx
+import { QueryClient, ActyxProvider } from "@explita/actyx-rpc/react";
+
+const queryClient = new QueryClient();
+
+function App() {
+  return (
+    <ActyxProvider client={queryClient}>
+      <MyComponents />
+    </ActyxProvider>
+  );
+}
+```
+
+You can retrieve the query client in any child component using the `useQueryClient` hook:
+
+```tsx
+import { useQueryClient } from "@explita/actyx-rpc/react";
+
+function InvalidateButton() {
+  const queryClient = useQueryClient();
+
+  return (
+    <button onClick={() => queryClient.invalidateQueries(["userProfile"])}>
+      Force Refresh Profile
+    </button>
+  );
+}
+```
+
+#### `QueryClient` API
+
+- **`invalidateQueries(queryKey)`**: Marks matching cache entries as stale (triggering an immediate refetch for any active hooks with matching keys).
+- **`setQueryData(queryKey, data | updater)`**: Manually updates cached query data. Handy for optimistic updates. Returns a tuple containing the `[oldData, newData]`.
+- **`prefetchQuery(queryKey, proc)`**: Fetches data from the server and caches it. Useful for prefetching data on hover or route transitions.
+- **`clear()`**: Clears all query cache entries and active timers.
+
+#
+
+### `useMutation`
 
 function CreatePostForm() {
   const mutation = useMutation(createPost, {
@@ -2118,6 +2176,130 @@ function PostsList() {
   );
 }
 ```
+
+#
+
+### useSSE
+
+Reactive hook for subscribing to Server-Sent Event (SSE) streams. It automatically manages connection lifecycles (opening on mount, cleaning up on unmount or dependency change) and accumulates a history of event payloads.
+
+```tsx
+import { useSSE } from "@explita/actyx-rpc/react";
+
+function StockTicker({ symbol }) {
+  const { data: history, lastData: latest, isConnected, error } = useSSE({
+    url: "/api/rpc/stock-ticker",
+    params: { symbol },
+    maxHistory: 10, // Optional: limit history size to prevent memory leaks
+  });
+
+  if (error) return <p>Error connecting: {error.message}</p>;
+
+  return (
+    <div>
+      <h3>Status: {isConnected ? "Live" : "Connecting..."}</h3>
+      {latest && <p>Latest Price: ${latest.price}</p>}
+      
+      <h4>Recent Updates:</h4>
+      <ul>
+        {history.map((update, i) => (
+          <li key={i}>${update.price}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+`useSSE` Options:
+- `url`: The SSE endpoint URL.
+- `params`: Optional record of query parameters.
+- `headers`: Optional record of custom request headers.
+- `signal`: Optional external `AbortSignal`.
+- `enabled`: Optional boolean to conditionally connect/disconnect (defaults to `true`).
+- `maxHistory`: Optional number limiting the length of the accumulated `data` array.
+- `onData`: Optional callback triggered on every event: `(data: T, event: string | undefined) => void`.
+- `onError`: Optional callback triggered on connection error: `(error: ErrorResponse) => void`.
+
+Returns:
+- `data`: An array of all accumulated event payloads (oldest first).
+- `lastData`: The most recently received event payload.
+- `event`: The name of the most recently received event.
+- `isConnected`: Boolean connection state.
+- `error`: `ErrorResponse` if the connection fails.
+- `close()`: Function to manually close the connection.
+- `clear()`: Function to clear the accumulated `data` history.
+
+#
+
+### useSuspenseQuery
+
+A hook that integrates with React Suspense for data loading. It throws the data-loading promise, allowing you to use a `<Suspense>` boundary in parent components.
+
+```tsx
+import { useSuspenseQuery } from "@explita/actyx-rpc/react";
+import { Suspense } from "react";
+
+function TodoList() {
+  const { data: todos } = useSuspenseQuery(() => getTodos(), {
+    queryKey: ["todos"],
+  });
+
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  );
+}
+
+function Page() {
+  return (
+    <Suspense fallback={<div>Loading todos...</div>}>
+      <TodoList />
+    </Suspense>
+  );
+}
+```
+
+#
+
+### useIsMutating
+
+A hook that tracks the number of active mutations in your application. This is useful for displaying global sync spinners or loading states in headers.
+
+```tsx
+import { useIsMutating } from "@explita/actyx-rpc/react";
+
+function GlobalSpinner() {
+  // Returns true if ANY mutation is currently executing in the app
+  const isMutating = useIsMutating();
+
+  // Or filter specifically by mutation key:
+  // const isAddingTodo = useIsMutating(["addTodo"]);
+
+  if (!isMutating) return null;
+
+  return <div>Syncing with server...</div>;
+}
+```
+
+#
+
+### Client-Only Subpaths
+
+If you are developing inside browser-only environments (such as Next.js Client Components) and want to keep your JS bundle size minimal, you can import client-only helpers directly from subpaths. This avoids referencing node-only/server-side dependencies (like `fs`, `node:async_hooks`, etc.) inside the client bundle.
+
+```tsx
+// Safely import SSEClient without pulling in server/node code:
+import { SSEClient } from "@explita/actyx-rpc/client/sse";
+
+// Safely import WebSocket client:
+import { WSClient } from "@explita/actyx-rpc/client/ws";
+```
+
+#
 
 <!-- #
 
