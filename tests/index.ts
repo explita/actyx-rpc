@@ -110,8 +110,14 @@ const getData = proc
       z.object({
         name: z.string().min(2, { error: "required" }),
         id: z.string(),
+        contact: z.array(z.object({ name: z.string(), email: z.string() })),
+        hobbies: z.array(z.string()),
+        settings: z.object({
+          showLogo: z.boolean(),
+        }),
       }),
     ),
+    { mode: "strict" },
   )
   // .authorize(async (ctx) => {
   //   return {
@@ -277,7 +283,17 @@ const joiData = proc
   console.log("--- Testing Output Validation ---");
   // We'll call getData. Since we are in mock mode (likely), we should check the result.
   // Actually, let's call it manually.
-  const [res, err] = await getData({ name: "john", id: "1" }, "1", "name");
+  const [res, err] = await getData(
+    {
+      name: "john",
+      id: "1",
+      contact: [{ name: "", email: "" }],
+      hobbies: ["a"],
+      settings: { showLogo: true },
+    },
+    "1",
+    "name",
+  );
   console.log("GetData Result:", res, "Error:", err);
 
   const { generateOpenApi } = await import("../src/core/docs/generator.js");

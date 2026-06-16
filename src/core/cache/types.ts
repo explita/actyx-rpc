@@ -1,7 +1,6 @@
 import type { Redis } from "ioredis";
-import { BaseContext, Prettify } from "../../types/misc.js";
-
-export type WindowTime = `${number}${"m" | "h" | "d" | "w" | "M"}` | number;
+import { BaseContext, Prettify, WindowTime } from "../../types/misc.js";
+export type { WindowTime };
 
 export type CacheAdapter = {
   get<T>(

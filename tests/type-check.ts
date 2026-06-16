@@ -19,4 +19,33 @@ type NonStandard = { other: string };
 type UnwrappedNonStandard = Unwrap<NonStandard, true>;
 const testNonStandard: UnwrappedNonStandard = { other: "field" };
 
+// Test: InputParams in form mode with Date check and recursive mapping
+import { InputParams } from "../src/types/misc.js";
+
+type TestInput = {
+  createdAt: Date;
+  updatedAt?: Date;
+  nested: {
+    time: Date;
+    flag: boolean;
+  };
+};
+
+type FormInput = InputParams<TestInput, { mode: "form" }, undefined>;
+
+// Verifies that fields are correctly mapped to unknown/recursive structures
+const validFormInput: FormInput = {
+  createdAt: "2026-06-12", // Date maps to unknown, so string is accepted
+  updatedAt: 1234567890,   // Date | undefined maps to unknown, so number/undefined is accepted
+  nested: {
+    time: new Date(),      // Nested objects are recursively mapped
+    flag: "yes",           // Primitive leaf values are relaxed to unknown
+  }
+};
+
+// @ts-expect-error - nested must still match the object structure
+const invalidFormInput: FormInput = {
+  nested: "not-an-object"
+};
+
 console.log("Type checks passed!");

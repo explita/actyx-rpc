@@ -507,6 +507,29 @@ export type ProcedureInstance<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     "output" | "description" | "summary"
   >;
+
+  /**
+   * Returns the current RPC context from `AsyncLocalStorage`.
+   *
+   * This is a zero-argument, fully-typed alternative to `getContext<T>()`.
+   * The context type is inferred directly from this procedure's definition —
+   * no generics needed at the call site.
+   *
+   * Must be called from within the synchronous or async call stack of a
+   * procedure handler — throws otherwise.
+   *
+   * @example
+   * ```ts
+   * // services/customer.ts
+   * import { procedure } from "../rpc";
+   *
+   * export async function getAllCustomers() {
+   *   const ctx = procedure.context; // fully typed!
+   *   return db.customer.findMany({ where: { companyId: ctx.company.id } });
+   * }
+   * ```
+   */
+  readonly context: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
 };
 
 export type ProcedureExtensionConfig<

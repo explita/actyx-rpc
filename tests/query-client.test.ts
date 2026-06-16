@@ -19,8 +19,11 @@ describe("React: QueryClient Caching & Invalidation", () => {
   });
 
   it("should set and get query state correctly", () => {
-    queryClient.setQueryState("user_1", { data: { name: "Alice" }, isSuccess: true });
-    
+    queryClient.setQueryState("user_1", {
+      data: { name: "Alice" },
+      isSuccess: true,
+    });
+
     const state = queryClient.getQueryState("user_1");
     expect(state).toBeDefined();
     expect(state?.data).toEqual({ name: "Alice" });
@@ -40,7 +43,11 @@ describe("React: QueryClient Caching & Invalidation", () => {
     const listener = vi.fn();
     queryClient.subscribe("user_1", listener);
 
-    queryClient.setQueryState("user_1", { data: { name: "Bob" } }, { silent: true });
+    queryClient.setQueryState(
+      "user_1",
+      { data: { name: "Bob" } },
+      { silent: true },
+    );
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -86,22 +93,28 @@ describe("React: QueryClient Caching & Invalidation", () => {
 
     const [oldData, newData] = queryClient.setQueryData<any>(
       ["profile"],
-      (old) => ({ ...old, role: "Admin" })
+      (old) => ({ ...old, role: "Admin" }),
     );
 
     expect(oldData).toEqual({ name: "Carol" });
     expect(newData).toEqual({ name: "Carol", role: "Admin" });
-    expect(queryClient.getQueryState("profile")?.data).toEqual({ name: "Carol", role: "Admin" });
+    expect(queryClient.getQueryState("profile")?.data).toEqual({
+      name: "Carol",
+      role: "Admin",
+    });
   });
 
   it("should invalidate query keys and trigger invalidation listeners", () => {
     const listener = vi.fn();
     queryClient.onInvalidate("posts|list", listener);
 
-    queryClient.setQueryState("posts|list", { data: ["post1"], updatedAt: Date.now() });
-    
+    queryClient.setQueryState("posts|list", {
+      data: ["post1"],
+      updatedAt: Date.now(),
+    });
+
     // Invalidate prefix matches exact key
-    queryClient.invalidateQueries(["posts", "list"]);
+    queryClient.invalidate(["posts", "list"]);
 
     const state = queryClient.getQueryState("posts|list");
     expect(state?.updatedAt).toBe(0); // Marked stale silently
@@ -112,10 +125,13 @@ describe("React: QueryClient Caching & Invalidation", () => {
     const listener = vi.fn();
     queryClient.onInvalidate("posts|list|page1", listener);
 
-    queryClient.setQueryState("posts|list|page1", { data: ["post1"], updatedAt: Date.now() });
-    
+    queryClient.setQueryState("posts|list|page1", {
+      data: ["post1"],
+      updatedAt: Date.now(),
+    });
+
     // Invalidate prefix matches prefix of keys
-    queryClient.invalidateQueries(["posts", "list"]);
+    queryClient.invalidate(["posts", "list"]);
 
     const state = queryClient.getQueryState("posts|list|page1");
     expect(state?.updatedAt).toBe(0);

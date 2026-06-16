@@ -3,6 +3,27 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-16
+
+### Added
+
+- **Cache Mutation & Optimistic UI Updates**: Added built-in cache mutation utility functions to `useInfiniteQuery` and `usePaginatedQuery` hook returns:
+  - `removeItem(index | filterFunc)`: Removes items from cached pages.
+  - `updateItem(index | filterFunc, updatedItem | updaterFunc)`: Updates specific items within cached pages and returns an automatic state rollback function.
+  - `prependItem(item)`, `appendItem(item)`, and `insertItem(index, item)`: Inserts new items into pages with automatic state rollback functions.
+  - `setPages(updaterFunc)`: Provides direct callback access to modify pages cache with state rollback.
+- **New Query Status Flags**: Added `isRefetching` (fetches in progress on existing cache), `isFetched` (fetching has completed at least once), and `isEmpty` (lists completed fetching and yielded empty results) indicators to all pagination-aware queries.
+- **Human-Readable Window Durations**: Added support for duration strings like `"10s"`, `"1m"`, `"1h"`, etc., in caching/staling configs (`staleTime`, `gcTime`) using the new `WindowTime` type.
+- **Server Context Lookup**: Added `procedure.context` getter to fetch context values via async local storage, matching standard context resolution signatures.
+- **Optimistic Mutation Tests**: Added extensive test suites in `tests/react-logic.test.ts` checking hook state operations, rollbacks, and active refetching logic.
+
+### Changed (Breaking Changes)
+
+- **QueryClient Invalidation Rename**: The method `invalidateQueries` on `QueryClient` has been renamed to `invalidate`.
+- **Stale/GC Configuration Types**: Refactored `staleTime` and `gcTime` options inside `UseQueryOpts` from raw numbers to `WindowTime`.
+
+---
+
 ## [0.4.0] - 2026-05-23
 
 ### Added

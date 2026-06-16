@@ -1,3 +1,7 @@
+export type WindowTime =
+  | `${number}${"s" | "m" | "h" | "d" | "w" | "M"}`
+  | number;
+
 export type Prettify<T> = {
   [K in keyof T]: T[K];
 } & {};
@@ -101,6 +105,15 @@ type ResolvedMode<
         ? "patch"
         : "strict";
 
+type MappedInputValue<V> =
+  V extends Array<any>
+    ? unknown[]
+    : V extends Date
+      ? unknown
+      : V extends object
+        ? { [K in keyof V]: MappedInputValue<V[K]> }
+        : unknown;
+
 export type InputParams<
   I,
   ICtx extends InputCtx,
@@ -112,8 +125,8 @@ export type InputParams<
     : ResolvedMode<GIM, ICtx> extends "patch"
       ? Partial<I>
       : ResolvedMode<GIM, ICtx> extends "form"
-        ? { [K in keyof I]: unknown }
-        : Partial<{ [K in keyof I]: unknown }>;
+        ? { [K in keyof I]: MappedInputValue<I[K]> }
+        : Partial<{ [K in keyof I]: MappedInputValue<I[K]> }>;
 
 export type QueryResult<T = unknown> = [T, null] | [null, ErrorResponse];
 export type MutationResult<T = unknown> =

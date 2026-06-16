@@ -34,6 +34,7 @@ import type {
   Prettify,
 } from "../types/misc.js";
 import { RedisCache } from "./cache/redis-cache.js";
+import { getContext } from "./helpers/get-context.js";
 
 export function createProcedure<
   TCtx extends Record<string, unknown>,
@@ -208,6 +209,10 @@ export function createProcedure<
           ...nextConfig,
           outputResolver: resolver,
         });
+      },
+
+      get context() {
+        return getContext();
       },
 
       middleware(mw) {

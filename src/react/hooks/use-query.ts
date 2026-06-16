@@ -11,12 +11,44 @@ import { globalRequestManager } from "../lib/request-manager.js";
 import { QueryResult, Unwrap, UseQueryOpts } from "../types.js";
 import { useQueryClient } from "../provider.js";
 import { QueryState } from "../lib/query-client.js";
+import { parseWindow } from "../../lib/utils.js";
 
 export function useQuery<
   TOutput,
-  TInitialData = undefined,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
+  TInitialData extends
+    | Omit<Unwrap<TOutput, TUnwrap>, "success">
+    | (() => Omit<Unwrap<TOutput, TUnwrap>, "success">) = Omit<
+    Unwrap<TOutput, TUnwrap>,
+    "success"
+  >,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
+>(
+  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
+    initialData: TInitialData;
+  },
+): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
+
+export function useQuery<
+  TOutput,
+  TQueryKey extends unknown[] = unknown[],
+  TUnwrap extends boolean = false,
+  TInitialData extends undefined = undefined,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
+>(
+  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  opts?: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
+    initialData?: undefined;
+  },
+): QueryResult<TOutput, undefined, TUnwrap, TSelectData>;
+
+export function useQuery<
+  TOutput,
+  TQueryKey extends unknown[] = unknown[],
+  TUnwrap extends boolean = false,
+  TInitialData = undefined,
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
@@ -27,14 +59,18 @@ export function useQuery<
     refetchOnWindowFocus: false,
     staleTime: 0,
     refetchOnMount: true,
-  } as any,
+  },
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData> {
   const queryClient = useQueryClient();
 
   const localId = useId();
 
   const queryKey = opts.queryKey
-    ? opts.queryKey.map((i) => String(i)).join("|")
+    ? opts.queryKey
+        .map((i) =>
+          typeof i === "object" && i !== null ? JSON.stringify(i) : String(i),
+        )
+        .join("|")
     : `__local__${localId}`;
 
   // Store callbacks in a ref to avoid re-creating fetchData when they change
@@ -60,14 +96,20 @@ export function useQuery<
 
   // Ensure initial state exists in cache before subscribing
   if (!queryClient.getQueryState(queryKey)) {
+    const resolvedInitialData =
+      typeof opts?.initialData === "function"
+        ? opts.initialData()
+        : opts?.initialData;
     queryClient.setQueryState(
       queryKey,
       {
-        data: opts?.initialData as Unwrap<TOutput, TUnwrap> | undefined,
+        data: resolvedInitialData as Unwrap<TOutput, TUnwrap> | undefined,
         error: undefined,
         isFetching: false,
         isError: false,
-        isSuccess: opts?.initialData !== undefined,
+        isSuccess: resolvedInitialData !== undefined,
+        // updatedAt: resolvedInitialData !== undefined ? Date.now() : undefined,
+        isFetched: false,
       },
       { silent: true },
     );
@@ -109,12 +151,16 @@ export function useQuery<
     const [result, err] = resultTuple;
 
     if (err) {
+      const initData = callbacksRef.current.initialData;
+      const resolvedInitData =
+        typeof initData === "function" ? initData() : initData;
       queryClient.setQueryState(queryKey, {
         error: err,
         isError: true,
         isSuccess: false,
         isFetching: false,
-        data: callbacksRef.current.initialData as any,
+        data: resolvedInitData,
+        isFetched: true,
       });
       callbacksRef.current.onError?.(err);
     } else {
@@ -133,9 +179,12 @@ export function useQuery<
         isSuccess: true,
         isFetching: false,
         updatedAt: Date.now(),
+        isFetched: true,
       });
-      
-      const finalData = callbacksRef.current.select ? callbacksRef.current.select(unwrapped) : (unwrapped as unknown as TSelectData);
+
+      const finalData = callbacksRef.current.select
+        ? callbacksRef.current.select(unwrapped)
+        : (unwrapped as unknown as TSelectData);
       callbacksRef.current.onSuccess?.(finalData);
       callbacksRef.current.onSettled?.(finalData, null);
     }
@@ -150,15 +199,20 @@ export function useQuery<
   const refetch = useCallback(fetchData, [fetchData]);
 
   const reset = useCallback(() => {
+    const initData = callbacksRef.current.initialData;
+    const resolvedInitData =
+      typeof initData === "function" ? initData() : initData;
     queryClient.setQueryState(queryKey, {
-      data: opts?.initialData as any,
+      data: resolvedInitData,
       error: undefined,
       isFetching: false,
       isError: false,
-      isSuccess: opts?.initialData !== undefined,
+      isSuccess: resolvedInitData !== undefined,
+      // updatedAt: resolvedInitData !== undefined ? Date.now() : undefined,
+      isFetched: false,
     });
     if (intervalRef.current) clearInterval(intervalRef.current);
-  }, [queryClient, queryKey, opts?.initialData]);
+  }, [queryClient, queryKey]);
 
   // Initial fetch
   useEffect(() => {
@@ -167,7 +221,7 @@ export function useQuery<
     }
 
     const state = queryClient.getQueryState(queryKey);
-    const staleTime = opts?.staleTime ?? 0;
+    const staleTime = parseWindow(opts.staleTime);
     const refetchOnMount = opts?.refetchOnMount ?? true;
 
     let shouldFetch = true;
@@ -191,7 +245,14 @@ export function useQuery<
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [opts?.enabled, opts?.staleTime, opts?.refetchOnMount, fetchData, queryKey, queryClient]);
+  }, [
+    opts?.enabled,
+    opts?.staleTime,
+    opts?.refetchOnMount,
+    fetchData,
+    queryKey,
+    queryClient,
+  ]);
 
   // Refetch interval
   useEffect(() => {
@@ -220,7 +281,7 @@ export function useQuery<
     const handleOnline = () => {
       if (opts?.enabled === false) return;
       const currentState = queryClient.getQueryState(queryKey);
-      const staleTime = opts?.staleTime ?? 0;
+      const staleTime = parseWindow(opts.staleTime);
       if (
         refetchOnReconnect === "always" ||
         !currentState?.updatedAt ||
@@ -231,7 +292,14 @@ export function useQuery<
     };
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
-  }, [opts?.refetchOnReconnect, opts?.enabled, opts?.staleTime, refetch, queryKey, queryClient]);
+  }, [
+    opts?.refetchOnReconnect,
+    opts?.enabled,
+    opts?.staleTime,
+    refetch,
+    queryKey,
+    queryClient,
+  ]);
 
   // Listen for query invalidation
   useEffect(() => {
@@ -247,9 +315,15 @@ export function useQuery<
   const data = state.data;
   const selectedData = useMemo(() => {
     if (data === undefined) return undefined;
-    if (opts?.select) return opts.select(data as Unwrap<TOutput, TUnwrap>);
-    return data as unknown as TSelectData;
+    if (opts?.select) return opts.select(data);
+    return data;
   }, [data, opts?.select]);
+
+  const isEmpty =
+    state.isFetched &&
+    (selectedData === null ||
+      selectedData === undefined ||
+      (Array.isArray(selectedData) && selectedData.length === 0));
 
   return {
     error: state.error,
@@ -257,7 +331,9 @@ export function useQuery<
     isRefetching,
     isError: state.isError,
     isSuccess: state.isSuccess,
-    refetch: refetch as any,
+    isFetched: state.isFetched,
+    isEmpty,
+    refetch,
     reset,
     data: selectedData,
   } as QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;

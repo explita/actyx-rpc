@@ -95,7 +95,7 @@ export default function Page() {
       setErrorToast("Whoops! Simulated failure. Rolling back...");
     },
     onSettled: () => {
-      queryClient.invalidateQueries(["todos"]);
+      queryClient.invalidate(["todos"]);
     },
   });
 

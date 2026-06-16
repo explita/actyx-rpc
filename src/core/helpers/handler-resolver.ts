@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { rpcStorage } from "./rpc-storage.js";
 import {
   getFinalStatusCode,
   isErrorResponse,
@@ -11,12 +11,6 @@ import type { CacheAdapter } from "../cache/types.js";
 import { startSpan, recordError } from "../telemetry/tracer.js";
 import { runMiddlewares } from "./run-middlewares.js";
 import { PubSubAdapter } from "../../lib/pubsub.js";
-
-/**
- * Global storage to track the current RPC context across nested calls.
- * This enables automatic bypass of context creation.
- */
-const rpcStorage = new AsyncLocalStorage<any>();
 
 export function handlerResolver<O, P = any>(
   handler: (opts: { ctx: any; input: any }, ...args: P[]) => Promise<O>,

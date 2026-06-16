@@ -1,13 +1,18 @@
 import crypto from "crypto";
 
-import type { CacheEntry } from "../core/cache/types.js";
+import type { CacheEntry, WindowTime } from "../core/cache/types.js";
 import type { ProcedureProps } from "../types/procedure.js";
 
 export function normalizeInput(data: unknown) {
   if (!data) return {};
-  
+
   // Robust FormData check
-  if (data instanceof FormData || (typeof data === "object" && "entries" in data && typeof (data as any).entries === "function")) {
+  if (
+    data instanceof FormData ||
+    (typeof data === "object" &&
+      "entries" in data &&
+      typeof (data as any).entries === "function")
+  ) {
     const obj: Record<string, any> = {};
     for (const [key, value] of (data as any).entries()) {
       if (key in obj) {
@@ -120,9 +125,8 @@ export function toBuffer(data: any): Buffer {
   return data;
 }
 
-export function parseWindow(
-  window: `${number}${"m" | "h" | "d" | "w" | "M"}` | number,
-): number {
+export function parseWindow(window?: WindowTime): number {
+  if (window === undefined) return 0;
   if (typeof window === "number") return window;
 
   try {
@@ -130,6 +134,8 @@ export function parseWindow(
     const unit = window.slice(-1);
 
     switch (unit) {
+      case "s": // seconds
+        return value * 1000;
       case "m": // minutes
         return value * 60 * 1000;
       case "h": // hours
@@ -141,7 +147,7 @@ export function parseWindow(
       case "M": // months (30 days)
         return value * 30 * 24 * 60 * 60 * 1000;
       default:
-        return 60000; // default 1 minute
+        return 0;
     }
   } catch (error) {
     return 0;

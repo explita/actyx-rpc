@@ -1,6 +1,7 @@
 export { createProcedure } from "./core/server.js";
 export { generateOpenApi } from "./core/docs/generator.js";
 export { createSSEResponse } from "./core/helpers/sse.js";
+export { getContext } from "./core/helpers/get-context.js";
 export { observabilityPlugin } from "./plugins/observability.js";
 export { SSEClient } from "./client/sse.js";
 export { progressFetch } from "./client/progress-fetch.js";
@@ -21,8 +22,9 @@ export type {
   ProcedureInstance,
   ProcedureProps,
   InferContext,
-  // InferInput,
+  InferInput,
 } from "./types/procedure.js";
+
 export type { Middleware, Plugin } from "./types/middleware.js";
 export type {
   Prettify,

@@ -1,0 +1,123 @@
+---
+sidebar_position: 1
+title: Introduction
+---
+
+# Introduction to Actyx RPC
+
+**Actyx RPC** is a type-safe RPC framework for building composable server actions in TypeScript. It allows you to build standard, type-safe API boundaries and hooks for React applications with minimal boilerplate and built-in caching.
+
+- 🔒 **End-to-end type safety**: Type inference flows from server procedures directly to client hooks.
+- ⚡ **Built for server actions**: Works seamlessly with Next.js Server Actions and standard route handlers.
+- 🧩 **Composable middleware & plugins**: Chain middlewares to extend context and validate payloads.
+- 🧠 **Flexible input modes**: Configure strict, partial, or form data input schemas.
+- 🛡️ **Resilience**: Out-of-the-box support for Retries, Timeouts, Rate Limits, and Circuit Breakers.
+- 📊 **Observability**: Built-in OpenTelemetry instrumentation and telemetry plugin tracking.
+- 🔌 **Resolver agnostic**: Integrates with Zod, Valibot, ArkType, Joi, Yup, or custom validation functions.
+
+---
+
+## Why Actyx?
+
+Traditional APIs force you to choose between flexibility and type safety. **Actyx gives you both.**
+
+Define a procedure once, and get:
+* Fully typed inputs
+* Validated payload structures
+* Reusable logic layers across your application
+
+No code generation steps. No duplicate schemas leaking across directories. Just clean, predictable, and typed server actions.
+
+---
+
+## Installation
+
+Install `@explita/actyx-rpc` using your preferred package manager:
+
+```bash
+npm install @explita/actyx-rpc
+```
+
+### Peer Dependencies
+Install the resolver library you want to use as a peer dependency: `zod`, `valibot`, `arktype`, `joi`, `yup`, or supply a custom resolver function.
+
+---
+
+## Quick Start
+
+Create a base procedure configuration:
+
+```ts
+import { createProcedure } from "@explita/actyx-rpc";
+import { z } from "zod";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
+
+const procedure = createProcedure({
+  async createContext() {
+    return {
+      ok: true,
+      ctx: {
+        userId: "user_123",
+        role: "admin",
+      },
+    };
+  },
+  enrichInput(ctx) {
+    return { userId: ctx.userId };
+  },
+  async onError(props) {
+    console.error("Procedure error:", props);
+  },
+  inputMode: "form", // "strict" | "form" | "partial"
+});
+
+// 1. Create a Mutation Procedure
+const createPost = procedure
+  .input(
+    zodResolver(
+      z.object({
+        title: z.string().min(1, "Title is required"),
+        body: z.string().min(10, "Body is too short"),
+      }),
+    ),
+  )
+  .mutation(async ({ ctx, input }) => {
+    // Your DB operations here.
+    return {
+      success: true,
+      data: {
+        id: "post_1",
+        title: input.title,
+        body: input.body,
+        authorId: ctx.userId,
+      },
+    };
+  });
+
+// Calling a Mutation
+const [result, error] = await createPost({
+  title: "Hello World",
+  body: "This is my first post.",
+});
+
+// 2. Create a Query Procedure
+const getPost = procedure
+  .input(
+    zodResolver(
+      z.object({
+        id: z.string().min(1, "Post id is required"),
+      }),
+    ),
+  )
+  .query(async ({ ctx, input }, includeDrafts: boolean) => {
+    // Your DB operations here.
+    return {
+      id: input.id,
+      authorId: ctx.userId,
+      includeDrafts,
+    };
+  });
+
+// Calling a Query
+const [post, queryError] = await getPost({ id: "post_1" }, true);
+```

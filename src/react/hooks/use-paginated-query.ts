@@ -9,14 +9,15 @@ import type { ErrorResponse, QueryResult } from "../../types/misc.js";
 import type {
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
-  UseInfiniteQueryReturn,
+  InfiniteQueryResult,
   WithoutCursor,
 } from "../types.js";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
+import { parseWindow } from "../../lib/utils.js";
 
-type InfData<TPage> = {
-  pages: InfiniteQueryPage<TPage>[];
+type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
+  pages: TFullPage[];
   pageParams: (string | number)[];
 };
 
@@ -24,12 +25,11 @@ export function usePaginatedQuery<
   TInput,
   TPage,
   TQueryKey extends unknown[] = unknown[],
+  TFullPage extends InfiniteQueryPage<TPage> = InfiniteQueryPage<TPage>,
 >(
-  proc: (
-    input: WithoutCursor<TInput>,
-  ) => Promise<QueryResult<InfiniteQueryPage<TPage>>>,
-  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey>,
-): UseInfiniteQueryReturn<TPage> {
+  proc: (input: WithoutCursor<TInput>) => Promise<QueryResult<TFullPage>>,
+  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+): InfiniteQueryResult<TPage, TFullPage> {
   const queryClient = useQueryClient();
   const localId = useId();
 
@@ -47,27 +47,46 @@ export function usePaginatedQuery<
     refetchOnWindowFocus = false,
     refetchInterval = 0,
     onSuccess,
+    onError,
     onSettled,
   } = opts;
 
-  const callbacksRef = useRef({ onSuccess, onSettled, proc, initialInput });
+  const callbacksRef = useRef({
+    onSuccess,
+    onError,
+    onSettled,
+    proc,
+    initialInput,
+    initialData,
+  });
   useEffect(() => {
-    callbacksRef.current = { onSuccess, onSettled, proc, initialInput };
+    callbacksRef.current = {
+      onSuccess,
+      onError,
+      onSettled,
+      proc,
+      initialInput,
+      initialData,
+    };
   });
 
   // Initialize cache
   if (!queryClient.getQueryState(queryKey)) {
+    const resolvedInitialData =
+      typeof initialData === "function" ? initialData() : initialData;
     queryClient.setQueryState(
       queryKey,
       {
-        data: initialData || {
+        data: resolvedInitialData || {
           pages: [],
           pageParams: [initialPageParam].filter(Boolean),
         },
         error: undefined,
         isFetching: false,
         isError: false,
-        isSuccess: !!initialData,
+        isSuccess: !!resolvedInitialData,
+        // updatedAt: resolvedInitialData ? Date.now() : undefined,
+        isFetched: false,
       },
       { silent: true },
     );
@@ -75,8 +94,8 @@ export function usePaginatedQuery<
 
   const subscribe = useCallback(
     (onChange: () => void) =>
-      queryClient.subscribe(queryKey, onChange, opts?.gcTime),
-    [queryClient, queryKey, opts?.gcTime],
+      queryClient.subscribe(queryKey, onChange, opts.gcTime),
+    [queryClient, queryKey, opts.gcTime],
   );
   const getSnapshot = useCallback(
     () => queryClient.getQueryState(queryKey)!,
@@ -84,7 +103,10 @@ export function usePaginatedQuery<
   );
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const data = (state.data as InfData<TPage>) || { pages: [], pageParams: [] };
+  const data = (state.data as InfData<TPage, TFullPage>) || {
+    pages: [],
+    pageParams: [],
+  };
   const pages = data.pages;
   const pageParams = data.pageParams;
 
@@ -95,22 +117,22 @@ export function usePaginatedQuery<
   const hasNext =
     pages.length > 0
       ? !!(
-          getNextPageParam?.(pages[pages.length - 1]) ??
+          getNextPageParam?.(pages[pages.length - 1], pages) ??
           pages[pages.length - 1]?.nextCursor
         )
       : false;
   const hasPrevious = pages.length > 1 || !!pageParams[0];
 
   const fetchPage = useCallback(
-    async (cursor?: string | number): Promise<InfiniteQueryPage<TPage>> => {
+    async (cursor?: string | number): Promise<TFullPage> => {
       const fetcher = async () =>
         await callbacksRef.current.proc({
           ...callbacksRef.current.initialInput,
           cursor,
-        } as WithoutCursor<TInput>);
+        } as TInput);
 
       const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
-      let resultTuple: [InfiniteQueryPage<TPage>, null] | [null, ErrorResponse];
+      let resultTuple: [TFullPage, null] | [null, ErrorResponse];
 
       if (!queryKey.startsWith("__local__")) {
         resultTuple = await globalRequestManager.fetch(subKey, fetcher);
@@ -121,7 +143,7 @@ export function usePaginatedQuery<
       const [result, err] = resultTuple;
 
       if (err) throw err;
-      return result as InfiniteQueryPage<TPage>;
+      return result as TFullPage;
     },
     [queryKey],
   );
@@ -131,7 +153,8 @@ export function usePaginatedQuery<
     queryClient.setQueryState(queryKey, { isFetching: true });
 
     const lastPage = pages[pages.length - 1];
-    const nextCursor = getNextPageParam?.(lastPage) ?? lastPage?.nextCursor;
+    const nextCursor =
+      getNextPageParam?.(lastPage, pages) ?? lastPage?.nextCursor;
 
     if (!nextCursor || fetchedCursorsRef.current.has(nextCursor)) {
       queryClient.setQueryState(queryKey, { isFetching: false });
@@ -165,16 +188,20 @@ export function usePaginatedQuery<
         isSuccess: true,
         error: undefined,
         updatedAt: Date.now(),
+        isFetched: true,
       });
       callbacksRef.current.onSuccess?.(newData);
       callbacksRef.current.onSettled?.();
       return newPage;
     } catch (err) {
+      const errorRes = err as ErrorResponse;
       queryClient.setQueryState(queryKey, {
         isFetching: false,
-        error: err as ErrorResponse,
+        error: errorRes,
         isError: true,
+        isFetched: true,
       });
+      callbacksRef.current.onError?.(errorRes);
       callbacksRef.current.onSettled?.();
       return undefined;
     }
@@ -231,16 +258,20 @@ export function usePaginatedQuery<
         isSuccess: true,
         error: undefined,
         updatedAt: Date.now(),
+        isFetched: true,
       });
       callbacksRef.current.onSuccess?.(newData);
       callbacksRef.current.onSettled?.();
       return newPage;
     } catch (err) {
+      const errorRes = err as ErrorResponse;
       queryClient.setQueryState(queryKey, {
         isFetching: false,
-        error: err as ErrorResponse,
+        error: errorRes,
         isError: true,
+        isFetched: true,
       });
+      callbacksRef.current.onError?.(errorRes);
       callbacksRef.current.onSettled?.();
       return undefined;
     }
@@ -278,32 +309,304 @@ export function usePaginatedQuery<
         isError: false,
         isSuccess: true,
         updatedAt: Date.now(),
+        isFetched: true,
       });
       callbacksRef.current.onSuccess?.(newData);
     } catch (err) {
+      const errorRes = err as ErrorResponse;
       queryClient.setQueryState(queryKey, {
-        error: err as ErrorResponse,
+        error: errorRes,
         isError: true,
         isFetching: false,
+        isFetched: true,
       });
+      callbacksRef.current.onError?.(errorRes);
     } finally {
       callbacksRef.current.onSettled?.();
     }
   }, [fetchPage, initialPageParam, queryClient, queryKey]);
 
   const reset = useCallback(() => {
+    const initData = callbacksRef.current.initialData;
+    const resolvedInitData =
+      typeof initData === "function" ? initData() : initData;
     queryClient.setQueryState(queryKey, {
-      data: initialData || {
+      data: resolvedInitData || {
         pages: [],
         pageParams: [initialPageParam].filter(Boolean),
       },
       isFetching: false,
       error: undefined,
       isError: false,
-      isSuccess: !!initialData,
+      isSuccess: !!resolvedInitData,
+      // updatedAt: resolvedInitData ? Date.now() : undefined,
+      isFetched: false,
     });
     fetchedCursorsRef.current.clear();
-  }, [initialData, initialPageParam, queryClient, queryKey]);
+  }, [initialPageParam, queryClient, queryKey]);
+
+  const snapshot = useCallback(() => {
+    const currentState = queryClient.getQueryState(queryKey);
+    const savedData = currentState?.data;
+    return () => {
+      queryClient.setQueryState(queryKey, {
+        data: savedData,
+      });
+    };
+  }, [queryClient, queryKey]);
+
+  const removeItem = useCallback(
+    (arg: number | ((item: TPage) => boolean)) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      if (!currentState || !currentState.data) return rollback;
+
+      const oldPages = (currentState.data as any).pages as TFullPage[];
+      let newPages: TFullPage[] = [];
+
+      if (typeof arg === "number") {
+        let targetIndex = arg;
+        let removed = false;
+
+        newPages = oldPages.map((page) => {
+          if (removed) return page;
+          const pageLength = page.data.length;
+          if (targetIndex < pageLength) {
+            const newData = [...page.data];
+            newData.splice(targetIndex, 1);
+            removed = true;
+            return { ...page, data: newData };
+          }
+          targetIndex -= pageLength;
+          return page;
+        });
+      } else if (typeof arg === "function") {
+        newPages = oldPages.map((page) => {
+          const newData = page.data.filter((item) => !arg(item));
+          return { ...page, data: newData };
+        });
+      }
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState.data as any),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey],
+  );
+
+  const updateItem = useCallback(
+    (
+      arg: number | ((item: TPage) => boolean),
+      updater: TPage | ((item: TPage) => TPage),
+    ) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      if (!currentState || !currentState.data) return rollback;
+
+      const oldPages = (currentState.data as any).pages as TFullPage[];
+      let newPages: TFullPage[] = [];
+
+      const resolveUpdater = (item: TPage): TPage => {
+        return typeof updater === "function"
+          ? (updater as (item: TPage) => TPage)(item)
+          : updater;
+      };
+
+      if (typeof arg === "number") {
+        let targetIndex = arg;
+        let updated = false;
+
+        newPages = oldPages.map((page) => {
+          if (updated) return page;
+          const pageLength = page.data.length;
+          if (targetIndex < pageLength) {
+            const newData = [...page.data];
+            newData[targetIndex] = resolveUpdater(newData[targetIndex]);
+            updated = true;
+            return { ...page, data: newData };
+          }
+          targetIndex -= pageLength;
+          return page;
+        });
+      } else if (typeof arg === "function") {
+        newPages = oldPages.map((page) => {
+          const newData = page.data.map((item) => {
+            if (arg(item)) {
+              return resolveUpdater(item);
+            }
+            return item;
+          });
+          return { ...page, data: newData };
+        });
+      }
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState.data as any),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey],
+  );
+
+  const prependItem = useCallback(
+    (item: TPage) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      const oldPages = (currentState?.data as any)?.pages as TFullPage[] || [];
+      let newPages: TFullPage[] = [];
+
+      if (oldPages.length === 0) {
+        newPages = [{ data: [item], nextCursor: null, hasMore: false } as any];
+      } else {
+        newPages = oldPages.map((page, idx) => {
+          if (idx === 0) {
+            return { ...page, data: [item, ...page.data] };
+          }
+          return page;
+        });
+      }
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState?.data as any || { pageParams: [] }),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey],
+  );
+
+  const appendItem = useCallback(
+    (item: TPage) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      const oldPages = (currentState?.data as any)?.pages as TFullPage[] || [];
+      let newPages: TFullPage[] = [];
+
+      if (oldPages.length === 0) {
+        newPages = [{ data: [item], nextCursor: null, hasMore: false } as any];
+      } else {
+        newPages = oldPages.map((page, idx) => {
+          if (idx === oldPages.length - 1) {
+            return { ...page, data: [...page.data, item] };
+          }
+          return page;
+        });
+      }
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState?.data as any || { pageParams: [] }),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey],
+  );
+
+  const insertItem = useCallback(
+    (index: number, item: TPage) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      const oldPages = (currentState?.data as any)?.pages as TFullPage[] || [];
+      let newPages: TFullPage[] = [];
+
+      if (oldPages.length === 0 || index <= 0) {
+        prependItem(item);
+        return rollback;
+      }
+
+      let targetIndex = index;
+      let inserted = false;
+      const totalLength = oldPages.reduce((acc, p) => acc + p.data.length, 0);
+
+      if (targetIndex >= totalLength) {
+        appendItem(item);
+        return rollback;
+      }
+
+      newPages = oldPages.map((page) => {
+        if (inserted) return page;
+        const pageLength = page.data.length;
+        if (targetIndex < pageLength) {
+          const newData = [...page.data];
+          newData.splice(targetIndex, 0, item);
+          inserted = true;
+          return { ...page, data: newData };
+        }
+        targetIndex -= pageLength;
+        return page;
+      });
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState?.data as any || { pageParams: [] }),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey, prependItem, appendItem],
+  );
+
+  const setPages = useCallback(
+    (updater: (oldPages: TFullPage[]) => TFullPage[]) => {
+      const currentState = queryClient.getQueryState(queryKey);
+      const previousData = currentState?.data;
+      const rollback = () => {
+        queryClient.setQueryState(queryKey, { data: previousData });
+      };
+
+      if (!currentState || !currentState.data) return rollback;
+
+      const oldPages = (currentState.data as any).pages as TFullPage[];
+      const newPages = updater(oldPages);
+
+      queryClient.setQueryState(queryKey, {
+        data: {
+          ...(currentState.data as any),
+          pages: newPages,
+        },
+      });
+
+      return rollback;
+    },
+    [queryClient, queryKey],
+  );
 
   useEffect(() => {
     if (enabled === false) return;
@@ -314,7 +617,7 @@ export function usePaginatedQuery<
     });
 
     const currentState = queryClient.getQueryState(queryKey);
-    const staleTime = opts?.staleTime ?? 0;
+    const staleTime = parseWindow(opts.staleTime);
     let shouldFetch = true;
     if (currentState?.isSuccess && currentState?.updatedAt) {
       if (Date.now() - currentState.updatedAt < staleTime) {
@@ -322,22 +625,19 @@ export function usePaginatedQuery<
       }
     }
 
-    if (pages.length === 0 && !initialData) {
+    if (pages.length === 0) {
       shouldFetch = true;
     }
 
     if (shouldFetch) refetch();
 
     return unsubscribe;
-  }, [
-    enabled,
-    queryClient,
-    queryKey,
-    refetch,
-    opts?.staleTime,
-    pages.length,
-    initialData,
-  ]);
+  }, [enabled, queryClient, queryKey, refetch, opts?.staleTime, pages.length]);
+
+  // Clear fetched cursors when queryKey changes
+  useEffect(() => {
+    fetchedCursorsRef.current.clear();
+  }, [queryKey]);
 
   // Refetch interval
   useEffect(() => {
@@ -367,7 +667,7 @@ export function usePaginatedQuery<
     const handleOnline = () => {
       if (enabled === false) return;
       const currentState = queryClient.getQueryState(queryKey);
-      const staleTime = opts?.staleTime ?? 0;
+      const staleTime = parseWindow(opts.staleTime);
       if (
         refetchOnReconnect === "always" ||
         !currentState?.updatedAt ||
@@ -393,6 +693,10 @@ export function usePaginatedQuery<
     };
   }, []);
 
+  const isRefetching = state.isFetching && pages.length > 0;
+
+  const isEmpty = state.isFetched && flattenedData.length === 0;
+
   return {
     data: flattenedData,
     pages,
@@ -402,10 +706,20 @@ export function usePaginatedQuery<
     hasNext,
     hasPrevious,
     isFetching: state.isFetching,
+    isRefetching,
     isError: state.isError,
     isSuccess: state.isSuccess,
     error: state.error,
+    isFetched: state.isFetched,
+    isEmpty,
     refetch,
     reset,
+    removeItem,
+    updateItem,
+    prependItem,
+    appendItem,
+    insertItem,
+    setPages,
+    snapshot,
   };
 }

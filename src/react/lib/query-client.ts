@@ -1,4 +1,6 @@
 import { globalRequestManager } from "./request-manager.js";
+import type { WindowTime } from "../../types/misc.js";
+import { parseWindow } from "../../lib/utils.js";
 
 export type QueryState<TData = any, TError = any> = {
   data: TData | undefined;
@@ -7,6 +9,7 @@ export type QueryState<TData = any, TError = any> = {
   isError: boolean;
   isSuccess: boolean;
   updatedAt: number;
+  isFetched: boolean;
 };
 
 export class QueryClient {
@@ -33,6 +36,7 @@ export class QueryClient {
       isError: false,
       isSuccess: false,
       updatedAt: 0,
+      isFetched: false,
     };
 
     const newState = { ...existing, ...state };
@@ -43,7 +47,7 @@ export class QueryClient {
     }
   }
 
-  subscribe(queryKey: string, listener: () => void, gcTime: number = 300000) {
+  subscribe(queryKey: string, listener: () => void, gcTime?: WindowTime) {
     if (!this.listeners.has(queryKey)) {
       this.listeners.set(queryKey, new Set());
     }
@@ -55,6 +59,8 @@ export class QueryClient {
       clearTimeout(existingGc);
       this.gcTimers.delete(queryKey);
     }
+
+    const gcMs = gcTime !== undefined ? parseWindow(gcTime) : 300000;
 
     return () => {
       const set = this.listeners.get(queryKey);
@@ -68,7 +74,7 @@ export class QueryClient {
             this.cache.delete(queryKey);
             this.gcTimers.delete(queryKey);
             this.invalidateListeners.delete(queryKey);
-          }, gcTime);
+          }, gcMs);
           this.gcTimers.set(queryKey, timer);
         }
       }
@@ -99,7 +105,7 @@ export class QueryClient {
     };
   }
 
-  invalidateQueries<T extends unknown>(queryKeyArr: T | T[]) {
+  invalidate<T extends unknown>(queryKeyArr: T | T[]) {
     const prefix = Array.isArray(queryKeyArr)
       ? queryKeyArr.map(String).join("|")
       : String(queryKeyArr);
@@ -172,12 +178,14 @@ export class QueryClient {
         isSuccess: true,
         isFetching: false,
         updatedAt: Date.now(),
+        isFetched: true,
       });
     } else {
       this.setQueryState(queryKey, {
         error: err,
         isError: true,
         isFetching: false,
+        isFetched: true,
       });
     }
   }

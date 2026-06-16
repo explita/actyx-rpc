@@ -21,10 +21,10 @@ export const getPosts = procedure
   .input(
     zodResolver(
       z.object({
-        limit: z.number().min(1).max(20).default(5),
+        limit: z.number().min(1).max(20).default(5).optional(),
         cursor: z.string().optional(),
-      })
-    )
+      }),
+    ),
   )
   .query(async ({ input }) => {
     // Artificial delay to simulate network latency
@@ -32,7 +32,7 @@ export const getPosts = procedure
 
     // Parse the cursor (defaults to 0 for the first page)
     const startIndex = input.cursor ? parseInt(input.cursor, 10) : 0;
-    const endIndex = startIndex + input.limit;
+    const endIndex = startIndex + (input.limit || 5);
 
     // Slice the data for the current page
     const data = allPosts.slice(startIndex, endIndex);

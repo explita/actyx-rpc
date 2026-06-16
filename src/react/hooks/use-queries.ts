@@ -9,6 +9,7 @@ import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { QueriesResults, UseQueriesQueryConfig } from "../types.js";
 import { ErrorResponse } from "../../types/misc.js";
+import { parseWindow } from "../../lib/utils.js";
 
 export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
   queries: T,
@@ -41,14 +42,18 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
   queries.forEach((q, index) => {
     const queryKey = stableKeys[index];
     if (!queryClient.getQueryState(queryKey)) {
+      const resolvedInitialData =
+        typeof q.initialData === "function" ? q.initialData() : q.initialData;
       queryClient.setQueryState(
         queryKey,
         {
-          data: q.initialData,
+          data: resolvedInitialData,
           error: undefined,
           isFetching: false,
           isError: false,
-          isSuccess: q.initialData !== undefined,
+          isSuccess: resolvedInitialData !== undefined,
+          updatedAt: resolvedInitialData !== undefined ? Date.now() : undefined,
+          isFetched: false,
         },
         { silent: true },
       );
@@ -83,7 +88,7 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
       if (q.enabled === false) return;
 
       const state = queryClient.getQueryState(queryKey);
-      const staleTime = q.staleTime ?? 0;
+      const staleTime = parseWindow(q.staleTime);
       const refetchOnMount = q.refetchOnMount ?? true;
 
       let shouldFetch = true;
@@ -115,12 +120,16 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
       const [result, err] = resultTuple;
 
       if (err) {
+        const initData = configsRef.current[index].initialData;
+        const resolvedInitData =
+          typeof initData === "function" ? initData() : initData;
         queryClient.setQueryState(queryKey, {
           error: err,
           isError: true,
           isSuccess: false,
           isFetching: false,
-          data: q.initialData,
+          data: resolvedInitData,
+          isFetched: true,
         });
         q.onError?.(err);
       } else {
@@ -139,6 +148,7 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
           isSuccess: true,
           isFetching: false,
           updatedAt: Date.now(),
+          isFetched: true,
         });
 
         const finalData = q.select ? q.select(unwrapped) : unwrapped;
@@ -184,6 +194,7 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
             isSuccess: false,
             isFetching: false,
             data: configsRef.current[index].initialData,
+            isFetched: true,
           });
           configsRef.current[index].onError?.(err);
           configsRef.current[index].onSettled?.(null, err);
@@ -203,6 +214,7 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
             isSuccess: true,
             isFetching: false,
             updatedAt: Date.now(),
+            isFetched: true,
           });
           const finalData = configsRef.current[index].select
             ? configsRef.current[index].select!(unwrapped)
@@ -214,12 +226,17 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
       };
 
       const reset = () => {
+        const initData = configsRef.current[index].initialData;
+        const resolvedInitData =
+          typeof initData === "function" ? initData() : initData;
         queryClient.setQueryState(queryKey, {
-          data: configsRef.current[index].initialData,
+          data: resolvedInitData,
           error: undefined,
           isFetching: false,
           isError: false,
-          isSuccess: configsRef.current[index].initialData !== undefined,
+          isSuccess: resolvedInitData !== undefined,
+          updatedAt: resolvedInitData !== undefined ? Date.now() : undefined,
+          isFetched: false,
         });
       };
 
@@ -228,12 +245,20 @@ export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
       const selectedData =
         data !== undefined && q?.select ? q.select(data) : data;
 
+      const isEmpty =
+        state.isFetched &&
+        (selectedData === null ||
+          selectedData === undefined ||
+          (Array.isArray(selectedData) && selectedData.length === 0));
+
       return {
         error: state.error,
         isFetching: state.isFetching,
         isRefetching,
         isError: state.isError,
         isSuccess: state.isSuccess,
+        isFetched: state.isFetched,
+        isEmpty,
         refetch,
         reset,
         data: selectedData,

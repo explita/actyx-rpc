@@ -13,7 +13,7 @@ export * from "./lib/query-client.js";
 export type {
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
-  UseInfiniteQueryReturn,
+  InfiniteQueryResult,
   UseMutationOpts,
   MutationStatus,
   QueryResult,
