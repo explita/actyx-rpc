@@ -1,8 +1,9 @@
 import React from "react";
-import { Layout, Navbar, Footer } from "nextra-theme-docs";
+import { Layout, Navbar } from "nextra-theme-docs";
 import { getPageMap } from "nextra/page-map";
 import "nextra-theme-docs/style.css";
 import { Logo } from "@/components/logo";
+import { Footer } from "@/components/footer";
 
 export default async function DocsLayout({
   children,
@@ -57,14 +58,7 @@ export default async function DocsLayout({
           projectLink="https://github.com/explita/actyx-rpc"
         />
       }
-      footer={
-        <Footer>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            © {new Date().getFullYear()} @explita/actyx-rpc. Built with Nextra &
-            Tailwind CSS.
-          </p>
-        </Footer>
-      }
+      footer={<Footer />}
       docsRepositoryBase="https://github.com/explita/actyx-rpc"
       editLink={null}
       sidebar={{ defaultMenuCollapseLevel: 1 }}

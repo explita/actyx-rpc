@@ -12,6 +12,27 @@ import {
   Server,
   Clock,
 } from "lucide-react";
+import { CopyButton } from "../copy-button";
+
+const demoCodeString = `import { createProcedure } from "@explita/actyx-rpc";
+import { z } from "zod";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
+
+const procedure = createProcedure({
+  createContext: () => ({ ok: true, ctx: { db, auth } }),
+});
+
+export const ping = procedure.query(async ({ ctx, input }) => ({
+  message: "pong",
+  serverTime: new Date().toISOString(),
+}));
+
+export const greet = procedure
+  .input(zodResolver(z.object({ name: z.string().min(1) })))
+  .query(async ({ input }) => ({
+    greeting: \`Hello, \${input.name}!\`,
+    serverTime: new Date().toISOString(),
+  }));`;
 
 export function LiveDemo() {
   const isMutating = useIsMutating();
@@ -65,9 +86,12 @@ export function LiveDemo() {
                 procedures.ts
               </span>
             </div>
-            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-mono">
-              TypeScript
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider font-mono">
+                TypeScript
+              </span>
+              <CopyButton text={demoCodeString} />
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto text-left select-none nextra-scrollbar bg-slate-950 text-slate-300 p-4 font-mono text-[13px] leading-relaxed whitespace-pre">

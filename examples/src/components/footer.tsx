@@ -1,9 +1,6 @@
-"use client";
-
-import React from "react";
 import { Package } from "lucide-react";
 
-export function LandingFooter() {
+export function Footer() {
   return (
     <footer className="w-full py-10 px-4 mt-auto border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/20">
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-semibold text-slate-500 dark:text-slate-400">
