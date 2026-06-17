@@ -13,17 +13,16 @@ import { useQueryClient } from "../provider.js";
 import { QueryState } from "../lib/query-client.js";
 import { parseWindow } from "../../lib/utils.js";
 
+type QueryData<T> = Omit<T, "success"> | (() => Omit<T, "success">);
+
 export function useQuery<
   TOutput,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
-  TInitialData extends
-    | Omit<Unwrap<TOutput, TUnwrap>, "success">
-    | (() => Omit<Unwrap<TOutput, TUnwrap>, "success">) = Omit<
-    Unwrap<TOutput, TUnwrap>,
-    "success"
-  >,
   TSelectData = Unwrap<TOutput, TUnwrap>,
+  TInitialData extends QueryData<Unwrap<TOutput, TUnwrap>> = QueryData<
+    Unwrap<TOutput, TUnwrap>
+  >,
 >(
   proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
   opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {

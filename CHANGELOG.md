@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 ### Added
 
 - **Cache Mutation & Optimistic UI Updates**: Added built-in cache mutation utility functions to `useInfiniteQuery` and `usePaginatedQuery` hook returns:
-  - `removeItem(index | filterFunc)`: Removes items from cached pages.
-  - `updateItem(index | filterFunc, updatedItem | updaterFunc)`: Updates specific items within cached pages and returns an automatic state rollback function.
-  - `prependItem(item)`, `appendItem(item)`, and `insertItem(index, item)`: Inserts new items into pages with automatic state rollback functions.
+  - `remove(index | filterFunc)`: Removes items from cached pages.
+  - `update(index | filterFunc, updatedItem | updaterFunc)`: Updates specific items within cached pages and returns an automatic state rollback function.
+  - `prepend(item)`, `append(item)`, and `insert(index, item)`: Inserts new items into pages with automatic state rollback functions.
   - `setPages(updaterFunc)`: Provides direct callback access to modify pages cache with state rollback.
 - **New Query Status Flags**: Added `isRefetching` (fetches in progress on existing cache), `isFetched` (fetching has completed at least once), and `isEmpty` (lists completed fetching and yielded empty results) indicators to all pagination-aware queries.
 - **Human-Readable Window Durations**: Added support for duration strings like `"10s"`, `"1m"`, `"1h"`, etc., in caching/staling configs (`staleTime`, `gcTime`) using the new `WindowTime` type.

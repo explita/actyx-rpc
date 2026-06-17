@@ -1,0 +1,8 @@
+{
+  "label": "React Hooks",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "description": "Utilize Actyx RPC reactive client-side hooks, caching, mutations, and optimistic rollbacks."
+  }
+}

@@ -90,7 +90,7 @@
   "scripts": {
     "clean": "rimraf dist",
     "copy-dist": "node scripts/copy-dist.js",
-    "build": "npm run clean && tsc && npm run copy-dist",
+    "build": "node scripts/gen-version.js && npm run clean && tsc && npm run copy-dist",
     "dev": "tsc --watch",
     "test": "vitest run",
     "prepublishOnly": "npm run build"

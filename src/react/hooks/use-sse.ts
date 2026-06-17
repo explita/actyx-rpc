@@ -3,9 +3,7 @@ import { SSEClient } from "../../client/sse.js";
 import type { ErrorResponse } from "../../types/misc.js";
 import type { UseSSEOptions, UseSSEReturn } from "../types.js";
 
-export function useSSE<T = any>(
-  options: UseSSEOptions<T>,
-): UseSSEReturn<T> {
+export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
   const {
     url,
     params,
@@ -15,6 +13,7 @@ export function useSSE<T = any>(
     maxHistory,
     onData,
     onError,
+    arrange,
   } = options;
 
   const [data, setData] = useState<T[]>([]);
@@ -94,9 +93,11 @@ export function useSSE<T = any>(
           setData((prev) => {
             const next = [...prev, sseEvent.data];
             if (maxHistory !== undefined && next.length > maxHistory) {
-              return next.slice(-maxHistory);
+              return arrange
+                ? arrange(next.slice(-maxHistory))
+                : next.slice(-maxHistory);
             }
-            return next;
+            return arrange ? arrange(next) : next;
           });
 
           onData?.(sseEvent.data, sseEvent.event);
@@ -130,7 +131,17 @@ export function useSSE<T = any>(
       }
       close();
     };
-  }, [url, paramsStr, headersStr, enabled, signal, maxHistory, close, onData, onError]);
+  }, [
+    url,
+    paramsStr,
+    headersStr,
+    enabled,
+    signal,
+    maxHistory,
+    close,
+    onData,
+    onError,
+  ]);
 
   return {
     data,

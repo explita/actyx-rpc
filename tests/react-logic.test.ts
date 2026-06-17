@@ -39,7 +39,10 @@ describe("RPC Hook Unwrapping Logic", () => {
   });
 });
 
-function mockRemoveItem(oldPages: any[], arg: number | ((item: any) => boolean)) {
+function mockRemove(oldPages: any[], arg: number | ((item: any) => boolean)) {
+  if (oldPages.some(page => !Array.isArray(page?.data))) {
+    return oldPages;
+  }
   let newPages = [];
   if (typeof arg === "number") {
     let targetIndex = arg;
@@ -66,7 +69,7 @@ function mockRemoveItem(oldPages: any[], arg: number | ((item: any) => boolean))
   return newPages;
 }
 
-describe("removeItem Cache Logic", () => {
+describe("remove Cache Logic", () => {
   const setupPages = () => [
     { data: ["a", "b", "c"], nextCursor: 2 },
     { data: ["d", "e"], nextCursor: 3 },
@@ -74,21 +77,21 @@ describe("removeItem Cache Logic", () => {
 
   it("should remove item by index from the first page", () => {
     const pages = setupPages();
-    const result = mockRemoveItem(pages, 1); // removes 'b'
+    const result = mockRemove(pages, 1); // removes 'b'
     expect(result[0].data).toEqual(["a", "c"]);
     expect(result[1].data).toEqual(["d", "e"]);
   });
 
   it("should remove item by index from a subsequent page", () => {
     const pages = setupPages();
-    const result = mockRemoveItem(pages, 3); // index 3 is 'd'
+    const result = mockRemove(pages, 3); // index 3 is 'd'
     expect(result[0].data).toEqual(["a", "b", "c"]);
     expect(result[1].data).toEqual(["e"]);
   });
 
   it("should do nothing if index is out of bounds", () => {
     const pages = setupPages();
-    const result = mockRemoveItem(pages, 10);
+    const result = mockRemove(pages, 10);
     expect(result).toEqual(pages);
   });
 
@@ -97,17 +100,28 @@ describe("removeItem Cache Logic", () => {
       { data: [{ id: 1, val: "a" }, { id: 2, val: "b" }] },
       { data: [{ id: 3, val: "c" }, { id: 1, val: "d" }] },
     ];
-    const result = mockRemoveItem(pages, (item) => item.id === 1);
+    const result = mockRemove(pages, (item) => item.id === 1);
     expect(result[0].data).toEqual([{ id: 2, val: "b" }]);
     expect(result[1].data).toEqual([{ id: 3, val: "c" }]);
   });
+
+  it("should discard remove if data is not an array", () => {
+    const pages = [
+      { data: { id: 1, val: "a" } },
+    ];
+    const result = mockRemove(pages, 0);
+    expect(result).toEqual(pages);
+  });
 });
 
-function mockUpdateItem(
+function mockUpdate(
   oldPages: any[],
   arg: number | ((item: any) => boolean),
   updater: any | ((item: any) => any),
 ) {
+  if (oldPages.some(page => !Array.isArray(page?.data))) {
+    return oldPages;
+  }
   let newPages = [];
 
   const resolveUpdater = (item: any): any => {
@@ -144,7 +158,7 @@ function mockUpdateItem(
   return newPages;
 }
 
-describe("updateItem Cache Logic", () => {
+describe("update Cache Logic", () => {
   const setupPages = () => [
     { data: ["a", "b", "c"] },
     { data: ["d", "e"] },
@@ -152,14 +166,14 @@ describe("updateItem Cache Logic", () => {
 
   it("should update item by index in the first page", () => {
     const pages = setupPages();
-    const result = mockUpdateItem(pages, 1, "z");
+    const result = mockUpdate(pages, 1, "z");
     expect(result[0].data).toEqual(["a", "z", "c"]);
     expect(result[1].data).toEqual(["d", "e"]);
   });
 
   it("should update item by index in a subsequent page", () => {
     const pages = setupPages();
-    const result = mockUpdateItem(pages, 3, "z");
+    const result = mockUpdate(pages, 3, "z");
     expect(result[0].data).toEqual(["a", "b", "c"]);
     expect(result[1].data).toEqual(["z", "e"]);
   });
@@ -169,7 +183,7 @@ describe("updateItem Cache Logic", () => {
       { data: [{ id: 1, val: "a" }, { id: 2, val: "b" }] },
       { data: [{ id: 3, val: "c" }, { id: 1, val: "d" }] },
     ];
-    const result = mockUpdateItem(
+    const result = mockUpdate(
       pages,
       (item) => item.id === 1,
       (item) => ({ ...item, val: item.val.toUpperCase() }),
@@ -177,35 +191,54 @@ describe("updateItem Cache Logic", () => {
     expect(result[0].data).toEqual([{ id: 1, val: "A" }, { id: 2, val: "b" }]);
     expect(result[1].data).toEqual([{ id: 3, val: "c" }, { id: 1, val: "D" }]);
   });
+
+  it("should discard update if data is not an array", () => {
+    const pages = [
+      { data: { id: 1, val: "a" } },
+    ];
+    const result = mockUpdate(pages, 0, "z");
+    expect(result).toEqual(pages);
+  });
 });
 
-function mockPrependItem(oldPages: any[], item: any) {
+function mockPrepend(oldPages: any[], item: any) {
   if (oldPages.length === 0) {
     return [{ data: [item], nextCursor: null, hasMore: false }];
   }
   return oldPages.map((page, idx) => {
     if (idx === 0) {
-      return { ...page, data: [item, ...page.data] };
+      if (page.data && typeof page.data === "object" && !Array.isArray(page.data)) {
+        return { ...page, data: { ...item, ...page.data } };
+      }
+      const arr = Array.isArray(page.data) ? page.data : [];
+      return { ...page, data: [item, ...arr] };
     }
     return page;
   });
 }
 
-function mockAppendItem(oldPages: any[], item: any) {
+function mockAppend(oldPages: any[], item: any) {
   if (oldPages.length === 0) {
     return [{ data: [item], nextCursor: null, hasMore: false }];
   }
   return oldPages.map((page, idx) => {
     if (idx === oldPages.length - 1) {
-      return { ...page, data: [...page.data, item] };
+      if (page.data && typeof page.data === "object" && !Array.isArray(page.data)) {
+        return { ...page, data: { ...page.data, ...item } };
+      }
+      const arr = Array.isArray(page.data) ? page.data : [];
+      return { ...page, data: [...arr, item] };
     }
     return page;
   });
 }
 
-function mockInsertItem(oldPages: any[], index: number, item: any) {
+function mockInsert(oldPages: any[], index: number, item: any) {
+  if (oldPages.length > 0 && oldPages.some(page => !Array.isArray(page?.data))) {
+    return oldPages;
+  }
   if (oldPages.length === 0 || index <= 0) {
-    return mockPrependItem(oldPages, item);
+    return mockPrepend(oldPages, item);
   }
 
   let targetIndex = index;
@@ -213,7 +246,7 @@ function mockInsertItem(oldPages: any[], index: number, item: any) {
   const totalLength = oldPages.reduce((acc, p) => acc + p.data.length, 0);
 
   if (targetIndex >= totalLength) {
-    return mockAppendItem(oldPages, item);
+    return mockAppend(oldPages, item);
   }
 
   return oldPages.map((page) => {
@@ -237,54 +270,78 @@ describe("Prepend, Append, and Insert Cache Logic", () => {
   ];
 
   it("should prepend item to empty pages list", () => {
-    const result = mockPrependItem([], "x");
+    const result = mockPrepend([], "x");
     expect(result[0].data).toEqual(["x"]);
   });
 
   it("should prepend item to existing pages", () => {
     const pages = setupPages();
-    const result = mockPrependItem(pages, "x");
+    const result = mockPrepend(pages, "x");
     expect(result[0].data).toEqual(["x", "a", "b"]);
     expect(result[1].data).toEqual(["c", "d"]);
   });
 
+  it("should prepend item when page data is an object (spread merge)", () => {
+    const pages = [{ data: { b: 2, c: 3 } }];
+    const result = mockPrepend(pages, { a: 1, b: 99 });
+    expect(result[0].data).toEqual({ a: 1, b: 2, c: 3 }); // prepended 'a', b: 2 overrides b: 99 because of `{ ...item, ...page.data }`
+  });
+
   it("should append item to empty pages list", () => {
-    const result = mockAppendItem([], "x");
+    const result = mockAppend([], "x");
     expect(result[0].data).toEqual(["x"]);
   });
 
   it("should append item to existing pages", () => {
     const pages = setupPages();
-    const result = mockAppendItem(pages, "x");
+    const result = mockAppend(pages, "x");
     expect(result[0].data).toEqual(["a", "b"]);
     expect(result[1].data).toEqual(["c", "d", "x"]);
   });
 
+  it("should append item when page data is an object (spread merge)", () => {
+    const pages = [{ data: { a: 1, b: 2 } }];
+    const result = mockAppend(pages, { b: 99, c: 3 });
+    expect(result[0].data).toEqual({ a: 1, b: 99, c: 3 }); // appended 'c', b: 99 overrides b: 2 because of `{ ...page.data, ...item }`
+  });
+
   it("should insert item at start (index 0) by prepending", () => {
     const pages = setupPages();
-    const result = mockInsertItem(pages, 0, "x");
+    const result = mockInsert(pages, 0, "x");
     expect(result[0].data).toEqual(["x", "a", "b"]);
   });
 
   it("should insert item in the middle of a page", () => {
     const pages = setupPages();
-    const result = mockInsertItem(pages, 1, "x"); // index 1 is between a and b
+    const result = mockInsert(pages, 1, "x"); // index 1 is between a and b
     expect(result[0].data).toEqual(["a", "x", "b"]);
     expect(result[1].data).toEqual(["c", "d"]);
   });
 
   it("should insert item at page boundaries", () => {
     const pages = setupPages();
-    const result = mockInsertItem(pages, 2, "x"); // index 2 is at start of page 2
+    const result = mockInsert(pages, 2, "x"); // index 2 is at start of page 2
     expect(result[0].data).toEqual(["a", "b"]);
     expect(result[1].data).toEqual(["x", "c", "d"]);
   });
 
   it("should insert item at the end of the pages (append)", () => {
     const pages = setupPages();
-    const result = mockInsertItem(pages, 4, "x"); // index 4 is out of bounds (end)
+    const result = mockInsert(pages, 4, "x"); // index 4 is out of bounds (end)
     expect(result[0].data).toEqual(["a", "b"]);
     expect(result[1].data).toEqual(["c", "d", "x"]);
+  });
+
+  it("should discard insert if data is not an array", () => {
+    const pages = [{ data: { a: 1 } }];
+    const result = mockInsert(pages, 1, { b: 2 });
+    expect(result).toEqual(pages);
+  });
+
+  it("should discard insert at index 0 if data is not an array", () => {
+    const pages = [{ data: { a: 1 } }];
+    const result = mockInsert(pages, 0, { b: 2 });
+    expect(result).toEqual(pages);
   });
 
   it("should update pages using setPages updater", () => {
@@ -307,18 +364,18 @@ describe("Optimistic Update & Rollback Cache Logic", () => {
       },
     };
 
-    const mockUpdateItemState = (arg: number, updater: any) => {
+    const mockUpdateState = (arg: number, updater: any) => {
       const previousPages = JSON.parse(JSON.stringify(mockState.data.pages));
       const rollback = () => {
         mockState.data.pages = previousPages;
       };
-      mockState.data.pages = mockUpdateItem(mockState.data.pages, arg, updater);
+      mockState.data.pages = mockUpdate(mockState.data.pages, arg, updater);
       return rollback;
     };
 
     expect(mockState.data.pages[0].data).toEqual(["a", "b"]);
 
-    const rollback = mockUpdateItemState(1, "x");
+    const rollback = mockUpdateState(1, "x");
     expect(mockState.data.pages[0].data).toEqual(["a", "x"]);
 
     rollback();
@@ -344,8 +401,8 @@ describe("Optimistic Update & Rollback Cache Logic", () => {
 
     const rollback = mockSnapshot();
 
-    mockState.data.pages = mockRemoveItem(mockState.data.pages, 1);
-    mockState.data.pages = mockPrependItem(mockState.data.pages, "x");
+    mockState.data.pages = mockRemove(mockState.data.pages, 1);
+    mockState.data.pages = mockPrepend(mockState.data.pages, "x");
 
     expect(mockState.data.pages[0].data).toEqual(["x", "a"]);
 

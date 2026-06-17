@@ -298,7 +298,7 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    *
    * Returns a rollback function to revert this update.
    */
-  removeItem: (arg: number | ((item: TPage) => boolean)) => () => void;
+  remove: (arg: number | ((item: TPage) => boolean)) => () => void;
 
   /**
    * Manually updates an item in the cached pages.
@@ -308,7 +308,7 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    *
    * Returns a rollback function to revert this update.
    */
-  updateItem: (
+  update: (
     arg: number | ((item: TPage) => boolean),
     updater: TPage | ((item: TPage) => TPage),
   ) => () => void;
@@ -318,21 +318,21 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    *
    * Returns a rollback function to revert this update.
    */
-  prependItem: (item: TPage) => () => void;
+  prepend: (item: TPage) => () => void;
 
   /**
    * Manually appends an item to the last page.
    *
    * Returns a rollback function to revert this update.
    */
-  appendItem: (item: TPage) => () => void;
+  append: (item: TPage) => () => void;
 
   /**
    * Manually inserts an item at a specific flattened index.
    *
    * Returns a rollback function to revert this update.
    */
-  insertItem: (index: number, item: TPage) => () => void;
+  insert: (index: number, item: TPage) => () => void;
 
   /**
    * Manually updates the cached pages structure using an updater function.
@@ -652,6 +652,13 @@ export type UseSSEOptions<T = any> = {
    * Callback triggered when a connection or event source error occurs.
    */
   onError?: (error: ErrorResponse) => void;
+
+  /**
+   * Optional callback to arrange the data array.
+   * @param data - The data array to arrange.
+   * @returns The arranged data array.
+   */
+  arrange?: (data: T[]) => T[];
 };
 
 /**

@@ -254,4 +254,427 @@ export class QueryClient {
   private notifyMutations() {
     this.mutationListeners.forEach((listener) => listener());
   }
+
+  private normalizeQueryKey(queryKeyArr: unknown[] | string): string {
+    if (typeof queryKeyArr === "string") return queryKeyArr;
+    return queryKeyArr.map(String).join("|");
+  }
+
+  prepend<T>(queryKeyArr: unknown[] | string, item: T): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const currentState = this.getQueryState(queryKey);
+    const previousData = currentState?.data;
+    const rollback = () => {
+      this.setQueryState(queryKey, { data: previousData });
+    };
+
+    if (!currentState || currentState.data === undefined) {
+      this.setQueryState(queryKey, {
+        data: [item],
+        isSuccess: true,
+        updatedAt: Date.now(),
+        isFetched: true,
+      });
+      return rollback;
+    }
+
+    const data = currentState.data;
+
+    if (
+      data &&
+      typeof data === "object" &&
+      "pages" in data &&
+      Array.isArray((data as any).pages)
+    ) {
+      const oldPages = (data as any).pages as any[];
+      let newPages: any[] = [];
+      if (oldPages.length === 0) {
+        newPages = [{ data: [item], nextCursor: null, hasMore: false }];
+      } else {
+        newPages = oldPages.map((page, idx) => {
+          if (idx === 0) {
+            const pageData = page.data;
+            if (
+              pageData &&
+              typeof pageData === "object" &&
+              !Array.isArray(pageData)
+            ) {
+              return { ...page, data: { ...item, ...pageData } };
+            }
+            const arr = Array.isArray(pageData) ? pageData : [];
+            return { ...page, data: [item, ...arr] };
+          }
+          return page;
+        });
+      }
+      this.setQueryState(queryKey, {
+        data: {
+          ...data,
+          pages: newPages,
+        },
+      });
+    } else {
+      if (Array.isArray(data)) {
+        this.setQueryState(queryKey, {
+          data: [item, ...data],
+          updatedAt: Date.now(),
+        });
+      } else if (data && typeof data === "object") {
+        this.setQueryState(queryKey, {
+          data: { ...item, ...data },
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    return rollback;
+  }
+
+  append<T>(queryKeyArr: unknown[] | string, item: T): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const currentState = this.getQueryState(queryKey);
+    const previousData = currentState?.data;
+    const rollback = () => {
+      this.setQueryState(queryKey, { data: previousData });
+    };
+
+    if (!currentState || currentState.data === undefined) {
+      this.setQueryState(queryKey, {
+        data: [item],
+        isSuccess: true,
+        updatedAt: Date.now(),
+        isFetched: true,
+      });
+      return rollback;
+    }
+
+    const data = currentState.data;
+
+    if (
+      data &&
+      typeof data === "object" &&
+      "pages" in data &&
+      Array.isArray((data as any).pages)
+    ) {
+      const oldPages = (data as any).pages as any[];
+      let newPages: any[] = [];
+      if (oldPages.length === 0) {
+        newPages = [{ data: [item], nextCursor: null, hasMore: false }];
+      } else {
+        newPages = oldPages.map((page, idx) => {
+          if (idx === oldPages.length - 1) {
+            const pageData = page.data;
+            if (
+              pageData &&
+              typeof pageData === "object" &&
+              !Array.isArray(pageData)
+            ) {
+              return { ...page, data: { ...pageData, ...item } };
+            }
+            const arr = Array.isArray(pageData) ? pageData : [];
+            return { ...page, data: [...arr, item] };
+          }
+          return page;
+        });
+      }
+      this.setQueryState(queryKey, {
+        data: {
+          ...data,
+          pages: newPages,
+        },
+      });
+    } else {
+      if (Array.isArray(data)) {
+        this.setQueryState(queryKey, {
+          data: [...data, item],
+          updatedAt: Date.now(),
+        });
+      } else if (data && typeof data === "object") {
+        this.setQueryState(queryKey, {
+          data: { ...data, ...item },
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    return rollback;
+  }
+
+  insert<T>(
+    queryKeyArr: unknown[] | string,
+    index: number,
+    item: T,
+  ): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const currentState = this.getQueryState(queryKey);
+    const previousData = currentState?.data;
+    const rollback = () => {
+      this.setQueryState(queryKey, { data: previousData });
+    };
+
+    if (!currentState || currentState.data === undefined) {
+      return this.prepend(queryKey, item);
+    }
+
+    const data = currentState.data;
+
+    if (
+      data &&
+      typeof data === "object" &&
+      "pages" in data &&
+      Array.isArray((data as any).pages)
+    ) {
+      const oldPages = (data as any).pages as any[];
+      if (
+        oldPages.length > 0 &&
+        oldPages.some((page) => !Array.isArray(page?.data))
+      ) {
+        return rollback;
+      }
+
+      if (oldPages.length === 0 || index <= 0) {
+        return this.prepend(queryKey, item);
+      }
+
+      let targetIndex = index;
+      let inserted = false;
+      const totalLength = oldPages.reduce(
+        (acc, p) => acc + (p.data?.length || 0),
+        0,
+      );
+
+      if (targetIndex >= totalLength) {
+        return this.append(queryKey, item);
+      }
+
+      const newPages = oldPages.map((page) => {
+        if (inserted) return page;
+        const pageLength = page.data.length;
+        if (targetIndex < pageLength) {
+          const newData = [...page.data];
+          newData.splice(targetIndex, 0, item);
+          inserted = true;
+          return { ...page, data: newData };
+        }
+        targetIndex -= pageLength;
+        return page;
+      });
+
+      this.setQueryState(queryKey, {
+        data: {
+          ...data,
+          pages: newPages,
+        },
+      });
+    } else {
+      if (Array.isArray(data)) {
+        if (index <= 0) {
+          return this.prepend(queryKey, item);
+        }
+        if (index >= data.length) {
+          return this.append(queryKey, item);
+        }
+        const newData = [...data];
+        newData.splice(index, 0, item);
+        this.setQueryState(queryKey, {
+          data: newData,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    return rollback;
+  }
+
+  remove(
+    queryKeyArr: unknown[] | string,
+    arg: number | ((item: any) => boolean),
+  ): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const currentState = this.getQueryState(queryKey);
+    const previousData = currentState?.data;
+    const rollback = () => {
+      this.setQueryState(queryKey, { data: previousData });
+    };
+
+    if (!currentState || currentState.data === undefined) {
+      return rollback;
+    }
+
+    const data = currentState.data;
+
+    if (
+      data &&
+      typeof data === "object" &&
+      "pages" in data &&
+      Array.isArray((data as any).pages)
+    ) {
+      const oldPages = (data as any).pages as any[];
+      if (oldPages.some((page) => !Array.isArray(page?.data))) {
+        return rollback;
+      }
+
+      let newPages: any[] = [];
+
+      if (typeof arg === "number") {
+        let targetIndex = arg;
+        let removed = false;
+
+        newPages = oldPages.map((page) => {
+          if (removed) return page;
+          const pageLength = page.data.length;
+          if (targetIndex < pageLength) {
+            const newData = [...page.data];
+            newData.splice(targetIndex, 1);
+            removed = true;
+            return { ...page, data: newData };
+          }
+          targetIndex -= pageLength;
+          return page;
+        });
+      } else if (typeof arg === "function") {
+        newPages = oldPages.map((page) => {
+          const newData = page.data.filter((item: any) => !arg(item));
+          return { ...page, data: newData };
+        });
+      }
+
+      this.setQueryState(queryKey, {
+        data: {
+          ...data,
+          pages: newPages,
+        },
+      });
+    } else {
+      if (Array.isArray(data)) {
+        let newData: any[] = [];
+        if (typeof arg === "number") {
+          if (arg >= 0 && arg < data.length) {
+            newData = [...data];
+            newData.splice(arg, 1);
+            this.setQueryState(queryKey, {
+              data: newData,
+              updatedAt: Date.now(),
+            });
+          }
+        } else if (typeof arg === "function") {
+          newData = data.filter((item) => !arg(item));
+          this.setQueryState(queryKey, {
+            data: newData,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }
+
+    return rollback;
+  }
+
+  update<T>(
+    queryKeyArr: unknown[] | string,
+    arg: number | ((item: T) => boolean),
+    updater: T | ((item: T) => T),
+  ): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const currentState = this.getQueryState(queryKey);
+    const previousData = currentState?.data;
+    const rollback = () => {
+      this.setQueryState(queryKey, { data: previousData });
+    };
+
+    if (!currentState || currentState.data === undefined) {
+      return rollback;
+    }
+
+    const data = currentState.data;
+
+    const resolveUpdater = (item: any): any => {
+      //@ts-ignore
+      return typeof updater === "function" ? updater(item) : updater;
+    };
+
+    if (
+      data &&
+      typeof data === "object" &&
+      "pages" in data &&
+      Array.isArray((data as any).pages)
+    ) {
+      const oldPages = (data as any).pages as any[];
+      if (oldPages.some((page) => !Array.isArray(page?.data))) {
+        return rollback;
+      }
+
+      let newPages: any[] = [];
+
+      if (typeof arg === "number") {
+        let targetIndex = arg;
+        let updated = false;
+
+        newPages = oldPages.map((page) => {
+          if (updated) return page;
+          const pageLength = page.data.length;
+          if (targetIndex < pageLength) {
+            const newData = [...page.data];
+            newData[targetIndex] = resolveUpdater(newData[targetIndex]);
+            updated = true;
+            return { ...page, data: newData };
+          }
+          targetIndex -= pageLength;
+          return page;
+        });
+      } else if (typeof arg === "function") {
+        newPages = oldPages.map((page) => {
+          const newData = page.data.map((item: any) => {
+            if (arg(item)) {
+              return resolveUpdater(item);
+            }
+            return item;
+          });
+          return { ...page, data: newData };
+        });
+      }
+
+      this.setQueryState(queryKey, {
+        data: {
+          ...data,
+          pages: newPages,
+        },
+      });
+    } else {
+      if (Array.isArray(data)) {
+        let newData: any[] = [];
+        if (typeof arg === "number") {
+          if (arg >= 0 && arg < data.length) {
+            newData = [...data];
+            newData[arg] = resolveUpdater(newData[arg]);
+            this.setQueryState(queryKey, {
+              data: newData,
+              updatedAt: Date.now(),
+            });
+          }
+        } else if (typeof arg === "function") {
+          newData = data.map((item) => {
+            if (arg(item)) {
+              return resolveUpdater(item);
+            }
+            return item;
+          });
+          this.setQueryState(queryKey, {
+            data: newData,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+    }
+
+    return rollback;
+  }
+
+  snapshot(queryKeyArr: unknown[] | string): () => void {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const savedData = this.getQueryState(queryKey)?.data;
+    return () => {
+      this.setQueryState(queryKey, { data: savedData });
+    };
+  }
 }

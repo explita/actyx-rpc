@@ -154,4 +154,99 @@ describe("React: QueryClient Caching & Invalidation", () => {
     expect(queryClient.isMutating()).toBe(false);
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  describe("QueryClient Mutation Helpers", () => {
+    describe("Standard Query (Arrays/Objects)", () => {
+      it("should prepend and append to array correctly", () => {
+        queryClient.setQueryState("arr", { data: [2, 3] });
+        queryClient.prepend("arr", 1);
+        expect(queryClient.getQueryState("arr")?.data).toEqual([1, 2, 3]);
+
+        queryClient.append("arr", 4);
+        expect(queryClient.getQueryState("arr")?.data).toEqual([1, 2, 3, 4]);
+      });
+
+      it("should prepend and append to object correctly (spread merge)", () => {
+        queryClient.setQueryState("obj", { data: { b: 2, c: 3 } });
+        queryClient.prepend("obj", { a: 1, b: 99 });
+        expect(queryClient.getQueryState("obj")?.data).toEqual({ a: 1, b: 2, c: 3 });
+
+        queryClient.append("obj", { c: 99, d: 4 });
+        expect(queryClient.getQueryState("obj")?.data).toEqual({ a: 1, b: 2, c: 99, d: 4 });
+      });
+
+      it("should insert, remove, update arrays correctly", () => {
+        queryClient.setQueryState("arr", { data: ["a", "b", "c"] });
+        queryClient.insert("arr", 1, "x");
+        expect(queryClient.getQueryState("arr")?.data).toEqual(["a", "x", "b", "c"]);
+
+        queryClient.update("arr", 1, "y");
+        expect(queryClient.getQueryState("arr")?.data).toEqual(["a", "y", "b", "c"]);
+
+        queryClient.remove("arr", 1);
+        expect(queryClient.getQueryState("arr")?.data).toEqual(["a", "b", "c"]);
+      });
+
+      it("should discard insert, remove, update on standard object data", () => {
+        const initialObj = { a: 1 };
+        queryClient.setQueryState("obj", { data: initialObj });
+        queryClient.insert("obj", 0, { b: 2 });
+        queryClient.remove("obj", 0);
+        queryClient.update("obj", 0, { b: 2 });
+        expect(queryClient.getQueryState("obj")?.data).toEqual(initialObj);
+      });
+    });
+
+    describe("Infinite Query (pages)", () => {
+      const setupInfiniteQuery = () => {
+        queryClient.setQueryState("inf", {
+          data: {
+            pages: [
+              { data: ["a", "b"] },
+              { data: ["c", "d"] }
+            ],
+            pageParams: [1, 2]
+          }
+        });
+      };
+
+      it("should prepend and append to pages correctly", () => {
+        setupInfiniteQuery();
+        queryClient.prepend("inf", "x");
+        expect((queryClient.getQueryState("inf")?.data as any).pages[0].data).toEqual(["x", "a", "b"]);
+
+        queryClient.append("inf", "y");
+        expect((queryClient.getQueryState("inf")?.data as any).pages[1].data).toEqual(["c", "d", "y"]);
+      });
+
+      it("should insert, remove, update infinite query pages correctly", () => {
+        setupInfiniteQuery();
+        queryClient.insert("inf", 1, "x"); // insert between a and b
+        expect((queryClient.getQueryState("inf")?.data as any).pages[0].data).toEqual(["a", "x", "b"]);
+
+        queryClient.update("inf", 1, "y"); // updates index 1 (x) to y
+        expect((queryClient.getQueryState("inf")?.data as any).pages[0].data).toEqual(["a", "y", "b"]);
+
+        queryClient.remove("inf", 1); // removes index 1 (y)
+        expect((queryClient.getQueryState("inf")?.data as any).pages[0].data).toEqual(["a", "b"]);
+      });
+
+      it("should discard insert, remove, update when infinite page data is an object", () => {
+        queryClient.setQueryState("inf_obj", {
+          data: {
+            pages: [
+              { data: { a: 1 } }
+            ],
+            pageParams: [1]
+          }
+        });
+
+        const initialPages = JSON.parse(JSON.stringify((queryClient.getQueryState("inf_obj")?.data as any).pages));
+        queryClient.insert("inf_obj", 0, { b: 2 });
+        queryClient.remove("inf_obj", 0);
+        queryClient.update("inf_obj", 0, { b: 2 });
+        expect((queryClient.getQueryState("inf_obj")?.data as any).pages).toEqual(initialPages);
+      });
+    });
+  });
 });

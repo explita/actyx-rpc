@@ -40,7 +40,11 @@ export function useSuspenseQuery<
 
   if (result.data === undefined) {
     const queryKeyStr = opts?.queryKey
-      ? opts.queryKey.map((i) => typeof i === "object" && i !== null ? JSON.stringify(i) : String(i)).join("|")
+      ? opts.queryKey
+          .map((i) =>
+            typeof i === "object" && i !== null ? JSON.stringify(i) : String(i),
+          )
+          .join("|")
       : "";
     const activePromise = globalRequestManager.getActivePromise(queryKeyStr);
 
