@@ -1,21 +1,7 @@
 import { useQuery } from "./use-query.js";
-import { UseQueryOpts, QueryResult, Unwrap } from "../types.js";
+import { UseQueryOpts, Unwrap, UseSuspenseQueryResult } from "../types.js";
 import { ErrorResponse } from "../../types/misc.js";
 import { globalRequestManager } from "../lib/request-manager.js";
-
-type UseSuspenseQueryReturn<
-  TOutput,
-  TUnwrap extends boolean = false,
-  TSelectData = Unwrap<TOutput, TUnwrap>,
-> = Omit<
-  QueryResult<TOutput, undefined, TUnwrap, TSelectData>,
-  "data" | "isFetching" | "isError" | "isSuccess"
-> & {
-  data: TSelectData;
-  isFetching: false;
-  isError: false;
-  isSuccess: true;
-};
 
 export function useSuspenseQuery<
   TOutput,
@@ -28,7 +14,7 @@ export function useSuspenseQuery<
     UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData>,
     "initialData" | "enabled"
   >,
-): UseSuspenseQueryReturn<TOutput, TUnwrap, TSelectData> {
+): UseSuspenseQueryResult<TOutput, TUnwrap, TSelectData> {
   const result = useQuery<TOutput, TQueryKey, TUnwrap, undefined, TSelectData>(
     proc,
     { ...opts, enabled: true, initialData: undefined },
@@ -55,5 +41,5 @@ export function useSuspenseQuery<
     }
   }
 
-  return result as UseSuspenseQueryReturn<TOutput, TUnwrap, TSelectData>;
+  return result as UseSuspenseQueryResult<TOutput, TUnwrap, TSelectData>;
 }

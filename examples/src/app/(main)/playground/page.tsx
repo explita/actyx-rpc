@@ -7,6 +7,8 @@ import {
   Activity,
   Wrench,
   Sparkles,
+  Upload,
+  Radio,
 } from "lucide-react";
 
 const demos = [
@@ -54,6 +56,24 @@ const demos = [
     accent: "from-rose-500/10 to-pink-500/10 dark:from-rose-500/5 dark:to-pink-500/5 border-rose-100 dark:border-rose-500/10",
     iconBg: "bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400",
     gradient: "from-rose-600 to-pink-600",
+  },
+  {
+    title: "File Uploads",
+    description: "Multipart form data validation and real-time progress",
+    href: "/uploads",
+    icon: Upload,
+    accent: "from-blue-500/10 to-indigo-500/10 dark:from-blue-500/5 dark:to-indigo-500/5 border-blue-100 dark:border-blue-500/10",
+    iconBg: "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400",
+    gradient: "from-blue-600 to-indigo-600",
+  },
+  {
+    title: "WebSocket",
+    description: "Real-time chat with useWS hook and Actyx-RPC WS procedures",
+    href: "/ws",
+    icon: Radio,
+    accent: "from-sky-500/10 to-blue-500/10 dark:from-sky-500/5 dark:to-blue-500/5 border-sky-100 dark:border-sky-500/10",
+    iconBg: "bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400",
+    gradient: "from-sky-600 to-blue-600",
   },
 ];
 

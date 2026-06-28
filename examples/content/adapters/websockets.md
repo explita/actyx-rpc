@@ -20,10 +20,26 @@ import { onRoomEvent } from "./procedures";
 
 const wss = new WebSocketServer({ port: 3001 });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  (ws as any).req = req; // Store upgrade request URL to identify channel
+
   // Bind the websocket client connection to the subscription handler
   applyWSHandler(onRoomEvent({ roomId: "main-lobby" }), {
     ws: ws,
+    broadcast: (data) => {
+      wss.clients.forEach((client) => {
+        const clientReq = (client as any).req;
+        // Broadcast only to clients in the exact same channel/room (matching req.url)
+        if (
+          client !== ws &&
+          client.readyState === 1 && // 1 = OPEN
+          clientReq &&
+          clientReq.url === req.url
+        ) {
+          client.send(JSON.stringify(data));
+        }
+      });
+    },
   });
 });
 

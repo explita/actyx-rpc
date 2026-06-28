@@ -34,6 +34,32 @@ await publishPost({ id: "post_1" }, true);
 
 ---
 
+## Web Routes (`.webRoute()`)
+
+For procedures that need to act directly as HTTP route endpoints (receiving standard Web `Request` objects and returning standard Web `Response` objects), use `.webRoute()`.
+
+This is ideal for exposing raw HTTP endpoints (like webhooks, direct file downloads, or binary stream ingestion) and keeps your procedures framework-agnostic.
+
+```ts
+import { procedure } from "@/lib/rpc/init";
+import { z } from "zod";
+
+export const handleWebhook = procedure
+  .input(zodResolver(z.object({ event: z.string() })))
+  .webRoute(async ({ ctx, input }, req, context) => {
+    // req is the standard Web Request instance
+    // context contains adapter-provided metadata (like params, cookies, headers)
+    console.log(`Processing event ${input.event} on path ${context.pathname}`);
+
+    return new Response(JSON.stringify({ received: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+```
+
+---
+
 ## Streaming Responses (`.stream()`)
 
 For procedures returning an `AsyncIterable`, use `.stream()`. This is ideal for consuming generative AI streams or real-time progress updates.
@@ -65,7 +91,7 @@ Yield events from a generator, and use the `createSSEResponse` adapter to turn t
 
 ### Server Setup
 ```ts
-import { createSSEResponse } from "@explita/actyx-rpc/adapters/next";
+import { createSSEResponse } from "@explita/actyx-rpc";
 
 const watchStock = procedure
   .input(z.object({ symbol: z.string() }))
@@ -91,7 +117,7 @@ export async function GET(req: Request) {
 Use the built-in `SSEClient` to consume the events on the client:
 
 ```ts
-import { SSEClient } from "@explita/actyx-rpc";
+import { SSEClient } from "@explita/actyx-rpc/client/sse";
 
 const stock = await SSEClient({
   url: "/api/sse",
@@ -110,56 +136,93 @@ stock.close();
 
 ---
 
-## WebSocket Subscriptions (`.subscription()`)
+## WebSockets (`.ws()`)
 
-For topic-based, real-time subscription feeds, use `.subscription()`. 
+For topic-based subscription feeds (like chat rooms) or complex, raw, bi-directional socket communications (like collaborative drawing boards), use `.ws()`.
 
-The handler receives `{ ctx, input, emit }` and should return a cleanup function (e.g. to unsubscribe from database or message broker updates).
+The handler receives raw socket controls to handle communications:
 
+* **`send(data)`**: Sends a message to the connected client.
+* **`broadcast(data)`**: Sends a message to all other connected clients.
+* **`onMessage(cb)`**: Registers a callback for incoming client messages.
+* **`onClose(cb)`**: Registers a callback for socket disconnection.
+* **`onError(cb)`**: Registers a callback for errors.
+
+### Subscription & Publishing Example
+
+To stream real-time events, use `.ws()` to subscribe, and a standard `.mutation()` or `.query()` to publish.
+
+#### 1. Subscribe via WebSockets
 ```ts
 export const onRoomEvent = procedure
-  .input(z.object({ roomId: z.string() }))
-  .subscription(async ({ ctx, input, emit }) => {
+  .input(zodResolver(z.object({ roomId: z.string() })))
+  .ws(async ({ ctx, input, send, onClose }) => {
     // Subscribe to a topic using the built-in pubsub context
-    const unsubscribe = await ctx.pubsub.subscribe(
+    const unsubscribe = ctx.pubsub.subscribe<string>(
       `room:${input.roomId}`,
-      (data) => {
-        emit(data); // Push event data payload to the client
+      (message) => {
+        send({ message }); // Push event data payload to the client
       }
     );
 
-    return unsubscribe; // Return the cleanup function
+    // Clean up on close (handles both sync and async unsubscribe)
+    onClose(async () => {
+      const unsub = await unsubscribe;
+      unsub();
+    });
   });
 ```
 
-For client integration, see [React Subscriptions](../react/subscriptions.md). For server setups, see [WebSocket Adapters](../adapters/websockets.md).
-
----
-
-## Bi-Directional WebSockets (`.ws()`)
-
-For complex, raw, bi-directional socket communications (like multi-user collaboration layers or real-time drawing maps), use `.ws()`.
-
-The handler receives raw socket callbacks to control communications:
-
+#### 2. Publish via Mutation
 ```ts
-export const handleCanvasSync = procedure
-  .input(z.object({ sessionId: z.string() }))
-  .ws(async ({ ctx, input, send, onMessage, onClose, onError }) => {
-    // Access parameters and context
-    console.log(`User ${ctx.userId} connected to session ${input.sessionId}`);
+export const sendRoomMessage = procedure
+  .input(
+    zodResolver(
+      z.object({
+        roomId: z.string(),
+        message: z.string().min(1),
+      })
+    )
+  )
+  .mutation(async ({ ctx, input }) => {
+    // Publish message to the topic
+    await ctx.pubsub.publish(`room:${input.roomId}`, input.message);
+    return { success: true };
+  });
+```
 
-    // Register listeners
-    onMessage((data) => {
-      // Broadcast or process incoming payload
-      broadcastToSession(input.sessionId, data);
+### Chat & Broadcast Example
+```ts
+export const chatProc = procedure.ws(
+  ({ send, broadcast, onMessage, onClose }) => {
+    // Welcome just this client
+    send({ type: "subscribed", data: { message: "🟢 You joined the chat!" } });
+
+    // Notify others that someone joined
+    broadcast({ type: "event", data: { message: "👋 A new user joined!" } });
+
+    onMessage((data: any) => {
+      if (data && data.type === "typing") {
+        // Typing indicator — broadcast to other clients only
+        broadcast({ type: "typing" });
+      } else {
+        // Regular message — broadcast to others + send back to sender
+        broadcast({ type: "event", data });
+        send({ type: "event", data });
+      }
     });
 
     onClose(() => {
-      cleanupUserSession(ctx.userId);
+      broadcast({
+        type: "event",
+        data: { message: "🚪 A user left the chat." },
+      });
     });
-  });
+  },
+);
 ```
+
+For client integration, see [React WebSockets](../react/subscriptions.md). For server setups, see [WebSocket Adapters](../adapters/websockets.md).
 
 ---
 

@@ -4,33 +4,29 @@ import XMLHttpRequest from "xhr2";
 // @ts-ignore
 global.XMLHttpRequest = XMLHttpRequest;
 
-import { createNextHandler } from "../src/adapters/next/next-handler.js";
+import { createProcedure } from "../src/core/server.js";
 import { progressFetch } from "../src/client/progress-fetch.js";
 import { Readable } from "stream";
 
-// 1. Define a dummy procedure that simulates a file upload
-const testUpload = async (input: any, fileStream: any) => {
+const procedure = createProcedure({});
+
+// 2. Create the Next.js-like handler using nextRoute
+const handler = procedure.nextRoute(async ({ input }, req) => {
   console.log("[Server] Received upload request");
 
+  const fileStream = req.body;
   if (fileStream) {
     console.log("[Server] Reading binary stream...");
     let bytesRead = 0;
-    for await (const chunk of fileStream) {
+    for await (const chunk of fileStream as any) {
       bytesRead += chunk.length;
-      // Simulate slow processing
       await new Promise((r) => setTimeout(r, 10));
     }
     console.log(`[Server] Finished reading ${bytesRead} bytes`);
   }
 
-  return [
-    { success: true, message: "Upload simulated successfully" },
-    null,
-  ] as const;
-};
-
-// 2. Create the Next.js-like handler
-const handler = createNextHandler(testUpload as any);
+  return { success: true, message: "Upload simulated successfully" };
+});
 
 // 3. Start a local HTTP server to host the handler
 const server = createServer(async (req, res) => {

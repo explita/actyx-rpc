@@ -87,7 +87,7 @@ export function usePaginatedQuery<
         isError: false,
         isSuccess: !!resolvedInitialData,
         // updatedAt: resolvedInitialData ? Date.now() : undefined,
-        isFetched: false,
+        isFetched: !!resolvedInitialData,
       },
       { silent: true },
     );
@@ -115,23 +115,42 @@ export function usePaginatedQuery<
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
 
-  const currentPage = pages[currentPageIndex];
+  const [lastKey, setLastKey] = useState(queryKey);
+  if (queryKey !== lastKey) {
+    setLastKey(queryKey);
+    setCurrentPageIndex(0);
+    fetchedCursorsRef.current.clear();
+  }
+
+  let adjustedIndex = currentPageIndex;
+  if (pages.length === 0) {
+    if (currentPageIndex !== 0) {
+      adjustedIndex = 0;
+      setCurrentPageIndex(0);
+    }
+  } else if (currentPageIndex >= pages.length) {
+    adjustedIndex = pages.length - 1;
+    setCurrentPageIndex(adjustedIndex);
+  } else if (currentPageIndex < 0) {
+    adjustedIndex = 0;
+    setCurrentPageIndex(0);
+  }
+
+  const currentPage = pages[adjustedIndex];
   const currentPageData: TPage[] = currentPage
     ? Array.isArray(currentPage.data)
       ? currentPage.data
       : []
-    : pages.length > 0 && Array.isArray(pages[0]?.data)
-      ? pages[0].data
-      : [];
+    : [];
 
   const hasNext =
-    currentPageIndex < pages.length - 1 ||
+    adjustedIndex < pages.length - 1 ||
     !!(
       currentPage &&
       (getNextPageParam?.(currentPage, pages) ?? currentPage.nextCursor)
     );
   const hasPrevious =
-    currentPageIndex > 0 || !!(pages[0]?.previousCursor);
+    adjustedIndex > 0 || !!(pages[0]?.previousCursor);
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
@@ -509,6 +528,15 @@ export function usePaginatedQuery<
 
     return unsubscribe;
   }, [enabled, queryClient, queryKey, refetch, opts?.staleTime]);
+
+  // Sync pageParams into fetchedCursorsRef to prevent double-fetching cached pages
+  useEffect(() => {
+    for (const param of pageParams) {
+      if (param !== undefined && param !== null) {
+        fetchedCursorsRef.current.add(param);
+      }
+    }
+  }, [pageParams]);
 
   // Clear fetched cursors when queryKey changes
   useEffect(() => {

@@ -2,10 +2,26 @@
  * WebSocket adapter to attach an Actyx-RPC WebSocket procedure to a
  * standard WebSocket (like ws or native in Node.js).
  */
-export function applyWSHandler(
+export function applyWSHandler<TData = any>(
+  /**
+   * The Actyx-RPC procedure to attach to the WebSocket.
+   * This procedure should be of type ".ws" and handle the WebSocket events.
+   * It will receive a context object with send, broadcast, onMessage, onClose, and onError methods.
+   */
   procedure: (wsContext: any) => Promise<void>,
   options: {
+    /**
+     * The WebSocket instance to attach the procedure to.
+     *
+     * This can be a WebSocket from the `ws` library, or a native WebSocket in Node.js.
+     */
     ws: any; // e.g., a WebSocket instance from ws
+    /**
+     * Broadcast function to send a message to all connected clients.
+     *
+     * Typically: `(data) => wss.clients.forEach(client => client.send(...))`.
+     */
+    broadcast: (data: TData) => void;
   },
 ) {
   const { ws } = options;
@@ -22,6 +38,7 @@ export function applyWSHandler(
         ws.send(typeof data === "object" ? JSON.stringify(data) : String(data));
       }
     },
+    broadcast: options.broadcast,
     onMessage: (cb: (data: any) => void) => {
       messageCallback = cb;
     },

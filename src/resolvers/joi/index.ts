@@ -20,7 +20,7 @@ type JoiInfer<T> = T extends Joi.Schema<infer U> ? U : never;
  */
 export function joiResolver<
   T extends Record<string, unknown>,
-  S extends Joi.Schema<any> = Joi.Schema<T>,
+  S extends Joi.ObjectSchema<any> = Joi.ObjectSchema<T>,
 >(schema: S, options?: Joi.ValidationOptions): SchemaResolver<T> {
   return {
     async parse(data: unknown) {

@@ -24,6 +24,8 @@ export function handlerResolver<O, P = any>(
     payload?: Record<string, unknown> | FormData,
     ...args: P[]
   ) {
+    const originalArgs = args;
+
     const caller = (config as any).caller || (this as any)?._def?.caller;
     if (caller) {
       return caller(payload, ...args);
@@ -31,7 +33,7 @@ export function handlerResolver<O, P = any>(
 
     const start = performance.now();
     let input: unknown = payload;
-    let rootCtx: Awaited<ReturnType<typeof opts.createContext>> | null = null;
+    let rootCtx: any;
 
     let span: any = null;
     if (config.telemetry) {
@@ -60,14 +62,17 @@ export function handlerResolver<O, P = any>(
       if (existingCtx) {
         rootCtx = { ok: true, ctx: existingCtx };
       } else {
-        rootCtx = await opts.createContext(baseCtx);
+        rootCtx = await (opts.createContext as any)(baseCtx, ...originalArgs);
       }
 
       if (!rootCtx.ok) {
-        const customError = await opts.onContextError?.({
-          reason: rootCtx.reason,
-          ctx: { ...baseCtx, ...rootCtx },
-        });
+        const customError = await (opts.onContextError as any)?.(
+          {
+            reason: rootCtx.reason,
+            ctx: { ...baseCtx, ...rootCtx },
+          },
+          ...originalArgs,
+        );
 
         if (customError) {
           return [null, { statusCode: 401, ...customError }];
@@ -93,7 +98,10 @@ export function handlerResolver<O, P = any>(
 
       // 2. Authorize (Runs even on bypass to ensure permission integrity)
       if (config.authorize) {
-        const authResult = await config.authorize(currentCtx);
+        const authResult = await (config.authorize as any)(
+          currentCtx,
+          ...originalArgs,
+        );
         if (
           authResult === false ||
           (typeof authResult === "object" && authResult.success === false)
@@ -117,6 +125,8 @@ export function handlerResolver<O, P = any>(
           cache,
           config.rateLimit.options!,
           currentCtx,
+          originalArgs[0] as any,
+          originalArgs[1],
         );
 
         if (!result.allowed) return [null, { ...baseError, ...result.error }];
@@ -128,7 +138,7 @@ export function handlerResolver<O, P = any>(
       if (config.resolver && !isMock) {
         const rawData = normalizeInput(payload);
         const result = await config.resolver.parse(rawData);
-        if (!result.success)
+        if (!result.success) {
           return [
             null,
             {
@@ -139,18 +149,28 @@ export function handlerResolver<O, P = any>(
               ...result,
             },
           ];
+        }
 
         input = result.data;
       } else {
-        input = {};
-        if (payload !== undefined && payload !== null) {
-          args = [payload as any, ...args];
+        if (config.type === "webRoute") {
+          input = payload ?? {};
+        } else {
+          input = {};
+          if (payload !== undefined && payload !== null) {
+            args = [payload as any, ...args];
+          }
         }
       }
 
       const enrichment =
-        (await opts.enrichInput?.({ ...rootCtx.ctx, meta: baseCtx.meta })) ??
-        {};
+        (await (opts.enrichInput as any)?.(
+          {
+            ...rootCtx.ctx,
+            meta: baseCtx.meta,
+          },
+          ...originalArgs,
+        )) ?? {};
       let enrichedData = {
         ...enrichment,
         ...(typeof input === "object" && input !== null ? input : {}),
@@ -201,7 +221,7 @@ export function handlerResolver<O, P = any>(
         currentCtx,
         enrichedData,
         next,
-        args,
+        originalArgs,
         baseError,
       );
 
@@ -214,7 +234,10 @@ export function handlerResolver<O, P = any>(
       // Execute handler within the AsyncLocalStorage context
       const result = await rpcStorage.run(currentCtx, async () => {
         return config.mock && process.env.ACTYX_MOCK === "true"
-          ? await config.mock({ ctx: currentCtx, input: enrichedData })
+          ? await (config.mock as any)(
+              { ctx: currentCtx, input: enrichedData },
+              ...originalArgs,
+            )
           : await handler({ ctx: currentCtx, input: enrichedData }, ...args);
       });
 
@@ -240,12 +263,15 @@ export function handlerResolver<O, P = any>(
           ).catch((err) => console.error(err));
         }
         if (opts.onError) {
-          const onErrorRes = await opts.onError({
-            error: result,
-            ctx: { ...currentCtx },
-            input: enrichedData,
-            args,
-          });
+          const onErrorRes = await (opts.onError as any)(
+            {
+              error: result,
+              ctx: { ...currentCtx },
+              input: enrichedData,
+              args,
+            },
+            ...originalArgs,
+          );
           if (onErrorRes && typeof onErrorRes === "object") {
             return [
               null,
@@ -269,13 +295,16 @@ export function handlerResolver<O, P = any>(
       const end = performance.now();
 
       Promise.resolve(
-        opts.onSuccess?.({
-          ctx: { ...baseCtx, ...currentCtx },
-          input: enrichedData,
-          output: result,
-          duration: end - start,
-          args,
-        }),
+        (opts.onSuccess as any)?.(
+          {
+            ctx: { ...baseCtx, ...currentCtx },
+            input: enrichedData,
+            output: result,
+            duration: end - start,
+            args,
+          },
+          ...originalArgs,
+        ),
       ).catch((err) => console.error(err));
 
       // 10. Validate Output
@@ -319,13 +348,16 @@ export function handlerResolver<O, P = any>(
       }
 
       if (opts.onError) {
-        const onErrorRes = await opts.onError({
-          error,
-          //@ts-ignore
-          ctx: { ...baseCtx, ...rootCtx?.ctx },
-          input,
-          args,
-        });
+        const onErrorRes = await (opts.onError as any)(
+          {
+            error,
+            //@ts-ignore
+            ctx: { ...baseCtx, ...rootCtx?.ctx },
+            input,
+            args,
+          },
+          ...originalArgs,
+        );
         if (onErrorRes && typeof onErrorRes === "object") {
           return [
             null,

@@ -1,4 +1,9 @@
-import type { ErrorResponse, WindowTime } from "../types/misc.js";
+import type {
+  ErrorResponse,
+  MaybePromise,
+  Prettify,
+  WindowTime,
+} from "../types/misc.js";
 
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
@@ -47,6 +52,11 @@ export type UseMutationOpts<
     context: TContext | undefined,
     ...args: TArgs
   ) => void;
+  /**
+   * Callback function to be executed before the procedure is mutated.
+   * If it throws an error or returns any non-void/non-undefined value, execution halts and is passed as the error to onError.
+   */
+  onBefore?: (...args: TArgs) => Promise<any> | any;
   /**
    * Callback function to be executed before the procedure is mutated.
    * @param args The arguments for the procedure.
@@ -190,6 +200,13 @@ export type UseInfiniteQueryOpts<
    * Runs after onSuccess or onError
    */
   onSettled?: () => void;
+
+  /**
+   * Optional callback to arrange the flattened data.
+   * @param data - The flattened data array.
+   * @returns The arranged flattened data array.
+   */
+  arrange?: (data: TPage[]) => TPage[];
 
   /**
    * Unique key for identifying this query in the cache
@@ -507,57 +524,89 @@ export type QueryResult<
 };
 
 /**
- * Options for the useSubscription hook.
+ * Options for the usews hook.
  *
- * @template TOutput - The type of data received from the subscription.
+ * @template TOutput - The type of data received from the ws.
+ * @template TInitialData - The type of initial data.
  */
-export type UseSubscriptionOpts<TOutput> = {
+export type UseWSOpts<TOutput> = {
   /**
    * The WebSocket server URL to connect to.
    */
-  wsUrl: string;
+  url: string;
 
   /**
-   * Whether the WebSocket subscription should be active.
+   * Initial data to prepopulate the data array with.
+   * Must be an array — the same shape as `data`.
+   */
+  initialData?: TOutput[] | (() => MaybePromise<TOutput[]>);
+
+  /**
+   * Whether the WebSocket ws should be active.
    * @default true
    */
   enabled?: boolean;
 
   /**
-   * Callback triggered whenever new data is received over the subscription.
+   * Callback triggered whenever new data is received over the ws.
    * @param data - The received data payload.
    */
   onData?: (data: TOutput) => void;
 
   /**
-   * Callback triggered when a connection or subscription error occurs.
+   * Callback triggered when a connection or ws error occurs.
    */
   onError?: (error: ErrorResponse) => void;
 
   /**
-   * Callback triggered when the subscription connection is successfully established.
+   * Callback triggered when the ws connection is successfully established.
    */
   onSubscribed?: () => void;
 
   /**
-   * Callback triggered when the subscription connection is closed.
+   * Callback triggered when the ws connection is closed.
    */
   onUnsubscribed?: () => void;
+
+  /**
+   * Optional callback to arrange the data array.
+   * @param data - The data array to arrange.
+   * @returns The arranged data array.
+   */
+  arrange?: (data: TOutput[]) => TOutput[];
+
+  /**
+   * Configuration for automatic reconnection when the connection is lost.
+   */
+  reconnect?: {
+    /**
+     * The maximum number of reconnect attempts before giving up.
+     * @default 5
+     */
+    maxAttempts?: number;
+    /**
+     * The delay in milliseconds between reconnect attempts.
+     * Can be a number or a function that receives the current attempt count (0-indexed).
+     * @default (attempt) => Math.min(1000 * Math.pow(2, attempt), 30000)
+     */
+    delay?: number | ((attempt: number) => number);
+  };
 };
 
 /**
- * Return shape of the useSubscription hook.
+ * Return shape of the usews hook.
  *
- * @template TOutput - The type of data received from the subscription.
+ * @template TOutput - The type of data received from the ws.
  */
-export type UseSubscriptionReturn<TOutput> = {
+export type UseWSResult<TOutput> = {
   /**
-   * The most recently received data payload, or undefined if no data has been received yet.
+   * All data payloads received since the connection was established.
+   * Accumulated in order of arrival.
    */
-  data: TOutput | undefined;
+  data: TOutput[];
 
   /**
-   * The current state of the subscription connection.
+   * The current state of the ws connection.
    */
   status: "idle" | "connecting" | "connected" | "error";
 
@@ -567,12 +616,24 @@ export type UseSubscriptionReturn<TOutput> = {
   error: ErrorResponse | undefined;
 
   /**
-   * Cleanly closes the WebSocket subscription connection.
+   * Cleanly closes the WebSocket ws connection.
    */
   unsubscribe: () => void;
+
+  /**
+   * Sends a message over the WebSocket connection.
+   * Safe to call before the connection is established (message will be queued and sent on open).
+   * @param data - The data to send. Will be JSON-stringified.
+   */
+  send: (data: TOutput) => void;
+
+  /**
+   * Whether the initial data is being fetched (only applies if `initialData` is a function that returns a Promise).
+   */
+  isFetchingInitialData: boolean;
 };
 
-export type UseQueriesQueryConfig<
+export type UseQueriesConfig<
   TOutput = any,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
@@ -587,7 +648,7 @@ export type UseQueriesQueryConfig<
   };
 
 export type QueriesResults<T extends readonly any[]> = {
-  [K in keyof T]: T[K] extends UseQueriesQueryConfig<
+  [K in keyof T]: T[K] extends UseQueriesConfig<
     infer TOut,
     any,
     infer TUnwrap,
@@ -607,7 +668,7 @@ export type QueriesResults<T extends readonly any[]> = {
  *
  * @template T - The type of data received from the SSE events.
  */
-export type UseSSEOptions<T = any> = {
+export type UseSSEOpts<T = any> = {
   /**
    * The Server-Sent Events endpoint URL to connect to.
    */
@@ -666,7 +727,7 @@ export type UseSSEOptions<T = any> = {
  *
  * @template T - The type of data received from the SSE events.
  */
-export type UseSSEReturn<T = any> = {
+export type UseSSEResult<T = any> = {
   /**
    * An array containing received events up to the `maxHistory` limit.
    */
@@ -702,3 +763,62 @@ export type UseSSEReturn<T = any> = {
    */
   clear: () => void;
 };
+
+export type UseSuspenseQueryResult<
+  TOutput,
+  TUnwrap extends boolean = false,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
+> = Omit<
+  QueryResult<TOutput, undefined, TUnwrap, TSelectData>,
+  "data" | "isFetching" | "isError" | "isSuccess"
+> & {
+  data: TSelectData;
+  isFetching: false;
+  isError: false;
+  isSuccess: true;
+};
+
+export interface WSEventContext<TData = any> {
+  data: TData;
+  allData: TData[];
+  append: (item: TData) => void;
+  prepend: (item: TData) => void;
+  update: (
+    predicate: number | ((item: TData) => boolean),
+    updater: (item: TData) => TData,
+  ) => void;
+}
+
+export interface WSAdapterOptions<
+  TInput,
+  TData,
+  TPage,
+  TQueryKey extends unknown[] = unknown[],
+  TFullPage = InfiniteQueryPage<TData>,
+> extends Omit<UseWSOpts<TData>, "onData"> {
+  // Infinite Query options
+  queryOpts?: Omit<
+    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+    "arrange"
+  >;
+
+  // Custom onWSData with query cache actions
+  onData?: (opts: WSEventContext<TData>) => void;
+}
+
+export interface SSEAdapterOptions<
+  TInput,
+  TData,
+  TPage,
+  TQueryKey extends unknown[] = unknown[],
+  TFullPage = InfiniteQueryPage<TData>,
+> extends Omit<UseSSEOpts<TData>, "onData"> {
+  // Infinite Query options
+  queryOpts?: Omit<
+    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+    "arrange"
+  >;
+
+  // Custom onWSData with query cache actions
+  onData?: (opts: Prettify<WSEventContext<TData> & { event?: string }>) => void;
+}

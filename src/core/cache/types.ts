@@ -295,11 +295,21 @@ export type RateLimitOptions<
   /** Time window (e.g., "1m", "5m", "1h", "1d", "1w", "1M") */
   window?: WindowTime;
   /** Custom key generator (default: based on ctx) */
-  key?: (ctx: Prettify<Ctx & BaseContext<TMeta, TName>>) => string;
+  key?: (
+    ctx: Prettify<Ctx & BaseContext<TMeta, TName>>,
+    req: Request,
+    context: any,
+  ) => string;
   /** Response message when rate limited (default: "Too many requests") */
   message?: string;
   /** Callback when rate limited */
-  onRateLimited?: (key: string, limit: number, windowMs: number) => void;
+  onRateLimited?: (
+    key: string,
+    limit: number,
+    windowMs: number,
+    req: Request,
+    context: any,
+  ) => void;
 };
 
 export type RateLimitConfig = {

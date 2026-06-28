@@ -29,15 +29,6 @@ export type BaseContext<TMeta, TName extends string = string> = {
   handlerName: TName;
   meta: TMeta;
   /**
-   * Call another procedure internally without a network request.
-   * The current context will be passed to the target procedure.
-   */
-  // call: <T, I, A extends any[]>(
-  //   proc: (input: I, ...args: A) => Promise<T>,
-  //   input?: I,
-  //   ...args: A
-  // ) => Promise<T>;
-  /**
    * Topic-based event distribution.
    * Uses Redis if configured, otherwise falls back to in-memory.
    */
@@ -106,8 +97,8 @@ type ResolvedMode<
         : "strict";
 
 type MappedInputValue<V> =
-  V extends Array<any>
-    ? unknown[]
+  V extends Array<infer E>
+    ? MappedInputValue<E>[]
     : V extends Date
       ? unknown
       : V extends object
@@ -175,6 +166,7 @@ export type WSServerHandler<Ctx = any, I = any, In = any, Out = any> = (opts: {
   ctx: Ctx;
   input: I;
   send: (data: Out) => void;
+  broadcast?: (data: any) => void;
   onMessage: (cb: (data: In) => void) => void;
   onClose: (cb: () => void) => void;
   onError: (cb: (err: any) => void) => void;

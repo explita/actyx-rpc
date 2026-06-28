@@ -6,10 +6,12 @@ export * from "./hooks/use-infinite-query.js";
 export * from "./hooks/use-is-mutating.js";
 // export * from "./hooks/use-queries.js";
 export * from "./hooks/use-sse.js";
+export * from "./hooks/use-ws.js";
+export * from "./hooks/use-ws-infinite-query.js";
+export * from "./hooks/use-sse-infinite-query.js";
 export * from "./provider.js";
 export * from "./lib/query-client.js";
 
-// export { useSubscription } from "./hooks/use-subscription.js";
 export type {
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
@@ -20,6 +22,11 @@ export type {
   UseQueryOpts,
   // UseQueriesQueryConfig,
   // QueriesResults,
-  UseSSEOptions,
-  UseSSEReturn,
+  UseSSEOpts,
+  UseSSEResult,
+  UseWSOpts,
+  UseWSResult,
+  WSAdapterOptions,
+  WSEventContext,
+  SSEAdapterOptions,
 } from "./types.js";

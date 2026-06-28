@@ -2,10 +2,10 @@ import type { Redis } from "ioredis";
 import { EventEmitter } from "node:events";
 
 export interface PubSubAdapter {
-  publish(topic: string, data: any): Promise<void> | void;
-  subscribe(
+  publish<TData = any>(topic: string, data: TData): Promise<void> | void;
+  subscribe<TData = any>(
     topic: string,
-    callback: (data: any) => void,
+    callback: (data: TData) => void,
   ): (() => void) | Promise<() => void>;
 }
 
@@ -19,11 +19,11 @@ export class MemoryPubSub implements PubSubAdapter {
     this.emitter.setMaxListeners(0);
   }
 
-  publish(topic: string, data: any) {
+  publish<TData = any>(topic: string, data: TData) {
     this.emitter.emit(topic, data);
   }
 
-  subscribe(topic: string, callback: (data: any) => void) {
+  subscribe<TData = any>(topic: string, callback: (data: TData) => void) {
     this.emitter.on(topic, callback);
     return () => {
       this.emitter.off(topic, callback);
@@ -43,11 +43,11 @@ export class RedisPubSub implements PubSubAdapter {
     this.sub = this.pub.duplicate();
   }
 
-  async publish(topic: string, data: any) {
+  async publish<TData = any>(topic: string, data: TData) {
     await this.pub.publish(topic, JSON.stringify(data));
   }
 
-  async subscribe(topic: string, callback: (data: any) => void) {
+  async subscribe<TData = any>(topic: string, callback: (data: TData) => void) {
     await this.sub.subscribe(topic);
 
     const handler = (channel: string, message: string) => {
@@ -55,7 +55,7 @@ export class RedisPubSub implements PubSubAdapter {
         try {
           callback(JSON.parse(message));
         } catch {
-          callback(message);
+          callback(message as TData);
         }
       }
     };

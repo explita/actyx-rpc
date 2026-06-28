@@ -12,7 +12,7 @@ export async function runMiddlewares(
   let currentCtx = ctx;
 
   for (const mw of middlewares) {
-    const mwResult = await mw({ ctx: currentCtx, input, next }, ...args);
+    const mwResult = await (mw as any)({ ctx: currentCtx, input, next }, ...args);
 
     if (mwResult && typeof mwResult === "object" && "_isNext" in mwResult) {
       // Continue to next middleware

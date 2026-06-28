@@ -7,11 +7,11 @@ import {
 } from "react";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
-import { QueriesResults, UseQueriesQueryConfig } from "../types.js";
+import { QueriesResults, UseQueriesConfig } from "../types.js";
 import { ErrorResponse } from "../../types/misc.js";
 import { parseWindow } from "../../lib/utils.js";
 
-export function useQueries<T extends readonly UseQueriesQueryConfig[]>(
+export function useQueries<T extends readonly UseQueriesConfig[]>(
   queries: T,
 ): QueriesResults<T> {
   const queryClient = useQueryClient();

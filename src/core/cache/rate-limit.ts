@@ -5,6 +5,8 @@ export async function checkRateLimit(
   cache: CacheAdapter,
   options: RateLimitOptions,
   ctx: any,
+  req: Request,
+  context: any,
 ) {
   const limit = options?.limit ?? 100;
   const windowStr = options?.window ?? "1m";
@@ -13,7 +15,7 @@ export async function checkRateLimit(
     options?.key ??
     ((ctx: any) => ctx.id || ctx.userId || ctx.ip || "anonymous");
 
-  const key = getKey(ctx);
+  const key = (getKey as any)(ctx, req, context);
   const cacheKey = `ratelimit:${key}`;
   const now = Date.now();
 
@@ -32,6 +34,7 @@ export async function checkRateLimit(
   }
 
   if (entry.count >= limit) {
+    options.onRateLimited?.(key, limit, windowMs, req, context);
     return {
       allowed: false,
       remaining: 0,

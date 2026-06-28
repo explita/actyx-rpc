@@ -28,6 +28,7 @@ export function useMutation<
   const pendingInputRef = useRef<TArgs | null>(null);
 
   const callbacksRef = useRef({
+    onBefore: opts?.onBefore,
     onSuccess: opts?.onSuccess,
     onError: opts?.onError,
     onMutate: opts?.onMutate,
@@ -39,6 +40,7 @@ export function useMutation<
 
   useEffect(() => {
     callbacksRef.current = {
+      onBefore: opts?.onBefore,
       onSuccess: opts?.onSuccess,
       onError: opts?.onError,
       onMutate: opts?.onMutate,
@@ -70,6 +72,89 @@ export function useMutation<
 
   const executeImmediately = useCallback(
     async (...args: TArgs): Promise<MutationResult<TOutput>> => {
+      // onBefore hook
+      if (callbacksRef.current.onBefore) {
+        try {
+          const beforeResult = await callbacksRef.current.onBefore(...args);
+          if (beforeResult === false) {
+            //@ts-expect-error
+            return [null, null];
+          }
+          if (beforeResult !== undefined) {
+            let errObj: any;
+            if (beforeResult instanceof Error) {
+              errObj = {
+                success: false,
+                message: beforeResult.message,
+                reason: "CLIENT_ERROR",
+                handlerName: "client",
+                statusCode: 500,
+              };
+            } else if (
+              typeof beforeResult === "object" &&
+              beforeResult !== null
+            ) {
+              errObj = {
+                success: false,
+                message:
+                  (beforeResult as any).message ||
+                  "Validation failed before execution",
+                reason: (beforeResult as any).reason || "CLIENT_ERROR",
+                handlerName: "client",
+                statusCode: (beforeResult as any).statusCode || 500,
+                ...beforeResult,
+              };
+            } else {
+              errObj = {
+                success: false,
+                message: String(beforeResult),
+                reason: "CLIENT_ERROR",
+                handlerName: "client",
+                statusCode: 500,
+              };
+            }
+
+            setStatus("error");
+            setError(errObj);
+            callbacksRef.current.onError?.(errObj, undefined, ...args);
+            callbacksRef.current.onSettled?.(
+              undefined,
+              errObj,
+              undefined,
+              ...args,
+            );
+            if (opts?.throwOnError) {
+              throw beforeResult instanceof Error
+                ? beforeResult
+                : new Error(errObj.message);
+            }
+            return [null, errObj];
+          }
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          const errObj = {
+            success: false,
+            message,
+            reason: "CLIENT_ERROR",
+            handlerName: "client",
+            statusCode: 500,
+          };
+          setStatus("error");
+          setError(errObj);
+          callbacksRef.current.onError?.(errObj, undefined, ...args);
+          callbacksRef.current.onSettled?.(
+            undefined,
+            errObj,
+            undefined,
+            ...args,
+          );
+          if (opts?.throwOnError) {
+            throw e;
+          }
+          return [null, errObj];
+        }
+      }
+
       queryClient.startMutation(opts?.mutationKey);
       const input = args[0];
       // Cancel previous request
@@ -94,7 +179,7 @@ export function useMutation<
       let mutationContext: TContext | undefined;
       if (callbacksRef.current.onMutate) {
         mutationContext = await callbacksRef.current.onMutate(...args);
-        setContext(mutationContext);
+        setContext(() => mutationContext);
       }
 
       setStatus("pending");
@@ -114,9 +199,7 @@ export function useMutation<
           let body: any = input;
           let headers: Record<string, string> = {};
 
-          if (input instanceof File) {
-            headers["x-rpc-filename"] = input.name;
-          } else if (
+          if (
             !(input instanceof Blob) &&
             !(input instanceof FormData) &&
             typeof input === "object" &&
@@ -150,6 +233,15 @@ export function useMutation<
               body = JSON.stringify(input);
               headers["Content-Type"] = "application/json";
             }
+          } else {
+            if (typeof File !== "undefined" && input instanceof File) {
+              headers["x-file-name"] = input.name;
+              headers["Content-Type"] =
+                input.type || "application/octet-stream";
+            } else if (input instanceof Blob) {
+              headers["Content-Type"] =
+                input.type || "application/octet-stream";
+            }
           }
 
           const finalUrl = new URL(url, window.location.origin);
@@ -164,13 +256,27 @@ export function useMutation<
             },
           });
 
-          const res = await response.json();
-          if (res.success) {
-            result = res.data;
+          if (response.ok) {
+            const res = await response.json();
+            if (
+              res &&
+              typeof res === "object" &&
+              "success" in res &&
+              "data" in res
+            ) {
+              result = res.data;
+            } else {
+              result = res;
+            }
             err = null;
           } else {
+            const res = await response.json().catch(() => null);
             result = null;
-            err = res;
+            err = res || {
+              success: false,
+              message: `Request failed with status ${response.status}`,
+              statusCode: response.status,
+            };
           }
         } else {
           const res = await action(...args);
@@ -214,7 +320,12 @@ export function useMutation<
           }
 
           callbacksRef.current.onError?.(error, mutationContext, ...args);
-          callbacksRef.current.onSettled?.(undefined, error, mutationContext, ...args);
+          callbacksRef.current.onSettled?.(
+            undefined,
+            error,
+            mutationContext,
+            ...args,
+          );
 
           if (opts?.throwOnError) throw err;
           return [null, err];
@@ -224,7 +335,12 @@ export function useMutation<
         setData(result);
         setValidationErrors(null);
         callbacksRef.current.onSuccess?.(result, mutationContext, ...args);
-        callbacksRef.current.onSettled?.(result, undefined, mutationContext, ...args);
+        callbacksRef.current.onSettled?.(
+          result,
+          undefined,
+          mutationContext,
+          ...args,
+        );
         return [result, null];
       } catch (err) {
         // Don't treat abort as error
@@ -259,7 +375,12 @@ export function useMutation<
 
         setError(error);
         callbacksRef.current.onError?.(error, mutationContext, ...args);
-        callbacksRef.current.onSettled?.(undefined, error, mutationContext, ...args);
+        callbacksRef.current.onSettled?.(
+          undefined,
+          error,
+          mutationContext,
+          ...args,
+        );
         throw err;
       } finally {
         queryClient.endMutation(opts?.mutationKey);

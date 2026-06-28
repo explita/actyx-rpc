@@ -67,12 +67,12 @@ export async function SSEClient<T = any>(
               ...options.headers,
               Accept: "text/event-stream",
               "Cache-Control": "no-cache",
-              Connection: "keep-alive",
+              // Connection: "keep-alive",
               ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
             },
             signal: controller.signal,
             credentials: "include",
-            keepalive: true,
+            // keepalive: true,
           });
 
           if (!response.ok || !response.body) {

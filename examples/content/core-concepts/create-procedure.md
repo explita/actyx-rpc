@@ -105,19 +105,32 @@ const createUser = procedure.input(userResolver).mutation(async ({ input }) => {
 
 ---
 
-## Next.js Redirects in Context Failures
+## Framework Redirects in Context Failures
 
-If you are using Next.js, you can return a `_redirect` callback in `onContextError` (or inside middlewares) to trigger a top-level redirect:
+Most modern frameworks support throwing specific routing errors to handle navigation control flow natively (for example, calling Next.js's `redirect("/login")`). In 99% of cases, you can simply invoke these native framework functions directly inside your procedure callbacks:
+
+```ts
+import { redirect } from "next/navigation";
+
+const procedure = createProcedure({
+  createContext: () => {
+    // Triggers standard native framework redirect logic directly
+    redirect("/login");
+  }
+});
+```
+
+However, if native framework redirect signals do not execute automatically (e.g. if they are caught or suppressed by nested pipeline wrappers), Actyx RPC provides a fallback `_redirect` callback mechanism inside `onContextError` or custom middlewares to guarantee navigation executes cleanly:
 
 ```ts
 onContextError({ reason }) {
   if (reason === "INVALID_SESSION") {
     return {
-      _redirect: () => redirect("/login"),
       message: "Session expired",
+      _redirect: () => redirect("/login"), // Safe callback fallback wrapper
     };
   }
 }
 ```
 
-This is executed at the very start of the procedure response before returning to the caller.
+This is executed at the very start of the procedure responses before returning to the caller.

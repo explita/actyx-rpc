@@ -108,7 +108,7 @@ export function useQuery<
         isError: false,
         isSuccess: resolvedInitialData !== undefined,
         // updatedAt: resolvedInitialData !== undefined ? Date.now() : undefined,
-        isFetched: false,
+        isFetched: resolvedInitialData !== undefined,
       },
       { silent: true },
     );

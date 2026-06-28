@@ -2,7 +2,7 @@ import type { z } from "zod";
 import type { SchemaResolver } from "../../types/misc.js";
 
 /**
- * Wraps a Zod object schema into a procedure resolver.
+ * Wraps a Zod object or discriminated-union schema into a procedure resolver.
  *
  * Handles `FormData` and plain objects. Validation errors are returned
  * as a field-keyed `errors` map so the client can display them inline.
@@ -14,9 +14,17 @@ import type { SchemaResolver } from "../../types/misc.js";
  *
  * const schema = z.object({ name: z.string().min(1) });
  * procedure.input(zodResolver(schema)).mutation(...)
+ *
+ * // Discriminated unions are also supported:
+ * const schema = z.discriminatedUnion("type", [
+ *   z.object({ type: z.literal("a"), value: z.string() }),
+ *   z.object({ type: z.literal("b"), count: z.number() }),
+ * ]);
  * ```
  */
-export function zodResolver<S extends z.ZodType>(
+export function zodResolver<
+  S extends z.ZodObject<z.ZodRawShape> | z.ZodDiscriminatedUnion<any, any>,
+>(
   schema: S,
   options?: z.core.ParseContext<z.core.$ZodIssue>,
 ): SchemaResolver<z.infer<S>> {
@@ -61,7 +69,7 @@ export function zodResolver<S extends z.ZodType>(
             properties[key] = {
               type:
                 typeName === "number"
-                   ? "number"
+                  ? "number"
                   : typeName === "boolean"
                     ? "boolean"
                     : typeName === "array"

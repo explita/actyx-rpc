@@ -16,7 +16,7 @@ import type { SchemaResolver } from "../../types/misc.js";
  * procedure.input(yupResolver(schema)).mutation(...)
  * ```
  */
-export function yupResolver<S extends yup.Schema<any>>(
+export function yupResolver<S extends yup.ObjectSchema<any>>(
   schema: S,
   options?: yup.ValidateOptions,
 ): SchemaResolver<yup.InferType<S>> {

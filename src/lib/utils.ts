@@ -55,17 +55,17 @@ export function mergeConfigs<TCtx, TEnrich>(
   };
 
   if (override.createContext) {
-    merged.createContext = async (prevCtx?: any) => {
-      const res = await base.createContext(prevCtx);
+    merged.createContext = async (prevCtx?: any, req?: any, context?: any) => {
+      const res = await base.createContext(prevCtx, req, context);
       if (!res.ok) return res;
-      return override.createContext({ ...prevCtx, ...res.ctx });
+      return override.createContext({ ...prevCtx, ...res.ctx }, req, context);
     };
   }
 
   if (override.enrichInput) {
-    merged.enrichInput = async (ctx: any) => {
-      const baseEnriched = base.enrichInput ? await base.enrichInput(ctx) : {};
-      return override.enrichInput({ ctx, previous: baseEnriched });
+    merged.enrichInput = async (ctx: any, req?: any, context?: any) => {
+      const baseEnriched = base.enrichInput ? await base.enrichInput(ctx, req, context) : {};
+      return override.enrichInput({ ctx, previous: baseEnriched }, req, context);
     };
   }
 

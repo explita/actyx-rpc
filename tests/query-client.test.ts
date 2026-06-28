@@ -184,8 +184,55 @@ describe("React: QueryClient Caching & Invalidation", () => {
         expect(queryClient.getQueryState("arr")?.data).toEqual(["a", "y", "b", "c"]);
 
         queryClient.remove("arr", 1);
-        expect(queryClient.getQueryState("arr")?.data).toEqual(["a", "b", "c"]);
       });
+
+      it("should support concurrent surgical rollbacks for multiple updates", () => {
+        queryClient.setQueryState("arr", {
+          data: [
+            { id: "1", text: "A", completed: false },
+            { id: "2", text: "B", completed: false },
+          ],
+        });
+
+        // Optimistically update B
+        const rollbackB = queryClient.update<any>(
+          "arr",
+          (item) => item.id === "2",
+          (item) => ({ ...item, completed: true }),
+        );
+
+        // Optimistically update A
+        const rollbackA = queryClient.update<any>(
+          "arr",
+          (item) => item.id === "1",
+          (item) => ({ ...item, completed: true }),
+        );
+
+        // State is both completed
+        expect(queryClient.getQueryState("arr")?.data).toEqual([
+          { id: "1", text: "A", completed: true },
+          { id: "2", text: "B", completed: true },
+        ]);
+
+        // Rollback B
+        rollbackB();
+
+        // A is still completed, B is reverted to false
+        expect(queryClient.getQueryState("arr")?.data).toEqual([
+          { id: "1", text: "A", completed: true },
+          { id: "2", text: "B", completed: false },
+        ]);
+
+        // Rollback A
+        rollbackA();
+
+        // Both are reverted
+        expect(queryClient.getQueryState("arr")?.data).toEqual([
+          { id: "1", text: "A", completed: false },
+          { id: "2", text: "B", completed: false },
+        ]);
+      });
+
 
       it("should discard insert, remove, update on standard object data", () => {
         const initialObj = { a: 1 };

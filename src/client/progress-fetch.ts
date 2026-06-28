@@ -29,7 +29,7 @@ export async function progressFetch(
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
-            const percentComplete = (event.loaded / event.total) * 100;
+            const percentComplete = Math.round((event.loaded / event.total) * 100);
             onProgress(percentComplete);
           }
         };
@@ -78,7 +78,7 @@ export async function progressFetch(
         if (done) break;
 
         loaded += value.length;
-        onProgress((loaded / total) * 100);
+        onProgress(Math.round((loaded / total) * 100));
         controller.enqueue(value);
       }
       controller.close();

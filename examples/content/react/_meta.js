@@ -7,5 +7,6 @@ export default {
   "cache-mutations": "Cache Mutations & Rollbacks",
   subscriptions: "WebSocket Subscriptions",
   sse: "Server-Sent Events (SSE)",
+  "real-time-infinite-queries": "Real-Time Infinite Queries",
   utilities: "React Utilities",
 };

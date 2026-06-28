@@ -74,11 +74,11 @@ To track upload progress, pass a **URL endpoint** to `useMutation` instead of a 
 Create a route handler (e.g. `app/api/rpc/upload/route.ts`) wrapping your procedure:
 
 ```ts
-import { createNextHandler } from "@explita/actyx-rpc/adapters/next";
+import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
 import { testUpload } from "@/backend/procedures";
 
 // Mount standard POST route handler
-export const POST = createNextHandler(testUpload);
+export const POST = createRouteHandler(testUpload);
 ```
 
 ### 2. Configure `useMutation` with the URL
@@ -130,21 +130,64 @@ await upload.mutate({
 ```
 
 ### Server-Side Ingestion
-On the server, your procedure recovers files cleanly regardless of which mode was chosen:
+On the server, you handle these uploads cleanly using standard web-router signatures. Here is how you can set up route handlers for both modes (shown using Next.js as an example framework):
+
+#### 1. Handling Binary Streams (Highly Efficient)
+For direct octet binary streams, you access the standard Web `Request` body stream (`req.body`) inside your `.webRoute`:
 
 ```ts
-export const testUpload = procedure
-  .input(z.object({ file: z.instanceof(File).optional() }))
-  .mutation(async ({ input, ctx }, fileDataArg: File) => {
-    // Falls back to direct binary argument if not present on form input
-    const fileData = fileDataArg || (input as any)?.file;
+import { procedure } from "@/lib/rpc/init";
+import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
+import { Readable } from "stream";
+import fs from "fs";
 
-    if (!fileData) {
-      throw new Error("No file uploaded");
+export const POST = createRouteHandler(
+  procedure.webRoute(async ({ input, ctx }, req) => {
+    const stream = req.body; // Native Web ReadableStream
+    if (!stream) {
+      throw new Error("No payload stream provided");
     }
 
-    // Access standard Web Readable Stream to write/process data
-    const stream = fileData.stream();
-    // ... write to S3/Disk
-  });
+    // Pipe the web stream to disk/storage
+    const nodeStream = Readable.fromWeb(stream as any);
+    const writeStream = fs.createWriteStream("./uploads/file.png");
+    await new Promise((resolve, reject) => {
+      nodeStream.pipe(writeStream);
+      writeStream.on("finish", resolve);
+      writeStream.on("error", reject);
+    });
+
+    return { success: true };
+  })
+);
+```
+
+#### 2. Handling Multipart Form-Data
+For standard Form-Data requests, files are automatically parsed by the core router and mapped straight to your schema validation inputs:
+
+```ts
+import { procedure } from "@/lib/rpc/init";
+import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
+import { z } from "zod";
+import fs from "fs";
+
+export const POST = createRouteHandler(
+  procedure
+    .input(
+      zodResolver(
+        z.object({
+          file: z.instanceof(File),
+          description: z.string().optional(),
+        })
+      )
+    )
+    .webRoute(async ({ input }) => {
+      const file = input.file; // Fully resolved standard File instance
+      const arrayBuffer = await file.arrayBuffer();
+      
+      await fs.promises.writeFile("./uploads/file.png", Buffer.from(arrayBuffer));
+      return { success: true };
+    })
+);
 ```

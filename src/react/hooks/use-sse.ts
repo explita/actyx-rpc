@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { SSEClient } from "../../client/sse.js";
 import type { ErrorResponse } from "../../types/misc.js";
-import type { UseSSEOptions, UseSSEReturn } from "../types.js";
+import type { UseSSEOpts, UseSSEResult } from "../types.js";
 
-export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
+export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
   const {
     url,
     params,
@@ -23,6 +23,13 @@ export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
   const [error, setError] = useState<ErrorResponse | undefined>();
 
   const activeClientRef = useRef<{ close: () => void } | null>(null);
+
+  const onDataRef = useRef(onData);
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onDataRef.current = onData;
+    onErrorRef.current = onError;
+  });
 
   const paramsStr = JSON.stringify(params);
   const headersStr = JSON.stringify(headers);
@@ -100,7 +107,7 @@ export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
             return arrange ? arrange(next) : next;
           });
 
-          onData?.(sseEvent.data, sseEvent.event);
+          onDataRef.current?.(sseEvent.data, sseEvent.event);
         }
       } catch (err: any) {
         if (!isAborted && err.name !== "AbortError") {
@@ -112,7 +119,7 @@ export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
             reason: "UNEXPECTED_ERROR",
           };
           setError(errResponse);
-          onError?.(errResponse);
+          onErrorRef.current?.(errResponse);
         }
       } finally {
         if (!isAborted) {
@@ -131,17 +138,7 @@ export function useSSE<T = any>(options: UseSSEOptions<T>): UseSSEReturn<T> {
       }
       close();
     };
-  }, [
-    url,
-    paramsStr,
-    headersStr,
-    enabled,
-    signal,
-    maxHistory,
-    close,
-    onData,
-    onError,
-  ]);
+  }, [url, paramsStr, headersStr, enabled, signal, maxHistory, close]);
 
   return {
     data,

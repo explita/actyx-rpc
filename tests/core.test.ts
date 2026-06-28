@@ -90,3 +90,118 @@ describe("Core: Input Modes", () => {
     });
   });
 });
+
+describe("Core: Web Route Handler", () => {
+  const procedure = createProcedure({
+    inputMode: "strict",
+    createContext: () => ({ ok: true, ctx: { userId: "user_1" } }),
+    enrichInput: (ctx) => ({ user: ctx.userId }),
+  });
+
+  it("should handle GET request and parse search params", async () => {
+    const route = procedure
+      .input(zodResolver(z.object({ name: z.string() })))
+      .webRoute(async ({ input }) => {
+        return { greeting: `Hello ${input.name}` };
+      });
+
+    const req = new Request("http://localhost/api/test?name=Alice", {
+      method: "GET",
+    });
+
+    const response = await route(req);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ greeting: "Hello Alice" });
+  });
+
+  it("should handle POST request and parse JSON body", async () => {
+    const route = procedure
+      .input(zodResolver(z.object({ age: z.number() })))
+      .webRoute(async ({ input }) => {
+        return { doubleAge: input.age * 2 };
+      });
+
+    const req = new Request("http://localhost/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ age: 30 }),
+    });
+
+    const response = await route(req);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ doubleAge: 60 });
+  });
+
+  it("should merge route params into input", async () => {
+    const route = procedure
+      .input(zodResolver(z.object({ id: z.string(), status: z.string() })))
+      .webRoute(async ({ input }) => {
+        return input;
+      });
+
+    const req = new Request("http://localhost/api/test?status=active", {
+      method: "GET",
+    });
+
+    const response = await route(req, { params: { id: "123" } });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ id: "123", status: "active", user: "user_1" });
+  });
+
+  it("should pass through custom Response objects", async () => {
+    const route = procedure.webRoute(async () => {
+      return new Response("Custom body", { status: 201 });
+    });
+
+    const req = new Request("http://localhost/api/test");
+    const response = await route(req);
+    expect(response.status).toBe(201);
+    const text = await response.text();
+    expect(text).toBe("Custom body");
+  });
+
+  it("should handle webRoute without input schema and keep argument alignment", async () => {
+    const route = procedure.webRoute(async ({ input }, req, context) => {
+      return { input, hasReq: req instanceof Request, params: context?.params };
+    });
+
+    const req = new Request("http://localhost/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ customField: "hello" }),
+    });
+
+    const response = await route(req, { params: { dynamicId: "999" } });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      input: {
+        customField: "hello",
+        dynamicId: "999",
+        user: "user_1",
+      },
+      hasReq: true,
+      params: { dynamicId: "999" },
+    });
+  });
+
+  it("should re-throw NEXT_REDIRECT errors to let Next.js handle redirects natively", async () => {
+    class RedirectError extends Error {
+      digest = "NEXT_REDIRECT;replace;/login;307;";
+      constructor() {
+        super("NEXT_REDIRECT");
+      }
+    }
+
+    const route = procedure.webRoute(async () => {
+      throw new RedirectError();
+    });
+
+    const req = new Request("http://localhost/api/test");
+    await expect(route(req)).rejects.toThrow("NEXT_REDIRECT");
+  });
+});
+

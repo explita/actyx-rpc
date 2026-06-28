@@ -577,13 +577,9 @@ export class QueryClient {
   ): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
-    const previousData = currentState?.data;
-    const rollback = () => {
-      this.setQueryState(queryKey, { data: previousData });
-    };
 
     if (!currentState || currentState.data === undefined) {
-      return rollback;
+      return () => {};
     }
 
     const data = currentState.data;
@@ -593,6 +589,12 @@ export class QueryClient {
       return typeof updater === "function" ? updater(item) : updater;
     };
 
+    // Surgical changes log
+    const changes: Array<
+      | { type: "flat"; index: number; originalValue: any }
+      | { type: "pages"; pageIndex: number; itemIndex: number; originalValue: any }
+    > = [];
+
     if (
       data &&
       typeof data === "object" &&
@@ -601,38 +603,39 @@ export class QueryClient {
     ) {
       const oldPages = (data as any).pages as any[];
       if (oldPages.some((page) => !Array.isArray(page?.data))) {
-        return rollback;
+        return () => {};
       }
 
-      let newPages: any[] = [];
+      let targetIndex = typeof arg === "number" ? arg : -1;
+      let updatedCount = 0;
 
-      if (typeof arg === "number") {
-        let targetIndex = arg;
-        let updated = false;
-
-        newPages = oldPages.map((page) => {
-          if (updated) return page;
-          const pageLength = page.data.length;
-          if (targetIndex < pageLength) {
-            const newData = [...page.data];
-            newData[targetIndex] = resolveUpdater(newData[targetIndex]);
-            updated = true;
-            return { ...page, data: newData };
-          }
-          targetIndex -= pageLength;
-          return page;
-        });
-      } else if (typeof arg === "function") {
-        newPages = oldPages.map((page) => {
-          const newData = page.data.map((item: any) => {
-            if (arg(item)) {
-              return resolveUpdater(item);
+      const newPages = oldPages.map((page, pageIndex) => {
+        const newData = page.data.map((item: any, itemIndex: number) => {
+          let shouldUpdate = false;
+          if (typeof arg === "number") {
+            if (targetIndex === updatedCount) {
+              shouldUpdate = true;
             }
-            return item;
-          });
-          return { ...page, data: newData };
+            updatedCount++;
+          } else if (typeof arg === "function") {
+            if (arg(item)) {
+              shouldUpdate = true;
+            }
+          }
+
+          if (shouldUpdate) {
+            changes.push({
+              type: "pages",
+              pageIndex,
+              itemIndex,
+              originalValue: item,
+            });
+            return resolveUpdater(item);
+          }
+          return item;
         });
-      }
+        return { ...page, data: newData };
+      });
 
       this.setQueryState(queryKey, {
         data: {
@@ -642,22 +645,77 @@ export class QueryClient {
       });
     } else {
       if (Array.isArray(data)) {
-        let newData: any[] = [];
+        let newData: any[] = [...data];
         if (typeof arg === "number") {
           if (arg >= 0 && arg < data.length) {
-            newData = [...data];
-            newData[arg] = resolveUpdater(newData[arg]);
-            this.setQueryState(queryKey, {
-              data: newData,
-              updatedAt: Date.now(),
+            changes.push({
+              type: "flat",
+              index: arg,
+              originalValue: data[arg],
             });
+            newData[arg] = resolveUpdater(data[arg]);
           }
         } else if (typeof arg === "function") {
-          newData = data.map((item) => {
+          newData = data.map((item, index) => {
             if (arg(item)) {
+              changes.push({
+                type: "flat",
+                index,
+                originalValue: item,
+              });
               return resolveUpdater(item);
             }
             return item;
+          });
+        }
+        this.setQueryState(queryKey, {
+          data: newData,
+          updatedAt: Date.now(),
+        });
+      }
+    }
+
+    // Surgical rollback function
+    const rollback = () => {
+      const latestState = this.getQueryState(queryKey);
+      if (!latestState || latestState.data === undefined) {
+        return;
+      }
+      const latestData = latestState.data;
+
+      if (
+        latestData &&
+        typeof latestData === "object" &&
+        "pages" in latestData &&
+        Array.isArray((latestData as any).pages)
+      ) {
+        const oldPages = (latestData as any).pages as any[];
+        const newPages = oldPages.map((page, pageIndex) => {
+          const newData = page.data.map((item: any, itemIndex: number) => {
+            const change = changes.find(
+              (c) =>
+                c.type === "pages" &&
+                c.pageIndex === pageIndex &&
+                c.itemIndex === itemIndex,
+            );
+            return change ? change.originalValue : item;
+          });
+          return { ...page, data: newData };
+        });
+
+        this.setQueryState(queryKey, {
+          data: {
+            ...latestData,
+            pages: newPages,
+          },
+        });
+      } else {
+        if (Array.isArray(latestData)) {
+          const newData = latestData.map((item, index) => {
+            const change = changes.find(
+              (c) => c.type === "flat" && c.index === index,
+            );
+            return change ? change.originalValue : item;
           });
           this.setQueryState(queryKey, {
             data: newData,
@@ -665,7 +723,7 @@ export class QueryClient {
           });
         }
       }
-    }
+    };
 
     return rollback;
   }

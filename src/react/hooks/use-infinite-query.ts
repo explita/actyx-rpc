@@ -4,6 +4,7 @@ import {
   useRef,
   useId,
   useSyncExternalStore,
+  useMemo,
 } from "react";
 import type { ErrorResponse, QueryResult } from "../../types/misc.js";
 import type {
@@ -51,12 +52,14 @@ export function useInfiniteQuery<
     onSuccess,
     onError,
     onSettled,
+    arrange,
   } = opts || {};
 
   const callbacksRef = useRef({
     onSuccess,
     onError,
     onSettled,
+    arrange,
     proc,
     initialInput,
     initialData,
@@ -66,6 +69,7 @@ export function useInfiniteQuery<
       onSuccess,
       onError,
       onSettled,
+      arrange,
       proc,
       initialInput,
       initialData,
@@ -88,7 +92,7 @@ export function useInfiniteQuery<
         isError: false,
         isSuccess: !!resolvedInitialData,
         updatedAt: resolvedInitialData ? Date.now() : undefined,
-        isFetched: false,
+        isFetched: !!resolvedInitialData,
       },
       { silent: true },
     );
@@ -429,8 +433,15 @@ export function useInfiniteQuery<
 
   const isEmpty = state.isFetched && flattenedData.length === 0;
 
+  const arrangedData = useMemo(() => {
+    if (callbacksRef.current.arrange) {
+      return callbacksRef.current.arrange(flattenedData);
+    }
+    return flattenedData;
+  }, [flattenedData]);
+
   return {
-    data: flattenedData,
+    data: arrangedData,
     pages,
     pageParams,
     fetchNext,

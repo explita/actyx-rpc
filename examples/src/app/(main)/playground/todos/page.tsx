@@ -38,6 +38,9 @@ const TodoList = () => {
     queryKey: ["todos"],
   });
   const qc = useQueryClient();
+  // const { data: todos } = client.todo.get.useSuspenseQuery({
+  //   queryKey: ["todos"],
+  // });
 
   function updateItem(id: string) {
     //optimistic ui update
@@ -99,11 +102,11 @@ export default function Page() {
   const [text, setText] = useState("");
   const [errorToast, setErrorToast] = useState("");
 
-  const rollback = qc.snapshot("todos");
-
-  const { mutate, isPending } = useMutation(() => addTodo({ text }), {
+  const { mutate, isPending } = useMutation(addTodo, {
     mutationKey: ["addTodo"],
     onMutate: () => {
+      const rollback = qc.snapshot("todos");
+
       qc.append<Todo>(["todos"], {
         id: `optimistic-${Date.now()}`,
         text,
@@ -112,13 +115,14 @@ export default function Page() {
 
       setText("");
       setErrorToast("");
+
+      return rollback;
     },
-    onError: () => {
-      rollback();
+    onError: (err, rollback) => {
+      if (rollback && typeof rollback === "function") {
+        rollback();
+      }
       setErrorToast("Whoops! Simulated failure. Rolling back...");
-    },
-    onSettled: () => {
-      qc.invalidate(["todos"]);
     },
   });
 
@@ -155,7 +159,7 @@ export default function Page() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (text) mutate();
+          if (text) mutate({ text });
         }}
         className="flex gap-3 mb-8"
       >

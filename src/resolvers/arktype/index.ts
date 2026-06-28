@@ -16,9 +16,9 @@ import type { SchemaResolver } from "../../types/misc.js";
  * procedure.input(arktypeResolver(schema)).mutation(...)
  * ```
  */
-export function arktypeResolver<S extends Type<any, any>>(
-  schema: S,
-): SchemaResolver<type.infer<S>> {
+export function arktypeResolver<TShape extends Record<string, unknown>>(
+  schema: Type<TShape, any>,
+): SchemaResolver<TShape> {
   return {
     async parse(data) {
       const result = schema(data);
@@ -33,7 +33,7 @@ export function arktypeResolver<S extends Type<any, any>>(
         );
         return { success: false, errors };
       }
-      return { success: true, data: result };
+      return { success: true, data: result as TShape };
     },
     toJsonSchema() {
       const s = schema as any;

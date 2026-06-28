@@ -239,9 +239,10 @@ const streamData = proc
     }
   });
 
+const arkSchema = type({ name: "string", age: "number" });
 const arktypeData = proc
   .name("arktypeData")
-  .input(arktypeResolver(type({ name: "string", age: "number" })))
+  .input(arktypeResolver(arkSchema))
   .query(async ({ input }) => ({ success: true, input }));
 
 const valibotData = proc
@@ -272,6 +273,18 @@ const joiData = proc
     ),
   )
   .query(async ({ input }) => ({ success: true, input }));
+
+// --- Primitive enforcement checks (all should produce TS errors) ---
+// @ts-expect-error — zod: only ZodObject<ZodRawShape> allowed
+zodResolver(z.string());
+// @ts-expect-error — yup: only ObjectSchema allowed
+yupResolver(yup.string());
+// @ts-expect-error — joi: only ObjectSchema allowed
+joiResolver(Joi.string());
+// @ts-expect-error — valibot: only ObjectSchema allowed
+valibotResolver(v.string());
+// @ts-expect-error — arktype: only Type<Record<string, unknown>, any> allowed
+arktypeResolver(type("string.email"));
 
 (async () => {
   console.log("--- Starting Stream Test ---");

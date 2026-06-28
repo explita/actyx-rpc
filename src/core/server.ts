@@ -1,6 +1,6 @@
 import { mergeConfigs } from "../lib/utils.js";
 import { MemoryCache } from "./cache/memory-cache.js";
-import { MemoryPubSub, RedisPubSub } from "../lib/pubsub.js";
+import { MemoryPubSub, RedisPubSub, type PubSubAdapter } from "../lib/pubsub.js";
 import type {
   CacheInvalidationOptions,
   RateLimitOptions,
@@ -35,6 +35,8 @@ import type {
 } from "../types/misc.js";
 import { RedisCache } from "./cache/redis-cache.js";
 import { getContext } from "./helpers/get-context.js";
+import { webRouter } from "./helpers/web-router.js";
+import { parseFrameworkError } from "../lib/parse-framework-error.js";
 
 export function createProcedure<
   TCtx extends Record<string, unknown>,
@@ -48,9 +50,16 @@ export function createProcedure<
 
   // Reuse Redis instance from cache if available for PubSub
   const redisInstance = (globalCache as RedisCache).redis;
-  const globalPubSub = redisInstance
-    ? new RedisPubSub(redisInstance)
-    : new MemoryPubSub();
+  let globalPubSub: PubSubAdapter;
+  if (redisInstance) {
+    globalPubSub = new RedisPubSub(redisInstance);
+  } else {
+    const globalKey = "__actyx_rpc_pubsub__";
+    if (!(globalThis as any)[globalKey]) {
+      (globalThis as any)[globalKey] = new MemoryPubSub();
+    }
+    globalPubSub = (globalThis as any)[globalKey];
+  }
 
   // Default implementations
   opts.createContext ??= (async () => ({ ok: true, ctx: {} as any })) as any;
@@ -69,8 +78,8 @@ export function createProcedure<
     const nextConfig = { ...config };
 
     return {
-      name(name) {
-        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, typeof name>({
+      name<NextName extends string>(name: NextName) {
+        return procedureBuilder<I, Ctx, TLocalMeta, TICtx, NextName>({
           ...nextConfig,
           name,
         });
@@ -300,6 +309,7 @@ export function createProcedure<
 
           // Handle redirect response
           if (error) {
+            parseFrameworkError(error);
             if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
@@ -360,6 +370,7 @@ export function createProcedure<
 
           // Handle redirect response
           if (error) {
+            parseFrameworkError(error);
             if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
@@ -373,6 +384,17 @@ export function createProcedure<
         return terminal;
       },
 
+      webRoute(handler) {
+        return webRouter(
+          handler,
+          opts,
+          config,
+          globalCache,
+          globalPubSub,
+          globalCompressor,
+        ) as any;
+      },
+
       //@ts-ignore
       stream(handler) {
         //@ts-ignore
@@ -380,7 +402,9 @@ export function createProcedure<
 
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
+
           if (error) {
+            parseFrameworkError(error);
             if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
@@ -413,6 +437,7 @@ export function createProcedure<
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
           if (error) {
+            parseFrameworkError(error);
             if ("_redirect" in error && typeof error._redirect === "function") {
               error._redirect();
             }
@@ -438,73 +463,25 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      subscription(handler) {
-        const nextConfig = { ...config, type: "subscription" };
-
-        const terminal = function (payload?: any, ...args: any[]) {
-          return async (wsContext: {
-            send: (data: any) => void;
-            onMessage: (cb: (data: any) => void) => void;
-            onClose: (cb: () => void) => void;
-            onError: (cb: (err: any) => void) => void;
-          }) => {
-            // We reuse the resolve logic to get context and input
-            // But since subscription is a long-running process, we need a custom executor
-            const resolvedFn = handlerResolver(
-              async ({ ctx, input }, ...args) => {
-                // This is the "setup" phase of the subscription
-                const emit = (data: any) => {
-                  wsContext.send({ type: "event", data });
-                };
-
-                //@ts-ignore
-                const cleanup = await handler({ ctx, input, emit }, ...args);
-
-                if (typeof cleanup === "function") {
-                  wsContext.onClose(cleanup);
-                }
-
-                return { subscribed: true };
-              },
-              //@ts-ignore
-              opts,
-              nextConfig,
-              globalCache,
-              globalPubSub,
-            );
-
-            const [result, error] = await resolvedFn(payload, ...args);
-
-            if (error) {
-              wsContext.send({ type: "error", error });
-              wsContext.onError?.(error);
-            } else {
-              wsContext.send({ type: "subscribed", data: result });
-            }
-          };
-        };
-
-        (terminal as any)._def = nextConfig;
-        return terminal;
-      },
-
-      //@ts-ignore
       ws(handler) {
         const nextConfig = { ...config, type: "ws" };
 
         const terminal = function (payload?: any, ...args: any[]) {
           return async (wsContext: {
             send: (data: any) => void;
+            broadcast: (data: any) => void;
             onMessage: (cb: (data: any) => void) => void;
             onClose: (cb: () => void) => void;
             onError: (cb: (err: any) => void) => void;
           }) => {
             const resolvedFn = handlerResolver(
               async ({ ctx, input }) => {
+                //@ts-ignore
                 return await handler({
                   ctx,
                   input,
                   send: wsContext.send,
+                  broadcast: wsContext.broadcast,
                   onMessage: wsContext.onMessage,
                   onClose: wsContext.onClose,
                   onError: wsContext.onError,
