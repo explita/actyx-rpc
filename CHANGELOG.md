@@ -3,6 +3,19 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-28
+
+### Added
+
+- **`useWSInfiniteQuery` Hook**: Added a new React hook that combines `useInfiniteQuery` with `useWS` for WebSocket-powered infinite pagination. Incoming WebSocket messages are automatically appended to the cached page data, and custom cache mutations (prepend, update) can be performed via the `onData` callback.
+- **`useSSEInfiniteQuery` Hook**: Added a new React hook that combines `useInfiniteQuery` with `useSSE` for SSE-powered infinite pagination. Incoming SSE events are automatically appended to the cached page data, with event name tracking and custom cache mutation support.
+
+### Fixed
+
+- **Documentation Import Paths**: Corrected `createSSEResponse` import path (was incorrectly pointing to `@explita/actyx-rpc/adapters/next`, now from `@explita/actyx-rpc`). Corrected `SSEClient` import path (was incorrectly pointing to `@explita/actyx-rpc`, now from `@explita/actyx-rpc/client/sse`).
+
+---
+
 ## [0.5.0] - 2026-06-16
 
 ### Added
