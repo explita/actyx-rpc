@@ -209,6 +209,14 @@ export type UseInfiniteQueryOpts<
   arrange?: (data: TPage[]) => TPage[];
 
   /**
+   * Whether to keep the previous data while fetching new data.
+   * If `true`, the UI will continue showing the old data during refetch
+   * instead of flashing an empty state. Only applies to refetches, not initial fetch.
+   * @default true
+   */
+  keepPreviousData?: boolean;
+
+  /**
    * Unique key for identifying this query in the cache
    * Used for manual invalidation and refetching
    */
@@ -434,6 +442,15 @@ export type UseQueryOpts<
    * @default false
    */
   unwrap?: TUnwrap;
+
+  /**
+   * Whether to keep the previous data while fetching new data.
+   * If `true`, the UI will continue showing the old data during refetch
+   * instead of flashing an empty state.
+   * @default true
+   */
+  keepPreviousData?: boolean;
+
   /**
    * Unique key for this query. If provided, simultaneous requests for the same key will be deduplicated.
    */
@@ -550,8 +567,9 @@ export type UseWSOpts<TOutput> = {
   /**
    * Callback triggered whenever new data is received over the ws.
    * @param data - The received data payload.
+   * @param action - Whether the item was `"added"` (new) or `"updated"` (dedup key matched an existing item). Only meaningful if `dedupKey` is provided; otherwise always `"added"`.
    */
-  onData?: (data: TOutput) => void;
+  onData?: (data: TOutput, action: "added" | "updated") => void;
 
   /**
    * Callback triggered when a connection or ws error occurs.
@@ -567,6 +585,49 @@ export type UseWSOpts<TOutput> = {
    * Callback triggered when the ws connection is closed.
    */
   onUnsubscribed?: () => void;
+
+  /**
+   * Callback triggered when the browser window regains focus.
+   * Receives the current accumulated data array.
+   * @param data - The current data array accumulated so far.
+   */
+  onWindowFocus?: (data: TOutput[]) => void;
+
+  /**
+   * Callback triggered when the network connection is restored after being offline.
+   * Receives the current accumulated data array.
+   * @param data - The current data array accumulated so far.
+   */
+  onReconnect?: (data: TOutput[]) => void;
+
+  /**
+   * Callback fired before each reconnection attempt.
+   * @param attempt - The current attempt number (0-indexed).
+   */
+  onReconnectAttempt?: (attempt: number) => void;
+
+  /**
+   * Callback fired when all reconnection attempts are exhausted.
+   */
+  onReconnectFailed?: () => void;
+
+  /**
+   * Optional filter function to decide whether to include incoming data in the state.
+   * The data is still passed to `onData` regardless.
+   * @param data - The received data payload.
+   * @returns `true` to include the data in state, `false` to skip it.
+   */
+  filter?: (data: TOutput) => boolean;
+
+  /**
+   * Function to extract a deduplication key from a data item.
+   * When provided, incoming items with the same key as an existing item
+   * will update it in-place instead of being appended.
+   * Useful for real-time updates where the server sends updated versions of records.
+   * @param item - The data item.
+   * @returns A unique key for the item.
+   */
+  dedupKey?: (item: TOutput) => string | number;
 
   /**
    * Optional callback to arrange the data array.
@@ -640,12 +701,14 @@ export type UseQueriesConfig<
   TInitialData extends Omit<Unwrap<TOutput, TUnwrap>, "success"> | undefined =
     undefined,
   TSelectData = Unwrap<TOutput, TUnwrap>,
-> = {
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>;
-  queryKey: TQueryKey;
-} & Omit<UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData>, "queryKey"> & {
-    initialData?: TInitialData | (() => TInitialData);
-  };
+> = Prettify<
+  {
+    proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>;
+    // queryKey: TQueryKey;
+  } & UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
+      initialData?: TInitialData | (() => TInitialData);
+    }
+>;
 
 export type QueriesResults<T extends readonly any[]> = {
   [K in keyof T]: T[K] extends UseQueriesConfig<
@@ -653,9 +716,9 @@ export type QueriesResults<T extends readonly any[]> = {
     any,
     infer TUnwrap,
     infer TInit,
-    infer TSelect
+    any
   >
-    ? QueryResult<TOut, TInit, TUnwrap, TSelect>
+    ? QueryResult<TOut, TInit, TUnwrap, TOut>
     : T[K] extends {
           proc: () => Promise<[infer TOut, null] | [null, ErrorResponse]>;
         }
@@ -781,6 +844,7 @@ export type UseSuspenseQueryResult<
 export interface WSEventContext<TData = any> {
   data: TData;
   allData: TData[];
+  action: "updated" | "added";
   append: (item: TData) => void;
   prepend: (item: TData) => void;
   update: (
@@ -795,15 +859,38 @@ export interface WSAdapterOptions<
   TPage,
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
-> extends Omit<UseWSOpts<TData>, "onData"> {
+> extends Omit<UseWSOpts<TData>, "onData" | "onWindowFocus" | "onReconnect"> {
   // Infinite Query options
   queryOpts?: Omit<
     UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
     "arrange"
   >;
 
-  // Custom onWSData with query cache actions
+  /**
+   * Callback triggered whenever new data is received over the ws.
+   * Receives a context object with the data, the dedup action, the full dataset,
+   * and cache manipulation helpers.
+   */
   onData?: (opts: WSEventContext<TData>) => void;
+
+  /**
+   * Callback triggered when the browser window regains focus.
+   * Receives the current infinite query data and a refetch function.
+   * @param opts.data - The current infinite query data array.
+   * @param opts.refetch - Function to manually refetch the query.
+   */
+  onWindowFocus?: (opts: {
+    data: TData[];
+    refetch: () => Promise<void>;
+  }) => void;
+
+  /**
+   * Callback triggered when the network connection is restored after being offline.
+   * Receives the current infinite query data and a refetch function.
+   * @param opts.data - The current infinite query data array.
+   * @param opts.refetch - Function to manually refetch the query.
+   */
+  onReconnect?: (opts: { data: TData[]; refetch: () => Promise<void> }) => void;
 }
 
 export interface SSEAdapterOptions<

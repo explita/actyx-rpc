@@ -80,6 +80,7 @@ function LiveFeed() {
 | `refetchInterval` | `number` | `0` | Polling interval in ms. |
 | `refetchOnWindowFocus` | `boolean` | `false` | Refetch on window focus. |
 | `refetchOnReconnect` | `boolean \| "always"` | `true` | Refetch on network restore. |
+| `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
 | `initialData` | `data \| (() => data)` | — | Pre-populate cache on mount. |
 
 **WebSocket Options** (all `useWS` options except `onData`):
@@ -89,10 +90,12 @@ function LiveFeed() {
 | `url` | `string` | — | WebSocket server URL. |
 | `initialData` | `TOutput[] \| (() => MaybePromise<TOutput[]>)` | — | Pre-populate the data array. |
 | `enabled` | `boolean` | `true` | Set to `false` to prevent connecting. |
-| `onData` | `(opts: WSEventContext) => void` | — | Callback receiving `{ data, allData, append, prepend, update }` for custom cache mutations. |
+| `onData` | `(opts: WSEventContext) => void` | — | Callback receiving `{ data, action, allData, append, prepend, update }` for custom cache mutations. |
 | `onError` | `(err) => void` | — | Connection error callback. |
 | `onSubscribed` | `() => void` | — | Connection established callback. |
 | `onUnsubscribed` | `() => void` | — | Connection closed callback. |
+| `onWindowFocus` | `(opts: { data: TData[]; refetch: () => Promise<void> }) => void` | — | Callback when window regains focus. Receives infinite query data and a refetch function. |
+| `onReconnect` | `(opts: { data: TData[]; refetch: () => Promise<void> }) => void` | — | Callback when network reconnects. Receives infinite query data and a refetch function. |
 
 ### Returned Properties
 
@@ -198,8 +201,9 @@ Returns all properties from `useInfiniteQuery` **plus** the following from `useS
 Both hooks accept an `onData` callback that fires on every incoming event/message. It provides the raw payload along with helper functions to manipulate the infinite query cache directly:
 
 ```ts
-onData({ data, allData, append, prepend, update, event }) {
+onData({ data, action, allData, append, prepend, update, event }) {
   // data       - The incoming event payload
+  // action     - `"added"` or `"updated"` (dedup key matched an existing item)
   // allData    - The current flattened data array from all pages
   // append     - Append item to the last page
   // prepend    - Prepend item to the first page

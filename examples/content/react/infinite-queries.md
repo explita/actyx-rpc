@@ -94,6 +94,7 @@ The `useInfiniteQuery` hook accepts two arguments:
 | `onSuccess` | `(data) => void` | — | Callback run on successful page load. |
 | `onError` | `(error) => void` | — | Callback run when a fetch fails. |
 | `onSettled` | `() => void` | — | Callback run when a query completes (success or failure). |
+| `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
 
 ---
 

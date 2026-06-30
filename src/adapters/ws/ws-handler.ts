@@ -1,27 +1,57 @@
+import { MaybePromise } from "../../types/misc";
+
+/** Socket that uses EventEmitter-style `.on()` (e.g. `ws` library). */
+interface EventEmitterSocket {
+  on: (event: string, listener: (...args: any[]) => void) => void;
+  readyState: number;
+  send: (data: string) => void;
+}
+
+/** Socket that uses DOM/WHATWG-style event properties (e.g. browser, Node.js built-in). */
+interface DOMSocket {
+  onmessage: ((ev: { data: string }) => void) | null;
+  onclose: (() => void) | null;
+  onerror: ((err: any) => void) | null;
+  readyState: number;
+  send: (data: string) => void;
+}
+
+/** Context object passed to the WebSocket procedure. */
+export interface WSProcedureContext<TData = any> {
+  send: (data: any) => void;
+  broadcast: (data: TData) => void;
+  onMessage: (cb: (data: any) => void) => void;
+  onClose: (cb: () => void) => void;
+  onError: (cb: (err: any) => void) => void;
+}
+
 /**
  * WebSocket adapter to attach an Actyx-RPC WebSocket procedure to a
- * standard WebSocket (like ws or native in Node.js).
+ * standard WebSocket (like ws library, Node.js built-in, or browser).
  */
-export function applyWSHandler<TData = any>(
+export function applyWSHandler<
+  TData = any,
+  WSClient extends EventEmitterSocket | DOMSocket = EventEmitterSocket,
+>(
   /**
    * The Actyx-RPC procedure to attach to the WebSocket.
    * This procedure should be of type ".ws" and handle the WebSocket events.
    * It will receive a context object with send, broadcast, onMessage, onClose, and onError methods.
    */
-  procedure: (wsContext: any) => Promise<void>,
+  procedure: (wsContext: WSProcedureContext<TData>) => Promise<void>,
   options: {
     /**
      * The WebSocket instance to attach the procedure to.
      *
-     * This can be a WebSocket from the `ws` library, or a native WebSocket in Node.js.
+     * Supports `ws` library (EventEmitter `.on()`), Node.js built-in WebSocket, and browser WebSocket.
      */
-    ws: any; // e.g., a WebSocket instance from ws
+    ws: WSClient;
     /**
      * Broadcast function to send a message to all connected clients.
      *
      * Typically: `(data) => wss.clients.forEach(client => client.send(...))`.
      */
-    broadcast: (data: TData) => void;
+    broadcast?: (data: TData) => void;
   },
 ) {
   const { ws } = options;
@@ -38,7 +68,7 @@ export function applyWSHandler<TData = any>(
         ws.send(typeof data === "object" ? JSON.stringify(data) : String(data));
       }
     },
-    broadcast: options.broadcast,
+    broadcast: (data) => options.broadcast?.(data),
     onMessage: (cb: (data: any) => void) => {
       messageCallback = cb;
     },
@@ -50,22 +80,36 @@ export function applyWSHandler<TData = any>(
     },
   });
 
-  // Attach event handlers to the actual underlying socket
-  ws.on("message", (raw: any) => {
-    if (!messageCallback) return;
-    try {
-      const parsed = JSON.parse(String(raw));
-      messageCallback(parsed);
-    } catch {
-      messageCallback(String(raw));
-    }
-  });
+  // 2. Attach event handlers — support both EventEmitter and DOM-style sockets
+  const isEventEmitter = typeof (ws as any).on === "function";
 
-  ws.on("close", () => {
-    closeCallback?.();
-  });
+  if (isEventEmitter) {
+    const emitter = ws as unknown as EventEmitterSocket;
 
-  ws.on("error", (err: any) => {
-    errorCallback?.(err);
-  });
+    emitter.on("message", (raw: any) => {
+      if (!messageCallback) return;
+      try {
+        const parsed = JSON.parse(String(raw));
+        messageCallback(parsed);
+      } catch {
+        messageCallback(String(raw));
+      }
+    });
+    emitter.on("close", () => closeCallback?.());
+    emitter.on("error", (err: any) => errorCallback?.(err));
+  } else {
+    const domSocket = ws as unknown as DOMSocket;
+
+    domSocket.onmessage = (ev: { data: string }) => {
+      if (!messageCallback) return;
+      try {
+        const parsed = JSON.parse(ev.data);
+        messageCallback(parsed);
+      } catch {
+        messageCallback(ev.data);
+      }
+    };
+    domSocket.onclose = () => closeCallback?.();
+    domSocket.onerror = (err: any) => errorCallback?.(err);
+  }
 }

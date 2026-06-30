@@ -17,7 +17,6 @@ Track active mutations globally or filter specifically by a mutation key. This i
 import { useIsMutating } from "@explita/actyx-rpc/react";
 
 function GlobalSpinner() {
-  // Returns the number of active mutations in the app
   const isMutating = useIsMutating();
 
   // Or filter specifically by mutation key:
@@ -26,6 +25,27 @@ function GlobalSpinner() {
   if (!isMutating) return null;
 
   return <div className="spinner">Syncing with database...</div>;
+}
+```
+
+---
+
+## `useIsFetching`
+
+Track whether any query is currently fetching globally or filtered by a specific key prefix:
+
+```tsx
+import { useIsFetching } from "@explita/actyx-rpc/react";
+
+function GlobalLoader() {
+  const isFetching = useIsFetching();
+
+  // Or filter by key prefix:
+  // const isTodosFetching = useIsFetching("todos");
+
+  if (!isFetching) return null;
+
+  return <div className="loader">Loading data...</div>;
 }
 ```
 

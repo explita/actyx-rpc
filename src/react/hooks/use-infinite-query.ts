@@ -49,6 +49,7 @@ export function useInfiniteQuery<
     maxPages,
     refetchOnWindowFocus = false,
     refetchInterval = 0,
+    keepPreviousData = true,
     onSuccess,
     onError,
     onSettled,
@@ -63,6 +64,7 @@ export function useInfiniteQuery<
     proc,
     initialInput,
     initialData,
+    keepPreviousData,
   });
   useEffect(() => {
     callbacksRef.current = {
@@ -73,6 +75,7 @@ export function useInfiniteQuery<
       proc,
       initialInput,
       initialData,
+      keepPreviousData,
     };
   });
 
@@ -204,7 +207,6 @@ export function useInfiniteQuery<
     }
   }, [
     hasNext,
-    state.isFetching,
     pages,
     pageParams,
     fetchPage,
@@ -218,6 +220,9 @@ export function useInfiniteQuery<
     queryClient.setQueryState(queryKey, {
       isFetching: true,
       error: undefined,
+      ...(callbacksRef.current.keepPreviousData === false && {
+        data: { pages: [], pageParams: [] },
+      }),
     });
     fetchedCursorsRef.current.clear();
 
@@ -341,6 +346,8 @@ export function useInfiniteQuery<
     [queryClient, queryKey],
   );
 
+  const initialFetchRef = useRef(false);
+
   useEffect(() => {
     if (enabled === false) return;
 
@@ -349,29 +356,17 @@ export function useInfiniteQuery<
       refetch();
     });
 
-    const currentState = queryClient.getQueryState(queryKey);
-    const staleTime = parseWindow(opts?.staleTime);
-    let shouldFetch = true;
-    if (currentState?.isSuccess && currentState?.updatedAt) {
-      // if (Date.now() - currentState.updatedAt < staleTime) {
-      //   shouldFetch = false;
-      // }
+    if (!initialFetchRef.current) {
+      initialFetchRef.current = true;
+      refetch();
     }
-
-    const data = currentState?.data as InfData<TPage> | undefined;
-    const currentPagesLength = data?.pages?.length || 0;
-
-    if (currentPagesLength === 0) {
-      shouldFetch = true;
-    }
-
-    if (shouldFetch) refetch();
 
     return unsubscribe;
-  }, [enabled, queryClient, queryKey, refetch, opts?.staleTime]);
+  }, [enabled, queryClient, queryKey, refetch]);
 
-  // Clear fetched cursors when queryKey changes
+  // Reset state when queryKey changes
   useEffect(() => {
+    initialFetchRef.current = false;
     fetchedCursorsRef.current.clear();
   }, [queryKey]);
 

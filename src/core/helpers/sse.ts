@@ -1,10 +1,13 @@
 import type { SSEEvent } from "../../types/misc.js";
+import { parseFrameworkError } from "../../lib/parse-framework-error.js";
 
 /**
  * Transforms an AsyncIterable of SSEEvents into a web-standard ReadableStream
  * formatted for the Server-Sent Events protocol.
  */
-export function createSSEResponse(iterator: AsyncIterable<SSEEvent<any>>) {
+export function createSSEResponse<TEventData = any>(
+  iterator: AsyncIterable<SSEEvent<TEventData>>,
+) {
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -35,6 +38,10 @@ export function createSSEResponse(iterator: AsyncIterable<SSEEvent<any>>) {
         ) {
           return;
         }
+
+        // Re-throw framework redirects (e.g. Next.js) so they propagate out of the catch block
+        parseFrameworkError(error);
+
         console.error("SSE Stream Error:", error);
       } finally {
         controller.close();

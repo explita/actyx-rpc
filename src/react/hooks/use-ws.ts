@@ -1,8 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ErrorResponse, MaybePromise } from "../../types/misc.js";
+import type { ErrorResponse } from "../../types/misc.js";
 import type { UseWSOpts, UseWSResult } from "../types.js";
+
+const applyDedup = <T>(
+  prev: T[],
+  item: T,
+  dedupKey: (item: T) => string | number,
+): T[] => {
+  const key = dedupKey(item);
+  const index = prev.findIndex((existing) => dedupKey(existing) === key);
+  if (index >= 0) {
+    const next = [...prev];
+    next[index] = item;
+    return next;
+  }
+  return [...prev, item];
+};
+
+const addItem = <T>(
+  prev: T[],
+  item: T,
+  dedupKey?: (item: T) => string | number,
+): T[] => (dedupKey ? applyDedup(prev, item, dedupKey) : [...prev, item]);
 
 /**
  * Hook for connecting to a WebSocket server and receiving real-time messages.
@@ -13,14 +34,14 @@ export function useWS<
   TInitialData = undefined,
   TOutput = TInitialData extends undefined ? any : TInitialData,
 >(opts: UseWSOpts<TOutput>): UseWSResult<TOutput> {
-  const [data, setData] = useState<TOutput[]>(() => {
+  const [data, setData] = useState(() => {
     if (!opts.initialData) return [];
     if (typeof opts.initialData !== "function") {
-      return opts.initialData as TOutput[];
+      return opts.initialData;
     }
     const result = opts.initialData();
     if (!(result instanceof Promise)) {
-      return result as TOutput[];
+      return result;
     }
     // Async function — start empty, resolve in effect below
     return [];
@@ -35,6 +56,8 @@ export function useWS<
   const sendRef = useRef<(data: any) => void>(() => {});
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   // Resolve async initialData — must be in an effect, not in useState initializer.
   // Reads from optsRef to avoid re-running on every render when initialData is an inline function.
@@ -113,23 +136,38 @@ export function useWS<
           const parsed = JSON.parse(event.data);
 
           if (parsed.type === "event") {
-            setData((prev) => [...prev, parsed.data]);
-            optsRef.current.onData?.(parsed.data);
+            const item = parsed.data;
+            const dedupKeyFn = optsRef.current.dedupKey;
+            const prevData = dataRef.current;
+            const existing = dedupKeyFn
+              ? prevData.findIndex((i) => dedupKeyFn(i) === dedupKeyFn(item))
+              : -1;
+            const action = existing >= 0 ? "updated" : "added";
+
+            optsRef.current.onData?.(item, action);
+
+            if (optsRef.current.filter?.(item) ?? true) {
+              setData((prev) => addItem(prev, item, dedupKeyFn));
+            }
           } else if (parsed.type === "subscribed") {
             setStatus("connected");
             optsRef.current.onSubscribed?.();
             if (parsed.data !== undefined) {
-              setData((prev) => [...prev, parsed.data]);
+              if (optsRef.current.filter?.(parsed.data) ?? true) {
+                setData((prev) =>
+                  addItem(prev, parsed.data, optsRef.current.dedupKey),
+                );
+              }
             }
           } else if (parsed.type === "error") {
             setStatus("error");
             setError(parsed.error);
             optsRef.current.onError?.(parsed.error);
           } else {
-            if (parsed.data !== undefined) {
-              setData((prev) => [...prev, parsed.data]);
-            } else {
-              setData((prev) => [...prev, parsed as TOutput]);
+            const item =
+              parsed.data !== undefined ? parsed.data : (parsed as TOutput);
+            if (optsRef.current.filter?.(item) ?? true) {
+              setData((prev) => addItem(prev, item, optsRef.current.dedupKey));
             }
           }
         } catch {
@@ -155,6 +193,7 @@ export function useWS<
             const delay =
               typeof delayFn === "function" ? delayFn(attemptCount) : delayFn;
 
+            optsRef.current.onReconnectAttempt?.(attemptCount);
             attemptCount++;
             reconnectTimeoutId = setTimeout(() => {
               connect();
@@ -168,6 +207,7 @@ export function useWS<
               reason: "RETRY_EXHAUSTED",
               message: "Max reconnection attempts reached",
             });
+            optsRef.current.onReconnectFailed?.();
           }
         }
       };
@@ -190,6 +230,23 @@ export function useWS<
       optsRef.current.onUnsubscribed?.();
     };
   }, [opts.url, opts.enabled]);
+
+  useEffect(() => {
+    const reconnectHandler = () =>
+      optsRef.current.onReconnect?.(dataRef.current);
+    const focusHandler = () => optsRef.current.onWindowFocus?.(dataRef.current);
+    if (opts.onReconnect) {
+      window.addEventListener("online", reconnectHandler);
+    }
+    if (opts.onWindowFocus) {
+      window.addEventListener("focus", focusHandler);
+    }
+
+    return () => {
+      window.removeEventListener("online", reconnectHandler);
+      window.removeEventListener("focus", focusHandler);
+    };
+  }, []);
 
   const send = useCallback((data: any) => {
     sendRef.current(data);

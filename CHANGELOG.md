@@ -3,6 +3,41 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-30
+
+### Added
+
+- **`useIsFetching` Hook**: Track whether any query is currently fetching, globally or by key prefix. Returns a boolean.
+- **`useWS` — `onData` action parameter**: `onData` now receives a second `action` argument (`"added" | "updated"`), indicating whether the incoming item was new or replaced an existing one via `dedupKey`.
+- **`useWS` — `dedupKey` option**: Extract a unique identifier from each message. Incoming items with the same key as an existing item update in-place instead of appending.
+- **`useWS` — `filter` option**: Optional predicate to control which incoming messages enter the `data` state. `onData` still fires regardless.
+- **`useWS` — `onWindowFocus` / `onReconnect` callbacks**: Callbacks triggered when the window regains focus or the network reconnects, receiving the accumulated data array.
+- **`useWS` — `onReconnectAttempt` / `onReconnectFailed` callbacks**: Track reconnection progress (`attempt` is 0-indexed) and exhaustion.
+- **`useWSInfiniteQuery` — `onWindowFocus` / `onReconnect` callbacks**: Now receive an object with `{ data, refetch }` — the infinite query data and a refetch function — instead of raw WS data.
+- **`useWSInfiniteQuery` / `useSSEInfiniteQuery` — `action` in `WSEventContext`**: The `onData` callback now receives an `action` field (`"added" | "updated"`) to distinguish new items from deduped updates.
+- **`useInfiniteQuery` — `keepPreviousData` option**: When `false`, clears cached data during refetch so the UI shows a loading state instead of stale data. Defaults to `true`.
+- **`useQuery` — `keepPreviousData` option**: Same behavior as infinite query — defaults to `true`.
+- **`QueryClient.subscribeAll` / `isFetching` methods**: Internal API enabling `useIsFetching` to listen to all query state changes.
+- **`applyWSHandler` — `WSProcedureContext` type**: Exported typed context interface replacing raw `any`.
+- **`applyWSHandler` — Dual socket support**: Now supports both `ws` library (EventEmitter `.on()`) and DOM/WHATWG WebSocket (Node.js 21+, browser) by detecting the API at runtime.
+- **`applyWSHandler` — Optional `broadcast`**: The `broadcast` option is now optional. When omitted, calling `broadcast()` in the procedure is a no-op.
+
+### Fixed
+
+- **`useInfiniteQuery` — refetch on `queryKey` change**: `initialFetchRef` now resets when the query key changes, ensuring fresh data is fetched for the new key.
+- **`useInfiniteQuery` — stale-time guard restored**: The commented-out staleness check in the initial fetch effect is now active, preventing unnecessary re-fetches when data is fresh.
+- **`QueryClient.prepend` / `append` — `updatedAt` for paginated data**: Page mutations now set `updatedAt: Date.now()`, consistent with the plain array path.
+- **`useSSEInfiniteQuery` — Missing `action` in `WSEventContext`**: The SSE adapter now passes `action: "added"` to match the `WSEventContext` type requirement.
+- **`createSSEResponse` — Next.js redirect handling**: Framework redirect errors (`NEXT_REDIRECT`) are now re-thrown via `parseFrameworkError` instead of being swallowed.
+
+### Changed
+
+- **`useWS` — `onSubscribed` server-controlled**: `setStatus("connected")` and `onSubscribed` no longer fire on `ws.onopen`. They now only fire when the server explicitly sends `{ type: "subscribed" }`, giving the server full control over connection readiness.
+- **`applyWSHandler` — `WebSocket` type constraint removed**: Replaced the DOM `WebSocket` constraint with a minimal `WSSocket` interface matching both `ws` library and DOM-style APIs.
+- **`QueriesResults` type**: Simplified to use `TOut` as `TSelectData` to avoid union type distribution issues with `Unwrap`.
+
+---
+
 ## [0.6.0] - 2026-06-28
 
 ### Added

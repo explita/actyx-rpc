@@ -31,6 +31,7 @@ export function useSSEInfiniteQuery<
         onData({
           data,
           allData: queryResult.data as unknown as TData[],
+          action: "added",
           append: queryResult.append as any,
           prepend: queryResult.prepend as any,
           update: queryResult.update as any,

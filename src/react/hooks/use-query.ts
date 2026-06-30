@@ -58,6 +58,7 @@ export function useQuery<
     refetchOnWindowFocus: false,
     staleTime: 0,
     refetchOnMount: true,
+    keepPreviousData: true,
   },
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData> {
   const queryClient = useQueryClient();
@@ -80,6 +81,8 @@ export function useQuery<
     initialData: opts?.initialData,
     select: opts?.select,
     proc,
+    keepPreviousData: opts?.keepPreviousData,
+    unwrap: opts.unwrap,
   });
 
   useEffect(() => {
@@ -90,6 +93,8 @@ export function useQuery<
       initialData: opts?.initialData,
       select: opts?.select,
       proc,
+      keepPreviousData: opts?.keepPreviousData,
+      unwrap: opts.unwrap,
     };
   });
 
@@ -133,7 +138,12 @@ export function useQuery<
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchData = useCallback(async () => {
-    queryClient.setQueryState(queryKey, { isFetching: true });
+    queryClient.setQueryState(queryKey, {
+      isFetching: true,
+      ...(callbacksRef.current.keepPreviousData === false && {
+        data: undefined,
+      }),
+    });
 
     let resultTuple: [TOutput, null] | [null, ErrorResponse];
 
@@ -164,7 +174,7 @@ export function useQuery<
       callbacksRef.current.onError?.(err);
     } else {
       const unwrapped =
-        opts.unwrap === true &&
+        callbacksRef.current.unwrap === true &&
         result &&
         typeof result === "object" &&
         "data" in result
@@ -193,7 +203,7 @@ export function useQuery<
     }
 
     return result;
-  }, [queryKey, queryClient, opts.unwrap]);
+  }, [queryKey, queryClient]);
 
   const refetch = useCallback(fetchData, [fetchData]);
 

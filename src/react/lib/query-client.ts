@@ -17,6 +17,7 @@ export class QueryClient {
   private listeners = new Map<string, Set<() => void>>();
   private invalidateListeners = new Map<string, Set<() => void>>();
   private gcTimers = new Map<string, NodeJS.Timeout>();
+  private globalListeners = new Set<() => void>();
 
   getQueryState<TData = any, TError = any>(
     queryKey: string,
@@ -86,6 +87,24 @@ export class QueryClient {
     if (set) {
       set.forEach((listener) => listener());
     }
+    this.globalListeners.forEach((listener) => listener());
+  }
+
+  subscribeAll(listener: () => void) {
+    this.globalListeners.add(listener);
+    return () => {
+      this.globalListeners.delete(listener);
+    };
+  }
+
+  isFetching(filterKey?: string): boolean {
+    for (const [key, state] of this.cache) {
+      if (state.isFetching) {
+        if (!filterKey) return true;
+        if (key === filterKey || key.startsWith(filterKey + "|")) return true;
+      }
+    }
+    return false;
   }
 
   onInvalidate(queryKey: string, listener: () => void) {
@@ -312,6 +331,7 @@ export class QueryClient {
           ...data,
           pages: newPages,
         },
+        updatedAt: Date.now(),
       });
     } else {
       if (Array.isArray(data)) {
@@ -382,6 +402,7 @@ export class QueryClient {
           ...data,
           pages: newPages,
         },
+        updatedAt: Date.now(),
       });
     } else {
       if (Array.isArray(data)) {

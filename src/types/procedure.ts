@@ -543,7 +543,7 @@ export interface ProcedureInstance<
       Awaited<T>
     >;
 
-  ws: <In = any, Out = any, P extends unknown[] = []>(
+  ws: <P extends unknown[] = []>(
     handler: (
       opts: {
         ctx: Prettify<
@@ -552,9 +552,9 @@ export interface ProcedureInstance<
           }
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
-        send: (data: Out) => void;
-        broadcast: (data: any) => void;
-        onMessage: (cb: (data: In) => void) => void;
+        send: <T = any>(data: T) => void;
+        broadcast: <T = any>(data: T) => void;
+        onMessage: <T = any>(cb: (data: T) => void) => void;
         onClose: (cb: () => void) => void;
         onError: (cb: (err: any) => void) => void;
       },

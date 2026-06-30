@@ -68,10 +68,16 @@ function ChatRoom({ roomId }) {
 | `url` | `string` | — | The WebSocket server URL (e.g., `/api/ws` or `ws://localhost:3001/rpc`). Protocol will auto-correct to `ws:`/`wss:` depending on browser context. |
 | `initialData` | `TOutput[] \| (() => MaybePromise<TOutput[]>)` | — | Initial data to prepopulate the data array with. |
 | `enabled` | `boolean` | `true` | Set to `false` to prevent opening the socket connection automatically. |
-| `onData` | `(data: TOutput) => void` | — | Callback run whenever a new event payload is received. |
+| `onData` | `(data: TOutput, action: "added" \| "updated") => void` | — | Callback run when a new event payload is received. `action` indicates whether the item was new (`"added"`) or replaced an existing deduped item (`"updated"`). |
 | `onError` | `(err) => void` | — | Callback run when a connection or event error occurs. |
 | `onSubscribed` | `() => void` | — | Callback run when the socket connection is successfully established. |
 | `onUnsubscribed` | `() => void` | — | Callback run when the socket connection is closed. |
+| `onWindowFocus` | `(data: TOutput[]) => void` | — | Callback triggered when the browser window regains focus. Receives the accumulated data array. |
+| `onReconnect` | `(data: TOutput[]) => void` | — | Callback triggered when the network connection is restored after being offline. |
+| `onReconnectAttempt` | `(attempt: number) => void` | — | Fires before each reconnection attempt (0-indexed). Useful for UI such as "Reconnecting...". |
+| `onReconnectFailed` | `() => void` | — | Fires when all reconnection attempts are exhausted. |
+| `filter` | `(data: TOutput) => boolean` | — | Optional filter to decide whether incoming data is included in state. `onData` fires regardless. |
+| `dedupKey` | `(item: TOutput) => string \| number` | — | Extracts a unique key from each item. Incoming items with the same key as an existing item update it in-place instead of appending. |
 
 ---
 

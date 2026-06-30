@@ -71,6 +71,7 @@ The `useQuery` hook accepts two arguments:
 | `refetchInterval`      | `number`                | `0`             | Time in milliseconds for automatic background polling.                                                     |
 | `unwrap`               | `boolean`               | `false`         | Set to `true` to return the nested `data` field of the RPC response directly.                              |
 | `select`               | `(data) => selectData`  | —               | Transform the query response before returning it to the component.                                         |
+| `keepPreviousData`     | `boolean`               | `true`          | When `false`, clears cached data during refetch so the UI shows a loading state instead of stale data.     |                                         |
 | `onSuccess`            | `(data) => void`        | —               | Callback run on successful data fetch.                                                                     |
 | `onError`              | `(error) => void`       | —               | Callback run when the procedure encounters an error.                                                       |
 | `onSettled`            | `(data, error) => void` | —               | Callback run when a query completes (success or failure).                                                  |
@@ -153,5 +154,54 @@ export default function Page() {
       <TodoList />
     </Suspense>
   );
+}
+```
+
+---
+
+## `useQueries`
+
+Fetch multiple independent queries in parallel with a single hook call. Uses rest parameters for full tuple type inference:
+
+```tsx
+import { useQueries } from "@explita/actyx-rpc/react";
+import { getTodos, getUser } from "@/backend/procedures";
+
+const [todosResult, userResult] = useQueries(
+  {
+    proc: getTodos,
+    queryKey: ["todos"],
+    refetchOnWindowFocus: true,
+  },
+  {
+    proc: () => getUser({ id: userId }),
+    queryKey: ["user", userId],
+    enabled: !!userId,
+  },
+);
+
+if (todosResult.isFetching) return <p>Loading todos...</p>;
+if (userResult.isError) return <p>Error loading user</p>;
+```
+
+Each config accepts all `useQuery` options except `queryKey` (which is required). Returns a tuple of `QueryResult` objects, one per query, with proper per-element type inference.
+
+---
+
+## `useIsFetching`
+
+Track whether any query is currently fetching globally or by a specific key prefix:
+
+```tsx
+import { useIsFetching } from "@explita/actyx-rpc/react";
+
+function GlobalLoader() {
+  const isFetching = useIsFetching();
+  // Or filter by key prefix:
+  // const isTodosFetching = useIsFetching("todos");
+
+  if (!isFetching) return null;
+
+  return <div className="global-loader">Loading data...</div>;
 }
 ```

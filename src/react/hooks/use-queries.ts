@@ -11,18 +11,18 @@ import { QueriesResults, UseQueriesConfig } from "../types.js";
 import { ErrorResponse } from "../../types/misc.js";
 import { parseWindow } from "../../lib/utils.js";
 
-export function useQueries<T extends readonly UseQueriesConfig[]>(
-  queries: T,
+export function useQueries<T extends UseQueriesConfig[]>(
+  ...queries: T
 ): QueriesResults<T> {
   const queryClient = useQueryClient();
 
   // 1. Keep track of current query keys to avoid unnecessary resubscriptions
   const keysRef = useRef<string[]>([]);
   const keysStr = queries
-    .map((q) => q.queryKey.map(String).join("|"))
+    .map((q) => q.queryKey?.map(String).join("|"))
     .join(",");
   const stableKeys = useMemo(() => {
-    const keys = queries.map((q) => q.queryKey.map(String).join("|"));
+    const keys = queries.map((q) => (q.queryKey || []).map(String).join("|"));
     const changed =
       keys.length !== keysRef.current.length ||
       keys.some((k, i) => k !== keysRef.current[i]);
@@ -34,8 +34,10 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
 
   // 2. Keep a ref of callbacks and configurations
   const configsRef = useRef(queries);
+  const keepPrevRef = useRef<boolean[]>([]);
   useEffect(() => {
     configsRef.current = queries;
+    keepPrevRef.current = queries.map((q) => q.keepPreviousData ?? true);
   });
 
   // 3. Ensure initial states exist in the cache
@@ -60,31 +62,54 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
     }
   });
 
-  // 4. Set up the subscription store change listener
+  // 4. Cache snapshot to avoid infinite loop warning from useSyncExternalStore
+  const cachedSnapshotRef = useRef<any[]>([]);
+  const stableKeysRef = useRef(stableKeys);
+  stableKeysRef.current = stableKeys;
+
+  const refreshSnapshot = () => {
+    cachedSnapshotRef.current = stableKeysRef.current.map(
+      (key) => queryClient.getQueryState(key)!,
+    );
+  };
+
+  // 5. Set up the subscription store change listener
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      const unsubs = queries.map((q, index) => {
-        const queryKey = stableKeys[index];
-        return queryClient.subscribe(queryKey, onStoreChange, q.gcTime);
+      refreshSnapshot();
+      const keys = stableKeysRef.current;
+      const unsubs = configsRef.current.map((q, index) => {
+        const queryKey = keys[index];
+        return queryClient.subscribe(
+          queryKey,
+          () => {
+            refreshSnapshot();
+            onStoreChange();
+          },
+          q.gcTime,
+        );
       });
       return () => {
         unsubs.forEach((unsub) => unsub());
       };
     },
-    [queryClient, stableKeys],
+    [queryClient],
   );
 
-  // 5. Get snapshot of all states
+  // 6. Get snapshot of all states (referentially stable via cachedSnapshotRef)
   const getSnapshot = useCallback(() => {
-    return stableKeys.map((key) => queryClient.getQueryState(key)!);
-  }, [queryClient, stableKeys]);
+    if (cachedSnapshotRef.current.length === 0) {
+      refreshSnapshot();
+    }
+    return cachedSnapshotRef.current;
+  }, [queryClient]);
 
   const states = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   // 6. Fetch data using Promise.all
   const fetchAll = useCallback(async () => {
     const promises = configsRef.current.map(async (q, index) => {
-      const queryKey = stableKeys[index];
+      const queryKey = stableKeysRef.current[index];
       if (q.enabled === false) return;
 
       const state = queryClient.getQueryState(queryKey);
@@ -106,7 +131,10 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
 
       if (!shouldFetch) return;
 
-      queryClient.setQueryState(queryKey, { isFetching: true });
+      queryClient.setQueryState(queryKey, {
+        isFetching: true,
+        ...(keepPrevRef.current[index] === false && { data: undefined }),
+      });
 
       const fetcher = async () => await q.proc();
       let resultTuple: [any, null] | [null, ErrorResponse];
@@ -162,12 +190,167 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
     });
 
     await Promise.all(promises);
-  }, [stableKeys, queryClient]);
+  }, [queryClient]);
 
   // Initial fetch effect
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // Refetch on window focus
+  useEffect(() => {
+    let active = true;
+
+    const refetchableIndices = stableKeys
+      .map((_, i) => i)
+      .filter((i) => configsRef.current[i]?.refetchOnWindowFocus);
+
+    if (refetchableIndices.length === 0) return;
+
+    const handleFocus = () => {
+      if (!active) return;
+      refetchableIndices.forEach((i) => {
+        const q = configsRef.current[i];
+        const key = stableKeys[i];
+        const state = queryClient.getQueryState(key);
+        if (!state || q.enabled === false) return;
+
+        // Skip if data is still fresh
+        const staleTime = parseWindow(q.staleTime);
+        if (
+          state.isSuccess &&
+          state.updatedAt &&
+          Date.now() - state.updatedAt < staleTime
+        )
+          return;
+
+        queryClient.setQueryState(key, {
+          isFetching: true,
+          ...((q.keepPreviousData ?? true) === false && {
+            data: undefined,
+          }),
+        });
+
+        const fetcher = async () => await q.proc();
+        globalRequestManager.fetch(key, fetcher).then(([result, err]) => {
+          if (!active) return;
+          if (err) {
+            queryClient.setQueryState(key, {
+              error: err,
+              isError: true,
+              isSuccess: false,
+              isFetching: false,
+              isFetched: true,
+            });
+            q.onError?.(err);
+          } else {
+            const unwrapped =
+              (q.unwrap as any) === true &&
+              result &&
+              typeof result === "object" &&
+              "data" in result
+                ? (result as any).data
+                : result;
+            queryClient.setQueryState(key, {
+              data: unwrapped,
+              error: undefined,
+              isError: false,
+              isSuccess: true,
+              isFetching: false,
+              updatedAt: Date.now(),
+              isFetched: true,
+            });
+            const finalData = q.select ? q.select(unwrapped) : unwrapped;
+            q.onSuccess?.(finalData);
+            q.onSettled?.(finalData, null);
+          }
+        });
+      });
+    };
+
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [queryClient, stableKeys]);
+
+  // Refetch on network reconnect
+  useEffect(() => {
+    let active = true;
+
+    const refetchableIndices = stableKeys
+      .map((_, i) => i)
+      .filter((i) => configsRef.current[i]?.refetchOnReconnect ?? true);
+
+    if (refetchableIndices.length === 0) return;
+
+    const handleOnline = () => {
+      if (!active) return;
+      refetchableIndices.forEach((i) => {
+        const q = configsRef.current[i];
+        const key = stableKeys[i];
+        const state = queryClient.getQueryState(key);
+        if (!state || q.enabled === false) return;
+
+        const staleTime = parseWindow(q.staleTime);
+        if (
+          q.refetchOnReconnect !== "always" &&
+          state.updatedAt &&
+          Date.now() - state.updatedAt < staleTime
+        )
+          return;
+
+        queryClient.setQueryState(key, {
+          isFetching: true,
+          ...((q.keepPreviousData ?? true) === false && {
+            data: undefined,
+          }),
+        });
+
+        const fetcher = async () => await q.proc();
+        globalRequestManager.fetch(key, fetcher).then(([result, err]) => {
+          if (!active) return;
+          if (err) {
+            queryClient.setQueryState(key, {
+              error: err,
+              isError: true,
+              isSuccess: false,
+              isFetching: false,
+              isFetched: true,
+            });
+            q.onError?.(err);
+          } else {
+            const unwrapped =
+              (q.unwrap as any) === true &&
+              result &&
+              typeof result === "object" &&
+              "data" in result
+                ? (result as any).data
+                : result;
+            queryClient.setQueryState(key, {
+              data: unwrapped,
+              error: undefined,
+              isError: false,
+              isSuccess: true,
+              isFetching: false,
+              updatedAt: Date.now(),
+              isFetched: true,
+            });
+            const finalData = q.select ? q.select(unwrapped) : unwrapped;
+            q.onSuccess?.(finalData);
+            q.onSettled?.(finalData, null);
+          }
+        });
+      });
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => {
+      active = false;
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [queryClient, stableKeys]);
 
   // 7. Map states to QueryResults format
   return useMemo(() => {
@@ -176,7 +359,10 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
       const queryKey = stableKeys[index];
 
       const refetch = async () => {
-        queryClient.setQueryState(queryKey, { isFetching: true });
+        queryClient.setQueryState(queryKey, {
+          isFetching: true,
+          ...(keepPrevRef.current[index] === false && { data: undefined }),
+        });
         const fetcher = async () => await configsRef.current[index].proc();
         let resultTuple: [any, null] | [null, ErrorResponse];
 
@@ -188,12 +374,15 @@ export function useQueries<T extends readonly UseQueriesConfig[]>(
 
         const [result, err] = resultTuple;
         if (err) {
+          const initData = configsRef.current[index].initialData;
+          const resolvedInitData =
+            typeof initData === "function" ? initData() : initData;
           queryClient.setQueryState(queryKey, {
             error: err,
             isError: true,
             isSuccess: false,
             isFetching: false,
-            data: configsRef.current[index].initialData,
+            data: resolvedInitData,
             isFetched: true,
           });
           configsRef.current[index].onError?.(err);
