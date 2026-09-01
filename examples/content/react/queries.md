@@ -184,7 +184,7 @@ if (todosResult.isFetching) return <p>Loading todos...</p>;
 if (userResult.isError) return <p>Error loading user</p>;
 ```
 
-Each config accepts all `useQuery` options except `queryKey` (which is required). Returns a tuple of `QueryResult` objects, one per query, with proper per-element type inference.
+Each config accepts all `useQuery` options; `queryKey` is optional (omitted keys resolve to an empty local key). Returns a tuple of `QueryResult` objects, one per query, with proper per-element type inference.
 
 ---
 

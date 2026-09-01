@@ -1,19 +1,54 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ErrorResponse, MutationResult } from "../../types/misc.js";
-import type { MutationStatus, UseMutationOpts } from "../types.js";
+import type {
+  MutationStatus,
+  UseMutationOpts,
+  UseMutationResult,
+} from "../types.js";
 import { useQueryClient } from "../provider.js";
 
+/**
+ * `useMutation` for a procedure (function) action.
+ * `TOutput` and `TArgs` are inferred from the action's signature, so
+ * `mutate` receives the exact procedure input and returns its typed data.
+ */
 export function useMutation<
-  TOutput,
+  TOutput = unknown,
   TArgs extends any[] = any[],
   TContext = unknown,
   TMutationKey extends unknown[] = unknown[],
 >(
-  action: ((...args: TArgs) => Promise<MutationResult<TOutput>>) | string,
+  action: (...args: TArgs) => Promise<MutationResult<TOutput>>,
   opts?: UseMutationOpts<TOutput, TArgs, TContext, TMutationKey>,
-) {
+): UseMutationResult<
+  TOutput,
+  TArgs,
+  TContext,
+  (...args: TArgs) => Promise<MutationResult<TOutput>>
+>;
+
+/**
+ * `useMutation` for a URL (string) action.
+ * `TOutput`/`TArgs` fall back to `unknown`/`any[]` — provide them explicitly
+ * when you want the mutation return typed (e.g. `useMutation<MyData, [File]>(url)`).
+ */
+export function useMutation<
+  TOutput = unknown,
+  TArgs extends any[] = any[],
+  TContext = unknown,
+  TMutationKey extends unknown[] = unknown[],
+>(
+  action: string,
+  opts?: UseMutationOpts<TOutput, TArgs, TContext, TMutationKey, string>,
+): UseMutationResult<TOutput, TArgs, TContext, string>;
+
+export function useMutation<
+  TOutput = any,
+  TArgs extends any[] = any[],
+  TContext = unknown,
+>(action: any, opts?: any): UseMutationResult<any, any, any, any> {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<MutationStatus>("idle");
   const [data, setData] = useState<TOutput | null>(null);
@@ -26,6 +61,15 @@ export function useMutation<
   const abortControllerRef = useRef<AbortController | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingInputRef = useRef<TArgs | null>(null);
+  const localId = useId();
+  const generationRef = useRef(0);
+  const debouncePromiseRef = useRef<{
+    promise: Promise<TOutput>;
+    resolve: (value: TOutput) => void;
+    reject: (reason: any) => void;
+  } | null>(null);
+
+  const mutationKey = opts?.mutationKey ?? [localId];
 
   const callbacksRef = useRef({
     onBefore: opts?.onBefore,
@@ -54,31 +98,69 @@ export function useMutation<
   const isPending = status === "pending";
 
   const reset = useCallback(() => {
-    // Clear debounce timer
+    generationRef.current++;
+
+    // Clear debounce timer and reject any pending promise
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
-      pendingInputRef.current = null;
     }
+    if (debouncePromiseRef.current) {
+      debouncePromiseRef.current.reject(
+        new DOMException("Reset", "AbortError"),
+      );
+      debouncePromiseRef.current = null;
+    }
+    pendingInputRef.current = null;
 
     abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
+    // Only clear the ref if it's an internal controller (not user-provided)
+    if (!opts?.abortController) {
+      abortControllerRef.current = null;
+    }
+
+    // Release the mutation lock so the next mutate() call isn't blocked
+    queryClient.endMutation(mutationKey);
+
     setStatus("idle");
     setData(null);
     setError(null);
     setValidationErrors(null);
     setContext(undefined);
-  }, []);
+  }, [queryClient, mutationKey]);
 
   const executeImmediately = useCallback(
     async (...args: TArgs): Promise<MutationResult<TOutput>> => {
-      // onBefore hook
+      const generation = generationRef.current;
+
+      if (mutationKey && queryClient.isMutating(mutationKey)) {
+        return [
+          null,
+          {
+            success: false,
+            message: "Already in progress",
+            reason: "RATE_LIMITED",
+            handlerName: "client",
+            statusCode: 429,
+          },
+        ];
+      }
+
       if (callbacksRef.current.onBefore) {
+        // onBefore hook
         try {
           const beforeResult = await callbacksRef.current.onBefore(...args);
           if (beforeResult === false) {
-            //@ts-expect-error
-            return [null, null];
+            return [
+              null,
+              {
+                success: false,
+                message: "Cancelled by onBefore hook",
+                reason: "CLIENT_ERROR",
+                handlerName: "client",
+                statusCode: 400,
+              },
+            ];
           }
           if (beforeResult !== undefined) {
             let errObj: any;
@@ -155,13 +237,18 @@ export function useMutation<
         }
       }
 
-      queryClient.startMutation(opts?.mutationKey);
+      queryClient.startMutation(mutationKey);
       const input = args[0];
       // Cancel previous request
       abortControllerRef.current?.abort();
 
-      // Create new abort controller
-      const abortController = new AbortController();
+      // Use external controller if still usable, otherwise create a fresh internal one.
+      // AbortController is one-shot — once aborted, signal.aborted stays true forever.
+      // Falling back to internal ensures mutate() still works after the user aborts.
+      const abortController =
+        opts?.abortController && !opts.abortController.signal.aborted
+          ? opts.abortController
+          : new AbortController();
       abortControllerRef.current = abortController;
 
       // Optimistic update
@@ -182,6 +269,10 @@ export function useMutation<
         setContext(() => mutationContext);
       }
 
+      // Clear previous data if no optimistic update was applied
+      if (!optimisticResult) {
+        setData(null);
+      }
       setStatus("pending");
       setProgress(0);
       setError(null);
@@ -197,7 +288,7 @@ export function useMutation<
           const url = action;
 
           let body: any = input;
-          let headers: Record<string, string> = {};
+          const headers: Record<string, string> = {};
 
           if (
             !(input instanceof Blob) &&
@@ -244,12 +335,16 @@ export function useMutation<
             }
           }
 
-          const finalUrl = new URL(url, window.location.origin);
+          const finalUrl = new URL(
+            url,
+            typeof window !== "undefined" ? window.location.origin : undefined,
+          );
 
           const response = await progressFetch(finalUrl, {
             method: "POST",
             body,
             headers,
+            signal: abortController.signal,
             onProgress: (p: number) => {
               setProgress(p);
               callbacksRef.current.onProgress?.(p);
@@ -284,8 +379,11 @@ export function useMutation<
           err = res[1];
         }
 
-        // If this request was aborted, don't update state
-        if (abortController.signal.aborted) {
+        // If this request was aborted or reset, don't update state
+        if (
+          abortController.signal.aborted ||
+          generation !== generationRef.current
+        ) {
           // Rollback optimistic update
           if (optimisticResult) {
             setData(null);
@@ -343,8 +441,11 @@ export function useMutation<
         );
         return [result, null];
       } catch (err) {
-        // Don't treat abort as error
-        if (abortController.signal.aborted) {
+        // Don't treat abort or reset as error
+        if (
+          abortController.signal.aborted ||
+          generation !== generationRef.current
+        ) {
           // Rollback optimistic update
           if (optimisticResult) {
             setData(null);
@@ -383,43 +484,74 @@ export function useMutation<
         );
         throw err;
       } finally {
-        queryClient.endMutation(opts?.mutationKey);
-        abortControllerRef.current = null;
+        // Only release the lock if reset() didn't already do it.
+        // If generation changed, reset() already called endMutation.
+        if (generation === generationRef.current) {
+          queryClient.endMutation(mutationKey);
+        }
+        // Only clear the ref if it's an internal controller (not user-provided)
+        if (!opts?.abortController) {
+          abortControllerRef.current = null;
+        }
       }
     },
-    [action, opts?.throwOnError, opts?.mutationKey, queryClient],
+    [action, opts?.throwOnError, mutationKey, queryClient],
   );
 
   const mutateAsync = useCallback(
     async (...args: TArgs): Promise<TOutput> => {
-      // Clear any existing debounce timer
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-
       // If debounce is enabled, delay execution
       if (opts?.debounceMs && opts.debounceMs > 0) {
         pendingInputRef.current = args;
 
-        return new Promise((resolve, reject) => {
+        // Reuse existing pending promise if debounce cycle is active
+        if (debouncePromiseRef.current) {
+          clearTimeout(debounceTimerRef.current!);
           debounceTimerRef.current = setTimeout(async () => {
+            const pending = debouncePromiseRef.current;
+            debouncePromiseRef.current = null;
+            debounceTimerRef.current = null;
             try {
               const [result, err] = await executeImmediately(
                 ...(pendingInputRef.current as TArgs),
               );
-              if (err) {
-                reject(err);
-              } else {
-                resolve(result!);
-              }
+              if (err) pending?.reject(err);
+              else pending?.resolve(result!);
             } catch (e) {
-              reject(e);
+              pending?.reject(e);
             } finally {
               pendingInputRef.current = null;
-              debounceTimerRef.current = null;
+            }
+          }, opts.debounceMs);
+          return debouncePromiseRef.current.promise;
+        }
+
+        // First call in debounce cycle — create a new promise
+        const promise = new Promise<TOutput>((resolve, reject) => {
+          debouncePromiseRef.current = {
+            promise: null as any,
+            resolve,
+            reject,
+          };
+          debounceTimerRef.current = setTimeout(async () => {
+            const pending = debouncePromiseRef.current;
+            debouncePromiseRef.current = null;
+            debounceTimerRef.current = null;
+            try {
+              const [result, err] = await executeImmediately(
+                ...(pendingInputRef.current as TArgs),
+              );
+              if (err) pending?.reject(err);
+              else pending?.resolve(result!);
+            } catch (e) {
+              pending?.reject(e);
+            } finally {
+              pendingInputRef.current = null;
             }
           }, opts.debounceMs);
         });
+        debouncePromiseRef.current!.promise = promise;
+        return promise;
       }
 
       const [result, err] = await executeImmediately(...args);
@@ -463,7 +595,9 @@ export function useMutation<
     validationErrors,
     progress,
     reset,
-    abort: () => abortControllerRef.current?.abort(),
+    abort: (() => {
+      abortControllerRef.current?.abort();
+    }) as any,
     context,
   };
 }

@@ -30,7 +30,7 @@ function LiveFeed() {
   } = useWSInfiniteQuery(getFeedPosts, {
     // Infinite query options
     queryOpts: {
-      initialInput: { limit: 10 },
+      input: { limit: 10 },
       getNextPageParam: (lastPage) => lastPage.nextCursor,
       queryKey: ["feed"],
     },
@@ -67,45 +67,45 @@ function LiveFeed() {
 
 **Infinite Query Options** (`queryOpts`):
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `initialInput` | `WithoutCursor<TInput>` | — | Base input parameters for the first page fetch. |
-| `initialPageParam` | `string \| number` | `undefined` | Cursor for the first page. |
-| `getNextPageParam` | `(lastPage, allPages) => cursor` | — | Determines the next cursor. |
-| `queryKey` | `unknown[]` | — | Cache identification key. |
-| `maxPages` | `number` | — | Maximum pages to keep in cache. |
-| `enabled` | `boolean` | `true` | Enable/disable fetching on mount. |
-| `staleTime` | `number \| string` | `0` | Time before data is considered stale. |
-| `gcTime` | `number \| string` | `5min` | Time before unused cache is garbage collected. |
-| `refetchInterval` | `number` | `0` | Polling interval in ms. |
-| `refetchOnWindowFocus` | `boolean` | `false` | Refetch on window focus. |
-| `refetchOnReconnect` | `boolean \| "always"` | `true` | Refetch on network restore. |
-| `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
-| `initialData` | `data \| (() => data)` | — | Pre-populate cache on mount. |
+| Option                 | Type                             | Default     | Description                                                              |
+| :--------------------- | :------------------------------- | :---------- | :----------------------------------------------------------------------- |
+| `input`                | `WithoutCursor<TInput>`          | —           | Base input parameters for the first page fetch.                          |
+| `initialPageParam`     | `string \| number`               | `undefined` | Cursor for the first page.                                               |
+| `getNextPageParam`     | `(lastPage, allPages) => cursor` | —           | Determines the next cursor.                                              |
+| `queryKey`             | `unknown[]`                      | —           | Cache identification key.                                                |
+| `maxPages`             | `number`                         | —           | Maximum pages to keep in cache.                                          |
+| `enabled`              | `boolean`                        | `true`      | Enable/disable fetching on mount.                                        |
+| `staleTime`            | `number \| string`               | `0`         | Time before data is considered stale.                                    |
+| `gcTime`               | `number \| string`               | `5min`      | Time before unused cache is garbage collected.                           |
+| `refetchInterval`      | `number`                         | `0`         | Polling interval in ms.                                                  |
+| `refetchOnWindowFocus` | `boolean`                        | `false`     | Refetch on window focus.                                                 |
+| `refetchOnReconnect`   | `boolean \| "always"`            | `true`      | Refetch on network restore.                                              |
+| `keepPreviousData`     | `boolean`                        | `true`      | Keep old data visible during refetch instead of flashing an empty state. |
+| `initialData`          | `data \| (() => data)`           | —           | Pre-populate cache on mount.                                             |
 
 **WebSocket Options** (all `useWS` options except `onData`):
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `url` | `string` | — | WebSocket server URL. |
-| `initialData` | `TOutput[] \| (() => MaybePromise<TOutput[]>)` | — | Pre-populate the data array. |
-| `enabled` | `boolean` | `true` | Set to `false` to prevent connecting. |
-| `onData` | `(opts: WSEventContext) => void` | — | Callback receiving `{ data, action, allData, append, prepend, update }` for custom cache mutations. |
-| `onError` | `(err) => void` | — | Connection error callback. |
-| `onSubscribed` | `() => void` | — | Connection established callback. |
-| `onUnsubscribed` | `() => void` | — | Connection closed callback. |
-| `onWindowFocus` | `(opts: { data: TData[]; refetch: () => Promise<void> }) => void` | — | Callback when window regains focus. Receives infinite query data and a refetch function. |
-| `onReconnect` | `(opts: { data: TData[]; refetch: () => Promise<void> }) => void` | — | Callback when network reconnects. Receives infinite query data and a refetch function. |
+| Option           | Type                                           | Default | Description                                                                                                                                              |
+| :--------------- | :--------------------------------------------- | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`            | `string`                                       | —       | WebSocket server URL.                                                                                                                                    |
+| `initialData`    | `TOutput[] \| (() => MaybePromise<TOutput[]>)` | —       | Pre-populate the data array.                                                                                                                             |
+| `enabled`        | `boolean`                                      | `true`  | Set to `false` to prevent connecting.                                                                                                                    |
+| `onData`         | `(opts: WSEventContext) => void`               | —       | Callback receiving `{ data, action, allData, append, prepend, insert, update }` for custom cache mutations.                                              |
+| `onError`        | `(err) => void`                                | —       | Connection error callback.                                                                                                                               |
+| `onSubscribed`   | `() => void`                                   | —       | Connection established callback.                                                                                                                         |
+| `onUnsubscribed` | `(evt: CloseEvent) => void`                    | —       | Connection closed callback. Receives the `CloseEvent`.                                                                                                   |
+| `onWindowFocus`  | `(opts: InfiniteQueryContext) => void`         | —       | Callback when window regains focus. Receives `{ data, pages, pageParams, refetch, reset, prepend, append, insert, update, remove, setPages, snapshot }`. |
+| `onReconnect`    | `(opts: InfiniteQueryContext) => void`         | —       | Callback when network reconnects. Receives the same extended infinite query context as `onWindowFocus`.                                                  |
 
 ### Returned Properties
 
 Returns all properties from `useInfiniteQuery` **plus** the following from `useWS`:
 
-| Property | Type | Description |
-| :--- | :--- | :--- |
-| `send` | `(data) => void` | Send a message over the WebSocket. |
-| `unsubscribe` | `() => void` | Manually close the WebSocket connection. |
-| `status` | `"idle" \| "connecting" \| "connected" \| "error"` | Connection state. |
+| Property      | Type                                               | Description                              |
+| :------------ | :------------------------------------------------- | :--------------------------------------- |
+| `send`        | `(data) => void`                                   | Send a message over the WebSocket.       |
+| `unsubscribe` | `() => void`                                       | Manually close the WebSocket connection. |
+| `status`      | `"idle" \| "connecting" \| "connected" \| "error"` | Connection state.                        |
 
 All cache mutation helpers (`remove`, `update`, `prepend`, `append`, `insert`, `setPages`, `snapshot`) from the underlying infinite query are also available.
 
@@ -131,7 +131,7 @@ function NotificationFeed() {
   } = useSSEInfiniteQuery(getNotifications, {
     // Infinite query options
     queryOpts: {
-      initialInput: { limit: 20 },
+      input: { limit: 20 },
       getNextPageParam: (lastPage) => lastPage.nextCursor,
       queryKey: ["notifications"],
     },
@@ -172,27 +172,27 @@ function NotificationFeed() {
 
 **SSE Options** (all `useSSE` options except `onData`):
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `url` | `string` | — | SSE endpoint URL. |
-| `params` | `Record<string, string>` | — | Query parameters for the SSE URL. |
-| `headers` | `Record<string, string>` | — | Custom request headers. |
-| `enabled` | `boolean` | `true` | Toggle connection on/off. |
-| `maxHistory` | `number` | — | Limit accumulated event history. |
-| `onData` | `(opts: WSEventContext & { event?: string }) => void` | — | Callback receiving `{ data, allData, append, prepend, update, event }`. |
-| `onError` | `(err) => void` | — | Connection error callback. |
+| Option       | Type                                                  | Default | Description                                                             |
+| :----------- | :---------------------------------------------------- | :------ | :---------------------------------------------------------------------- |
+| `url`        | `string`                                              | —       | SSE endpoint URL.                                                       |
+| `params`     | `Record<string, string>`                              | —       | Query parameters for the SSE URL.                                       |
+| `headers`    | `Record<string, string>`                              | —       | Custom request headers.                                                 |
+| `enabled`    | `boolean`                                             | `true`  | Toggle connection on/off.                                               |
+| `maxHistory` | `number`                                              | —       | Limit accumulated event history.                                        |
+| `onData`     | `(opts: WSEventContext & { event?: string }) => void` | —       | Callback receiving `{ data, allData, append, prepend, update, event }`. |
+| `onError`    | `(err) => void`                                       | —       | Connection error callback.                                              |
 
 ### Returned Properties
 
 Returns all properties from `useInfiniteQuery` **plus** the following from `useSSE`:
 
-| Property | Type | Description |
-| :--- | :--- | :--- |
-| `lastData` | `TData \| undefined` | Most recent SSE event payload. |
-| `event` | `string \| undefined` | Name of the most recent SSE event. |
-| `isConnected` | `boolean` | Connection state. |
-| `close` | `() => void` | Manually close the SSE connection. |
-| `clear` | `() => void` | Clear accumulated data history. |
+| Property      | Type                  | Description                        |
+| :------------ | :-------------------- | :--------------------------------- |
+| `lastData`    | `TData \| undefined`  | Most recent SSE event payload.     |
+| `event`       | `string \| undefined` | Name of the most recent SSE event. |
+| `isConnected` | `boolean`             | Connection state.                  |
+| `close`       | `() => void`          | Manually close the SSE connection. |
+| `clear`       | `() => void`          | Clear accumulated data history.    |
 
 ---
 

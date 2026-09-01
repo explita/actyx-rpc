@@ -3,6 +3,52 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-01
+
+### Added
+
+- **`useQueries` hook**: Parallel query fetching with typed per-element configs. Uses a structural tuple overload, so each element gets independent generics for full IDE autocompletion — no fixed query-count cap.
+- **`UseQueriesItem` type**: Flat per-element config type extending `UseQueryOpts`. Generics (`TOutput`, `TQueryKey`, `TUnwrap`, `TSelectData`, `TInitialData`) flow from `proc` into all callbacks (`onSuccess`, `onSettled`, `select`).
+- **`UseQueriesResult<TItem>` type**: Maps a single `useQueries` element to its `QueryResult`, resolving `proc` output, `unwrap`, `select`, and `initialData` in one pass. Exported from `@explita/actyx-rpc/react`.
+- **`QueriesResults<T>` type**: Homomorphic mapped type that evaluates each tuple position via `UseQueriesResult` — eliminates the previous `Omit<T[], "success">`/union-distribution issues.
+- **`InferOutput<T>` type**: Extracts the resolved output type from a finalized procedure. Exported from the main entry point.
+- **`getCachedQueryClient()`**: Non-hook accessor for the active `QueryClient`, enabling SDK `invalidate()` to work outside React render without violating hooks rules.
+- **`ctx.cache` & `ctx.cache.invalidate()` in terminal handlers**: Mutations, actions, streams, and WS procedures can now access the cache adapter and invalidate cache entries directly via `ctx.cache.invalidate(options)` — previously only available through the `.invalidate()` builder chain. Shared logic lives in `core/cache/invalidate.ts`.
+- **`useMutation` — `abortController` option**: External `AbortController` to cancel URL-string mutations from outside the hook. Controllers are one-shot; subsequent `mutate()` calls fall back to a fresh internal controller.
+- **`useMutation` — per-key mutation lock**: Concurrent `mutate()` calls for the same mutation key are now deduplicated — a second call while one is in-flight returns a `429 "Already in progress"` error instead of running in parallel. Mutation keys default to a `useId()`-based local key.
+- **`useMutation` — debounce coalescing**: Repeated calls within a debounce window now share a single pending promise, and `reset()` rejects it.
+- **`syncSelection` / `selectedItem` / `selectItem`**: Infinite and paginated queries can keep a selected item in sync with the latest data. `syncSelection` accepts `true` (matches by `id` via `defaultSyncSelection`) or a custom equality function.
+- **`args` option for `useInfiniteQuery` / `usePaginatedQuery`**: Pass extra positional arguments to the procedure after the input object.
+- **Array support for cache mutations**: `prepend`, `append`, and `insert` now accept `T | T[]` in `QueryClient`, all pagination hooks, and the WS/SSE event contexts. `WSEventContext` also gained `insert(index, item)`.
+- **`useWS` — ping/pong**: Automatically answers `{ type: "ping" }` messages with `{ type: "pong" }`.
+- **`useWS` — pending message queue**: `send()` calls made before the socket opens are queued and flushed on `onopen`.
+- **`useWS` — typed error responses**: Parse failures and connection errors now produce `ErrorResponse`s (with `handlerName: "useWS"`) and invoke `onError`.
+- **Async cache key/tag functions**: `CacheOptions.key`, `CacheOptions.tags`, and invalidation `keys`/`patterns`/`tags` functions may now return `MaybePromise` values.
+- **Custom cache keys no longer hashed**: `withCache` stores the raw key when a custom `key` function is provided (previously always hashed).
+- **`useSSE` — `maxHistory` default**: History trimming now defaults to `100`.
+- **`useWSInfiniteQuery` — `queryError`**: Query errors are returned separately from the WS connection `error`.
+- **WS/SSE infinite — extended `onWindowFocus` / `onReconnect` context**: Now receive `pages`, `pageParams`, and cache helpers (`reset`, `prepend`, `append`, `insert`, `update`, `remove`, `setPages`, `snapshot`).
+- **ESLint configuration**: Added `eslint.config.mjs` with `typescript-eslint` rules. Run `pnpm lint` or `pnpm lint:fix`.
+- **`engines` field**: Added `"node": ">=18"` to `package.json`.
+
+### Changed (Breaking Changes)
+
+- **`initialInput` → `input`**: `UseInfiniteQueryOpts.initialInput` has been renamed to `input`. Update all `useInfiniteQuery`, `usePaginatedQuery`, `useWSInfiniteQuery`, and `useSSEInfiniteQuery` configs.
+- **`RateLimitOptions.key` signature**: Now receives `({ ctx, input }, req, context)` instead of `(ctx, req, context)`, and may be async. The builder's `rateLimit()` is now typed with the procedure's input.
+- **`onUnsubscribed` receives `CloseEvent`**: `useWS.onUnsubscribed` now receives the `CloseEvent` instead of no arguments. WS procedure `onClose`/`onError` callbacks are likewise typed with `CloseEvent`/`Event`.
+- **`onReconnectAttempt` is now 1-indexed**: The attempt count is incremented before the callback fires (previously 0-indexed).
+- **`middleware` / `plugin` curried overload**: `procedure.middleware<ExpectedInput>()(mw)` and `procedure.plugin<ExpectedInput>()(plugin)` — the extra `()` lets TypeScript infer `NextCtx` while supplying `ExpectedInput` explicitly.
+
+### Fixed
+
+- **Plugin `onError` return type**: Now returns `MaybePromise<Partial<ErrorResponse> | void>`, allowing plugins to override error fields.
+- **Plugin `onError` awaited**: `handler-resolver.ts` now awaits `plugin.onError()` in both error paths (isError + catch) and checks the return value for partial overrides.
+- **SDK `useSuspenseQuery` return type**: Non-void branch now correctly returns `UseSuspenseQueryResult` instead of `QueryResult`.
+- **SDK `invalidate()` hooks violation**: Replaced `useQueryClient()` call with `getCachedQueryClient()`, making `invalidate()` safe to call from event handlers.
+- **`getSnapshot` simplified**: `use-query.ts` getSnapshot now uses direct reference equality (`if (next === snapshotRef.current) return snapshotRef.current`).
+- **Stale-fetch race protection**: `useQuery`, `useQueries`, and `useMutation` now use generation counters so stale in-flight responses can't overwrite `reset()` or newer calls.
+- **`useSSE` cleanup**: The active client is now closed even if cleanup runs during the connection race window, and `isConnected` is reset.
+
 ## [0.7.0] - 2026-06-30
 
 ### Added

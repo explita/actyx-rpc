@@ -51,6 +51,23 @@ function GlobalLoader() {
 
 ---
 
+## `getCachedQueryClient()`
+
+Access the active `QueryClient` outside of React components (such as within external SDK methods, event handlers, or vanilla JS utilities) without violating React hook rules:
+
+```ts
+import { getCachedQueryClient } from "@explita/actyx-rpc/react";
+
+export function handleExternalEvent() {
+  const queryClient = getCachedQueryClient();
+  if (queryClient) {
+    queryClient.invalidate(["todos"]);
+  }
+}
+```
+
+---
+
 ## Client-Only Subpaths
 
 When developing for browser environments (such as Next.js Client Components) or building single-page applications, you can import clients directly from subpaths. 

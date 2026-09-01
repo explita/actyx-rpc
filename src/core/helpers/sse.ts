@@ -9,11 +9,14 @@ export function createSSEResponse<TEventData = any>(
   iterator: AsyncIterable<SSEEvent<TEventData>>,
 ) {
   const encoder = new TextEncoder();
+  let isClosed = false;
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
         for await (const event of iterator) {
+          if (isClosed) break;
+
           let chunk = "";
 
           if (event.id) chunk += `id: ${event.id}\n`;
@@ -28,7 +31,12 @@ export function createSSEResponse<TEventData = any>(
 
           chunk += `data: ${data}\n\n`;
 
-          controller.enqueue(encoder.encode(chunk));
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            isClosed = true;
+            break;
+          }
         }
       } catch (error: any) {
         if (
@@ -44,8 +52,17 @@ export function createSSEResponse<TEventData = any>(
 
         console.error("SSE Stream Error:", error);
       } finally {
-        controller.close();
+        if (!isClosed) {
+          try {
+            controller.close();
+          } catch {
+            // Stream was already closed/canceled by consumer — safe to ignore
+          }
+        }
       }
+    },
+    cancel() {
+      isClosed = true;
     },
   });
 

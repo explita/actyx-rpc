@@ -5,7 +5,7 @@ export * from "./hooks/use-paginated-query.js";
 export * from "./hooks/use-infinite-query.js";
 export * from "./hooks/use-is-mutating.js";
 export * from "./hooks/use-is-fetching.js";
-// export * from "./hooks/use-queries.js";
+export * from "./hooks/use-queries.js";
 export * from "./hooks/use-sse.js";
 export * from "./hooks/use-ws.js";
 export * from "./hooks/use-ws-infinite-query.js";
@@ -18,11 +18,13 @@ export type {
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
   UseMutationOpts,
+  UseMutationResult,
   MutationStatus,
   QueryResult,
   UseQueryOpts,
-  // UseQueriesConfig,
-  // QueriesResults,
+  UseQueriesItem,
+  UseQueriesResult,
+  QueriesResults,
   UseSSEOpts,
   UseSSEResult,
   UseWSOpts,

@@ -1,17 +1,6 @@
-import { MaybePromise } from "../../types/misc";
-
 /** Socket that uses EventEmitter-style `.on()` (e.g. `ws` library). */
 interface EventEmitterSocket {
   on: (event: string, listener: (...args: any[]) => void) => void;
-  readyState: number;
-  send: (data: string) => void;
-}
-
-/** Socket that uses DOM/WHATWG-style event properties (e.g. browser, Node.js built-in). */
-interface DOMSocket {
-  onmessage: ((ev: { data: string }) => void) | null;
-  onclose: (() => void) | null;
-  onerror: ((err: any) => void) | null;
   readyState: number;
   send: (data: string) => void;
 }
@@ -21,8 +10,8 @@ export interface WSProcedureContext<TData = any> {
   send: (data: any) => void;
   broadcast: (data: TData) => void;
   onMessage: (cb: (data: any) => void) => void;
-  onClose: (cb: () => void) => void;
-  onError: (cb: (err: any) => void) => void;
+  onClose: (cb: (evt: CloseEvent) => void) => void;
+  onError: (cb: (err: Event) => void) => void;
 }
 
 /**
@@ -31,7 +20,7 @@ export interface WSProcedureContext<TData = any> {
  */
 export function applyWSHandler<
   TData = any,
-  WSClient extends EventEmitterSocket | DOMSocket = EventEmitterSocket,
+  WSClient extends EventEmitterSocket | WebSocket = EventEmitterSocket,
 >(
   /**
    * The Actyx-RPC procedure to attach to the WebSocket.
@@ -58,8 +47,8 @@ export function applyWSHandler<
 
   // 1. Prepare listeners and event handlers
   let messageCallback: ((data: any) => void) | undefined = undefined;
-  let closeCallback: (() => void) | undefined = undefined;
-  let errorCallback: ((err: any) => void) | undefined = undefined;
+  let closeCallback: ((evt: CloseEvent) => void) | undefined = undefined;
+  let errorCallback: ((err: Event) => void) | undefined = undefined;
 
   procedure({
     send: (data: any) => {
@@ -72,10 +61,10 @@ export function applyWSHandler<
     onMessage: (cb: (data: any) => void) => {
       messageCallback = cb;
     },
-    onClose: (cb: () => void) => {
+    onClose: (cb: (evt: CloseEvent) => void) => {
       closeCallback = cb;
     },
-    onError: (cb: (err: any) => void) => {
+    onError: (cb: (err: Event) => void) => {
       errorCallback = cb;
     },
   });
@@ -95,10 +84,16 @@ export function applyWSHandler<
         messageCallback(String(raw));
       }
     });
-    emitter.on("close", () => closeCallback?.());
+    emitter.on("close", (code: number, reason: Buffer) =>
+      closeCallback?.({
+        code,
+        reason: reason?.toString() ?? "",
+        wasClean: code === 1000,
+      } as CloseEvent),
+    );
     emitter.on("error", (err: any) => errorCallback?.(err));
   } else {
-    const domSocket = ws as unknown as DOMSocket;
+    const domSocket = ws as unknown as WebSocket;
 
     domSocket.onmessage = (ev: { data: string }) => {
       if (!messageCallback) return;
@@ -109,7 +104,7 @@ export function applyWSHandler<
         messageCallback(ev.data);
       }
     };
-    domSocket.onclose = () => closeCallback?.();
-    domSocket.onerror = (err: any) => errorCallback?.(err);
+    domSocket.onclose = (evt) => closeCallback?.(evt);
+    domSocket.onerror = (err) => errorCallback?.(err);
   }
 }

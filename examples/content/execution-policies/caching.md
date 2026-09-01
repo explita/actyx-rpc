@@ -22,12 +22,13 @@ const procedure = createProcedure({
 
 const getUser = procedure
   .cache({
-    ttl: 60000,                 // Cache for 60 seconds
-    staleTime: 30000,           // Data becomes stale after 30 seconds
-    staleWhileRevalidate: true, // Return stale data while revalidating in the background
-    key: (input) => `user:${input.id}`,
+    ttl: "60s",                  // Cache for 60 seconds (supports string WindowTime or ms)
+    staleTime: "30s",            // Data becomes stale after 30 seconds
+    staleWhileRevalidate: true,  // Return stale data while revalidating in the background
+    key: ({ input }) => `user:${input.id}`, // Custom keys are stored raw (unhashed)
+    tags: ({ input }) => [`user:${input.id}`, "users"],
   })
-  .input(z.object({ id: z.string() }))
+  .input(zodResolver(z.object({ id: z.string() })))
   .query(async ({ input }) => {
     return await db.users.findById(input.id);
   });
@@ -37,12 +38,14 @@ const getUser = procedure
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `ttl` | `number` | `60000` | Cache time-to-live in milliseconds. |
-| `staleTime` | `number` | `0` | Delay in ms before data is considered stale. `0` means always stale. |
+| `ttl` | `WindowTime \| number` | `60000` | Cache time-to-live (e.g. `"60s"`, `"5m"`, `"1h"`, or milliseconds). |
+| `staleTime` | `WindowTime \| number` | `0` | Delay before data is considered stale. `0` means always stale. |
 | `staleWhileRevalidate` | `boolean` | `false` | Return stale cache immediately and fetch fresh data in the background. |
-| `key` | `(input) => string` | `JSON.stringify` | Custom key generator function. |
-| `onHit` | `(key, data) => void` | — | Callback run on cache hit. |
-| `onMiss` | `(key) => void` | — | Callback run on cache miss. |
+| `key` | `(opts: { ctx, input }) => MaybePromise<string>` | `JSON.stringify` | Custom key generator function (stored raw, unhashed). Can be async. |
+| `tags` | `string[] \| ((opts: { ctx, input }) => MaybePromise<string[]>)` | — | Cache tags for group invalidation. |
+| `onHit` | `<T>(key: string, entry: CacheEntry<T>) => void` | — | Callback run on cache hit. |
+| `onMiss` | `(key: string) => void` | — | Callback run on cache miss. |
+| `onEvict` | `<T>(key: string, entry: CacheEntry<T>) => void` | — | Callback run when an entry is evicted. |
 | `decompress` | `boolean` | `false` | Set to true if response payload compression was configured. |
 
 ---
@@ -72,27 +75,35 @@ To implement a custom cache (e.g., memcached, cloudflare KV), implement the `Cac
 
 ```ts
 interface CacheAdapter {
-  get<T>(key: string): Promise<T | undefined> | T | undefined;
+  get<T>(key: string): Promise<CacheEntry<T> | undefined> | CacheEntry<T> | undefined;
   set<T>(
     key: string,
     data: T,
-    options?: { ttl?: number; staleTime?: number },
+    options?: { ttl?: WindowTime; staleTime?: WindowTime },
   ): Promise<void> | void;
   isStale(key: string): Promise<boolean> | boolean;
   delete(key: string): Promise<boolean> | boolean;
   clear(): Promise<void> | void;
+  clearByPattern?(pattern: string): Promise<void> | void;
+  invalidateByTag?(tag: string): Promise<void> | void;
+  addTag?(key: string, tags: string | string[]): Promise<void> | void;
 }
 ```
 
 ---
 
-## `.invalidate()`
+## `.invalidate()` & `ctx.cache`
 
-Trigger cache invalidation automatically after a mutation completes successfully.
+### Builder Method (`.invalidate()`)
+Trigger cache invalidation automatically after a mutation completes successfully:
 
 ```ts
 const updatePost = procedure
-  .input(z.object({ id: z.string(), title: z.string() }))
+  .input(
+    zodResolver(
+      z.object({ id: z.string(), title: z.string() }),
+    ),
+  )
   .invalidate({
     keys: ({ input }) => [`post:${input.id}`, "posts:list"],
     tags: ["posts"],
@@ -103,13 +114,36 @@ const updatePost = procedure
   });
 ```
 
+### Programmatic Invalidation (`ctx.cache.invalidate()`)
+Inside any handler (`query`, `mutation`, `action`, `stream`, `ws`), you can also invalidate cache entries programmatically or access cache methods directly:
+
+```ts
+const updatePost = procedure
+  .input(
+    zodResolver(
+      z.object({ id: z.string(), title: z.string() }),
+    ),
+  )
+  .mutation(async ({ ctx, input }) => {
+    const post = await db.posts.update(input);
+
+    // Invalidate dynamically based on operation result
+    await ctx.cache.invalidate({
+      keys: [`post:${input.id}`, "posts:list"],
+      tags: ["posts"],
+    });
+
+    return post;
+  });
+```
+
 ### Invalidation Options
 
 | Option | Type | Description |
 | :--- | :--- | :--- |
-| `keys` | `string \| string[] \| (opts) => string[]` | Specific cache key(s) to delete. |
-| `patterns` | `string \| string[] \| (opts) => string[]` | Glob patterns to match keys (if supported by cache adapter). |
-| `tags` | `string \| string[] \| (opts) => string[]` | Specific cache tag(s) to invalidate. |
+| `keys` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Specific cache key(s) to delete. |
+| `patterns` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Glob patterns to match keys (if supported by cache adapter). |
+| `tags` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Specific cache tag(s) to invalidate. |
 | `delay` | `number` | Delay in ms before invalidation runs. |
 
 ---

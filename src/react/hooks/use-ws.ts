@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorResponse } from "../../types/misc.js";
 import type { UseWSOpts, UseWSResult } from "../types.js";
+import { parseWindow } from "../../lib/utils.js";
 
 const applyDedup = <T>(
   prev: T[],
@@ -53,7 +54,6 @@ export function useWS<
   const [isFetchingInitialData, setIsFetchingInitialData] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const sendRef = useRef<(data: any) => void>(() => {});
   const optsRef = useRef(opts);
   optsRef.current = opts;
   const dataRef = useRef(data);
@@ -75,6 +75,18 @@ export function useWS<
         if (cancelled) return;
         setData(resolved as TOutput[]);
       })
+      .catch((err) => {
+        if (cancelled) return;
+        const errResponse: ErrorResponse = {
+          success: false,
+          handlerName: "useWS",
+          statusCode: 500,
+          message: err?.message || "Failed to load initial data",
+          reason: "UNEXPECTED_ERROR",
+        };
+        setError(errResponse);
+        optsRef.current.onError?.(errResponse);
+      })
       .finally(() => {
         setIsFetchingInitialData(false);
       });
@@ -85,16 +97,20 @@ export function useWS<
   }, []);
 
   const isClosedRef = useRef(false);
+  const pendingMessagesRef = useRef<any[]>([]);
 
   const unsubscribe = useCallback(() => {
     isClosedRef.current = true;
+    pendingMessagesRef.current = [];
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
     setStatus("idle");
-    optsRef.current.onUnsubscribed?.();
+    setError(undefined);
   }, []);
+
+  const reconnectTimeoutIdRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (opts.enabled === false) {
@@ -103,11 +119,12 @@ export function useWS<
 
     isClosedRef.current = false;
     let ws: WebSocket | null = null;
-    let reconnectTimeoutId: NodeJS.Timeout | null = null;
     let attemptCount = 0;
 
     const connect = () => {
-      if (isClosedRef.current) return;
+      if (isClosedRef.current) {
+        return;
+      }
 
       setStatus("connecting");
       const url = new URL(
@@ -120,22 +137,41 @@ export function useWS<
       ws = new WebSocket(url);
       wsRef.current = ws;
 
-      const sendMessage = (msg: any) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(msg));
-        }
-      };
-      sendRef.current = sendMessage;
-
       ws.onopen = () => {
         attemptCount = 0;
+        // Flush pending messages
+        const pending = pendingMessagesRef.current;
+        pendingMessagesRef.current = [];
+        for (const msg of pending) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+          }
+        }
       };
 
       ws.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
 
-          if (parsed.type === "event") {
+          if (parsed.type === "ping") {
+            // Respond immediately
+            ws?.send(
+              JSON.stringify({
+                type: "pong",
+                timestamp: new Date().toISOString(),
+              }),
+            );
+          } else if (parsed.type === "subscribed") {
+            setStatus("connected");
+            optsRef.current.onSubscribed?.();
+            if (parsed.data !== undefined) {
+              if (optsRef.current.filter?.(parsed.data) ?? true) {
+                setData((prev) =>
+                  addItem(prev, parsed.data, optsRef.current.dedupKey),
+                );
+              }
+            }
+          } else if (parsed.type === "event") {
             const item = parsed.data;
             const dedupKeyFn = optsRef.current.dedupKey;
             const prevData = dataRef.current;
@@ -149,16 +185,6 @@ export function useWS<
             if (optsRef.current.filter?.(item) ?? true) {
               setData((prev) => addItem(prev, item, dedupKeyFn));
             }
-          } else if (parsed.type === "subscribed") {
-            setStatus("connected");
-            optsRef.current.onSubscribed?.();
-            if (parsed.data !== undefined) {
-              if (optsRef.current.filter?.(parsed.data) ?? true) {
-                setData((prev) =>
-                  addItem(prev, parsed.data, optsRef.current.dedupKey),
-                );
-              }
-            }
           } else if (parsed.type === "error") {
             setStatus("error");
             setError(parsed.error);
@@ -171,17 +197,32 @@ export function useWS<
             }
           }
         } catch {
-          setData((prev) => [...prev, event.data as TOutput]);
+          const errResponse: ErrorResponse = {
+            success: false,
+            handlerName: "useWS",
+            statusCode: 500,
+            message: "Failed to parse message",
+            reason: "UNEXPECTED_ERROR",
+          };
+          optsRef.current.onError?.(errResponse);
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
+        optsRef.current.onUnsubscribed?.(evt);
+
         if (isClosedRef.current) {
           setStatus("idle");
           return;
         }
 
         setStatus("idle");
+
+        // Don't reconnect on normal closure
+        if (evt.wasClean && evt.code === 1000) {
+          // console.log("✅ Normal closure, not reconnecting");
+          return;
+        }
 
         const reconnectOpts = optsRef.current.reconnect;
         if (reconnectOpts) {
@@ -190,12 +231,23 @@ export function useWS<
             const delayFn =
               reconnectOpts.delay ??
               ((attempt) => Math.min(1000 * Math.pow(2, attempt), 30000));
-            const delay =
+            const delayWindow =
               typeof delayFn === "function" ? delayFn(attemptCount) : delayFn;
+            let delay = parseWindow(delayWindow);
 
-            optsRef.current.onReconnectAttempt?.(attemptCount);
+            // Exponential backoff with extra delay for 1006
+            if (evt.code === 1006) {
+              delay += 2000;
+              // console.log("⚠️ 1006 error - adding extra delay");
+            }
+
+            // console.log(
+            // `🔄 Reconnecting in ${delay}ms (attempt ${attemptCount + 1}/${maxAttempts})`,
+            // );
+
             attemptCount++;
-            reconnectTimeoutId = setTimeout(() => {
+            optsRef.current.onReconnectAttempt?.(attemptCount);
+            reconnectTimeoutIdRef.current = setTimeout(() => {
               connect();
             }, delay);
           } else {
@@ -213,21 +265,35 @@ export function useWS<
       };
 
       ws.onerror = () => {
+        const errResponse: ErrorResponse = {
+          success: false,
+          handlerName: "useWS",
+          statusCode: 500,
+          message: "WebSocket connection error",
+          reason: "UNEXPECTED_ERROR",
+        };
         setStatus("error");
+        setError(errResponse);
+        optsRef.current.onError?.(errResponse);
       };
     };
 
     connect();
 
     return () => {
+      // console.log("🧹 Cleaning up WebSocket");
       isClosedRef.current = true;
-      if (reconnectTimeoutId) clearTimeout(reconnectTimeoutId);
+      pendingMessagesRef.current = [];
+      if (reconnectTimeoutIdRef.current) {
+        clearTimeout(reconnectTimeoutIdRef.current);
+        reconnectTimeoutIdRef.current = null;
+      }
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
       setStatus("idle");
-      optsRef.current.onUnsubscribed?.();
+      setError(undefined);
     };
   }, [opts.url, opts.enabled]);
 
@@ -235,12 +301,8 @@ export function useWS<
     const reconnectHandler = () =>
       optsRef.current.onReconnect?.(dataRef.current);
     const focusHandler = () => optsRef.current.onWindowFocus?.(dataRef.current);
-    if (opts.onReconnect) {
-      window.addEventListener("online", reconnectHandler);
-    }
-    if (opts.onWindowFocus) {
-      window.addEventListener("focus", focusHandler);
-    }
+    window.addEventListener("online", reconnectHandler);
+    window.addEventListener("focus", focusHandler);
 
     return () => {
       window.removeEventListener("online", reconnectHandler);
@@ -249,7 +311,12 @@ export function useWS<
   }, []);
 
   const send = useCallback((data: any) => {
-    sendRef.current(data);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(data));
+    } else {
+      pendingMessagesRef.current.push(data);
+    }
   }, []);
 
   const arrangedData = useMemo(() => {

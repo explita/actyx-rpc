@@ -144,3 +144,37 @@ const getProfile = procedure
     return user; // Even if 'user' has 50 fields, only these 3 will be returned.
   });
 ```
+
+---
+
+## Type Inference Utilities
+
+Actyx RPC provides built-in type helper utilities exported from `@explita/actyx-rpc`:
+
+### `InferInput<T>`
+Extracts the inferred input type for a procedure builder or procedure definition:
+
+```ts
+import type { InferInput } from "@explita/actyx-rpc";
+
+type UpdateProfileInput = InferInput<typeof updateProfile>;
+```
+
+### `InferOutput<T>`
+Extracts the resolved return data type from a finalized procedure:
+
+```ts
+import type { InferOutput } from "@explita/actyx-rpc";
+
+type Profile = InferOutput<typeof getProfile>;
+```
+
+### `InferContext<T>`
+Extracts the accumulated context type from a procedure builder:
+
+```ts
+import type { InferContext } from "@explita/actyx-rpc";
+
+type AppContext = InferContext<typeof procedure>;
+```
+

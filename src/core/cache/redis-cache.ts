@@ -4,6 +4,7 @@ import type {
   CacheEntry,
   RedisCacheOptions,
   RedisInstance,
+  WindowTime,
 } from "./types.js";
 import { getStaleAt, isStale, parseWindow } from "../../lib/utils.js";
 
@@ -35,11 +36,11 @@ export class RedisCache implements CacheAdapter {
   async sets<T>(
     key: string,
     data: T,
-    options?: { ttl?: number; staleTime?: number },
+    options?: { ttl?: WindowTime; staleTime?: WindowTime },
   ): Promise<void> {
     if (!data) return;
-    const ttl = options?.ttl ?? this.defaultTTL;
-    const staleTime = options?.staleTime ?? this.defaultStaleTime;
+    const ttl = parseWindow(options?.ttl ?? this.defaultTTL);
+    const staleTime = parseWindow(options?.staleTime ?? this.defaultStaleTime);
     const now = Date.now();
     const redisKey = this.getKey(key);
 
@@ -66,11 +67,11 @@ export class RedisCache implements CacheAdapter {
   async set<T>(
     key: string,
     data: T,
-    options?: { ttl?: number; staleTime?: number },
+    options?: { ttl?: WindowTime; staleTime?: WindowTime },
   ): Promise<void> {
     if (data === undefined || data === null) return;
-    const ttl = options?.ttl ?? this.defaultTTL;
-    const staleTime = options?.staleTime ?? this.defaultStaleTime;
+    const ttl = parseWindow(options?.ttl ?? this.defaultTTL);
+    const staleTime = parseWindow(options?.staleTime ?? this.defaultStaleTime);
     const now = Date.now();
     const redisKey = this.getKey(key);
 
@@ -160,7 +161,7 @@ export class RedisCache implements CacheAdapter {
 
     // Delete all cache keys
     for (const key of keys) {
-      pipeline.del(key);
+      pipeline.del(this.getKey(key));
     }
 
     // Delete the tag index

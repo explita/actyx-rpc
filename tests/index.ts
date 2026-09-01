@@ -23,9 +23,9 @@ const proc = createProcedure({
       },
     };
   },
-  enrichInput(ctx) {
-    return { userId: ctx.id };
-  },
+  // enrichInput(ctx) {
+  //   return { userId: ctx.id };
+  // },
   cache: new RedisCache(new Redis({}), { defaultTTL: "10m" }), // 10 minutes
   onContextError: async (reason) => {
     return {
@@ -65,9 +65,9 @@ const p2 = proc.extend({
       },
     };
   },
-  enrichInput({ ctx, previous }) {
-    return { ...previous, ...ctx };
-  },
+  // enrichInput({ ctx, previous }) {
+  //   return { ...previous, ...ctx };
+  // },
   meta: {
     anotherGlobal: "value",
     a: "",
@@ -98,7 +98,7 @@ const p4 = p3.extend({
   },
 });
 
-const md = proc.middleware<{ id: string }>(async ({ ctx, input, next }) => {
+const md = proc.middleware<{ id: string }>()(async ({ ctx, input, next }) => {
   return next({ aa: "" });
 });
 
@@ -184,7 +184,7 @@ const getData = proc
   .rateLimit({
     limit: 1000,
     window: "1d",
-    key(ctx) {
+    key({ ctx }) {
       return `${ctx.id}`;
     },
   })

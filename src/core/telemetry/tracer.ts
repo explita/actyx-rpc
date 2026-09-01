@@ -7,7 +7,7 @@ try {
   const api = await import("@opentelemetry/api");
   trace = api.trace;
   SpanStatusCode = api.SpanStatusCode;
-} catch (e) {
+} catch {
   // No-op fallback if API is not available
   trace = {
     getTracer: () => ({

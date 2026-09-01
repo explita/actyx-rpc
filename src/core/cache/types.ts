@@ -1,22 +1,108 @@
 import type { Redis } from "ioredis";
-import { BaseContext, Prettify, WindowTime } from "../../types/misc.js";
+import {
+  BaseContext,
+  MaybePromise,
+  Prettify,
+  WindowTime,
+} from "../../types/misc.js";
 export type { WindowTime };
 
+/**
+ * Adapter interface for caching implementations (e.g., In-Memory, Redis).
+ *
+ * Provides a unified API for storing, retrieving, checking, and invalidating
+ * cached procedure results and custom data.
+ */
 export type CacheAdapter = {
-  get<T>(
-    key: string,
-  ): Promise<CacheEntry<T> | undefined> | CacheEntry<T> | undefined;
+  /**
+   * Retrieves a cached entry by key.
+   *
+   * @template T - The expected data type of the cached entry
+   * @param key - Unique cache key
+   * @returns The cached entry wrapping the data and its metadata, or `undefined` if not found/expired
+   *
+   * @example
+   * ```typescript
+   * const entry = await cache.get<User>('user:123');
+   * if (entry) {
+   *   console.log(entry.data.name, entry.isStale);
+   * }
+   * ```
+   */
+  get<T>(key: string): MaybePromise<CacheEntry<T> | undefined>;
+
+  /**
+   * Stores a value in the cache with optional expiration and stale settings.
+   *
+   * @template T - The data type being cached
+   * @param key - Unique cache key
+   * @param data - The payload to store (undefined and null values are ignored)
+   * @param options - TTL and stale time configuration (in milliseconds)
+   *
+   * @example
+   * ```typescript
+   * await cache.set('user:123', userData, {
+   *   ttl: 60_000,       // 1 minute TTL
+   *   staleTime: 30_000, // Stale after 30 seconds
+   * });
+   * ```
+   */
   set<T>(
     key: string,
     data: T,
-    options?: { ttl?: number; staleTime?: number },
+    options?: { ttl?: WindowTime; staleTime?: WindowTime },
   ): Promise<void> | void;
+
+  /**
+   * Checks whether a cached entry is considered stale based on its `staleTime`.
+   *
+   * @param key - Unique cache key
+   * @returns `true` if the entry exists and has exceeded its stale duration, `false` otherwise
+   */
   isStale(key: string): Promise<boolean> | boolean;
+
+  /**
+   * Checks whether a non-expired entry exists in the cache.
+   *
+   * @param key - Unique cache key
+   * @returns `true` if the key exists and has not expired, `false` otherwise
+   */
   has(key: string): Promise<boolean> | boolean;
+
+  /**
+   * Deletes a specific entry from the cache.
+   *
+   * @param key - Unique cache key to remove
+   * @returns `true` if the key was deleted, `false` if it did not exist
+   */
   delete(key: string): Promise<boolean> | boolean;
+
+  /**
+   * Clears all entries from the cache adapter.
+   */
   clear(): Promise<void> | void;
+
+  /**
+   * Clears entries matching a key pattern (e.g. `user:*`).
+   * Supported by Redis and memory cache adapters that implement pattern matching.
+   *
+   * @param pattern - Glob-style pattern to match keys against
+   */
   clearByPattern?(pattern: string): Promise<void>;
+
+  /**
+   * Associates one or more tags with a cache key for group invalidation.
+   *
+   * @param key - Cache key to tag
+   * @param tags - A single tag string or array of tags
+   */
   addTag?(key: string, tags: string | string[]): Promise<void>;
+
+  /**
+   * Invalidates all cache entries associated with a specific tag.
+   *
+   * @param tag - Tag name whose associated entries should be purged
+   */
   invalidateByTag?(tag: string): Promise<void>;
 };
 
@@ -210,7 +296,7 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * @example
    * tags: ['users', 'active-users']
    */
-  tags?: string[];
+  tags?: (opts: { ctx: Ctx; input: I }) => MaybePromise<string[]> | string[];
 
   /**
    * Whether to decompress cached data.
@@ -227,7 +313,7 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * @example
    * key: ({ ctx, input }) => `user:${ctx.tenantId}:${input.id}`
    */
-  key?: (opts: { ctx: Ctx; input: I }) => string;
+  key?: (opts: { ctx: Ctx; input: I }) => MaybePromise<string>;
 
   /**
    * Callback triggered when an entry is evicted from cache.
@@ -235,14 +321,14 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * @param key - The cache key being evicted
    * @param entry - The cached entry being removed
    */
-  onEvict?: (key: string, entry: CacheEntry) => void;
+  onEvict?: <T = unknown>(key: string, entry: CacheEntry<T>) => void;
 
   /**
    * Callback triggered when a cache hit occurs.
    * @param key - The cache key that was hit
    * @param entry - The cached entry retrieved
    */
-  onHit?: (key: string, entry: CacheEntry) => void;
+  onHit?: <T = unknown>(key: string, entry: CacheEntry<T>) => void;
 
   /**
    * Callback triggered when a cache miss occurs.
@@ -264,7 +350,7 @@ export type CacheConfig = {
 };
 
 export type CacheInvalidateKeyFn<Ctx = unknown, I = unknown> =
-  | ((opts: { ctx: Ctx; input: I }) => string | string[])
+  | ((opts: { ctx: Ctx; input: I }) => MaybePromise<string | string[]>)
   | string
   | string[];
 
@@ -285,8 +371,26 @@ export type CacheInvalidationConfig = {
   options?: CacheInvalidationOptions;
 };
 
+/**
+ * Context-aware cache helper attached to `ctx.cache`.
+ * Combines all standard CacheAdapter methods with typed invalidation.
+ */
+export type CacheContextHelper<
+  TCtx = unknown,
+  TInput = unknown,
+> = CacheAdapter & {
+  /**
+   * Invalidates cache from inside a terminal handler.
+   * Same options as the `.invalidate()` builder method.
+   */
+  invalidate: (
+    options: CacheInvalidationOptions<TCtx, TInput>,
+  ) => Promise<void>;
+};
+
 export type RateLimitOptions<
   Ctx = unknown,
+  I = unknown,
   TMeta = unknown,
   TName extends string = string,
 > = {
@@ -296,10 +400,13 @@ export type RateLimitOptions<
   window?: WindowTime;
   /** Custom key generator (default: based on ctx) */
   key?: (
-    ctx: Prettify<Ctx & BaseContext<TMeta, TName>>,
+    opts: {
+      ctx: Prettify<Ctx & BaseContext<TMeta, TName>>;
+      input: I;
+    },
     req: Request,
     context: any,
-  ) => string;
+  ) => MaybePromise<string>;
   /** Response message when rate limited (default: "Too many requests") */
   message?: string;
   /** Callback when rate limited */

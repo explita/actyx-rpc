@@ -33,7 +33,7 @@ export function observabilityPlugin(
 
       return next();
     },
-    onAfter: async (ctx, result) => {
+    onAfter: async (ctx) => {
       const stack = (ctx as any)[START_TIMES_KEY];
       if (stack && stack.length > 0) {
         const start = stack.pop();

@@ -1,5 +1,4 @@
 import { rpcStorage } from "./rpc-storage.js";
-import type { InferContext } from "../../types/procedure.js";
 
 /**
  * Returns the current RPC context from `AsyncLocalStorage`.

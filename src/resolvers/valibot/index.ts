@@ -50,7 +50,6 @@ export function valibotResolver<S extends v.ObjectSchema<any, any>>(
       // Basic introspection for Valibot objects
       if (schema.type === "object" && (schema as any).entries) {
         const properties: Record<string, any> = {};
-        const required: string[] = [];
 
         for (const [key, value] of Object.entries((schema as any).entries)) {
           const v = value as any;

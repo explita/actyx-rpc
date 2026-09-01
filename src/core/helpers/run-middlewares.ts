@@ -9,7 +9,7 @@ export async function runMiddlewares(
   args: any[],
   baseError: Partial<ErrorResponse>,
 ): Promise<{ ctx: any; shouldContinue: boolean; errorResponse?: any }> {
-  let currentCtx = ctx;
+  const currentCtx = ctx;
 
   for (const mw of middlewares) {
     const mwResult = await (mw as any)({ ctx: currentCtx, input, next }, ...args);

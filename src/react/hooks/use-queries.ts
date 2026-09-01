@@ -7,20 +7,276 @@ import {
 } from "react";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
-import { QueriesResults, UseQueriesConfig } from "../types.js";
+import {
+  QueriesResults,
+  QueryData,
+  QueryResult,
+  Unwrap,
+  UseQueriesItem,
+} from "../types.js";
 import { ErrorResponse } from "../../types/misc.js";
 import { parseWindow } from "../../lib/utils.js";
+import { QueryState } from "../lib/query-client.js";
 
-export function useQueries<T extends UseQueriesConfig[]>(
-  ...queries: T
-): QueriesResults<T> {
+/**
+ * `useQueries` — fetch multiple independent queries at once, with per-item
+ * type inference (TanStack-inspired structural approach).
+ *
+ * Each item is mapped independently so that `unwrap`, `select`, and
+ * `initialData` work exactly like they do in `useQuery`.
+ */
+// 1 query
+export function useQueries<
+  T1Output,
+  T1QueryKey extends unknown[] = unknown[],
+  T1Unwrap extends boolean = false,
+  T1SelectData = Unwrap<T1Output, T1Unwrap>,
+  T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
+    undefined,
+>(
+  q1: UseQueriesItem<
+    T1Output,
+    T1QueryKey,
+    T1Unwrap,
+    T1SelectData,
+    T1InitialData
+  >,
+): [QueryResult<T1Output, T1InitialData, T1Unwrap, T1SelectData>];
+
+// 2 queries
+export function useQueries<
+  T1Output,
+  T1QueryKey extends unknown[] = unknown[],
+  T1Unwrap extends boolean = false,
+  T1SelectData = Unwrap<T1Output, T1Unwrap>,
+  T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
+    undefined,
+  T2Output = any,
+  T2QueryKey extends unknown[] = unknown[],
+  T2Unwrap extends boolean = false,
+  T2SelectData = Unwrap<T2Output, T2Unwrap>,
+  T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
+    undefined,
+>(
+  q1: UseQueriesItem<
+    T1Output,
+    T1QueryKey,
+    T1Unwrap,
+    T1SelectData,
+    T1InitialData
+  >,
+  q2: UseQueriesItem<
+    T2Output,
+    T2QueryKey,
+    T2Unwrap,
+    T2SelectData,
+    T2InitialData
+  >,
+): [
+  QueryResult<T1Output, T1InitialData, T1Unwrap, T1SelectData>,
+  QueryResult<T2Output, T2InitialData, T2Unwrap, T2SelectData>,
+];
+
+// 3 queries
+export function useQueries<
+  T1Output,
+  T1QueryKey extends unknown[] = unknown[],
+  T1Unwrap extends boolean = false,
+  T1SelectData = Unwrap<T1Output, T1Unwrap>,
+  T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
+    undefined,
+  T2Output = any,
+  T2QueryKey extends unknown[] = unknown[],
+  T2Unwrap extends boolean = false,
+  T2SelectData = Unwrap<T2Output, T2Unwrap>,
+  T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
+    undefined,
+  T3Output = any,
+  T3QueryKey extends unknown[] = unknown[],
+  T3Unwrap extends boolean = false,
+  T3SelectData = Unwrap<T3Output, T3Unwrap>,
+  T3InitialData extends QueryData<Unwrap<T3Output, T3Unwrap>> | undefined =
+    undefined,
+>(
+  q1: UseQueriesItem<
+    T1Output,
+    T1QueryKey,
+    T1Unwrap,
+    T1SelectData,
+    T1InitialData
+  >,
+  q2: UseQueriesItem<
+    T2Output,
+    T2QueryKey,
+    T2Unwrap,
+    T2SelectData,
+    T2InitialData
+  >,
+  q3: UseQueriesItem<
+    T3Output,
+    T3QueryKey,
+    T3Unwrap,
+    T3SelectData,
+    T3InitialData
+  >,
+): [
+  QueryResult<T1Output, T1InitialData, T1Unwrap, T1SelectData>,
+  QueryResult<T2Output, T2InitialData, T2Unwrap, T2SelectData>,
+  QueryResult<T3Output, T3InitialData, T3Unwrap, T3SelectData>,
+];
+
+// 4 queries
+export function useQueries<
+  T1Output,
+  T1QueryKey extends unknown[] = unknown[],
+  T1Unwrap extends boolean = false,
+  T1SelectData = Unwrap<T1Output, T1Unwrap>,
+  T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
+    undefined,
+  T2Output = any,
+  T2QueryKey extends unknown[] = unknown[],
+  T2Unwrap extends boolean = false,
+  T2SelectData = Unwrap<T2Output, T2Unwrap>,
+  T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
+    undefined,
+  T3Output = any,
+  T3QueryKey extends unknown[] = unknown[],
+  T3Unwrap extends boolean = false,
+  T3SelectData = Unwrap<T3Output, T3Unwrap>,
+  T3InitialData extends QueryData<Unwrap<T3Output, T3Unwrap>> | undefined =
+    undefined,
+  T4Output = any,
+  T4QueryKey extends unknown[] = unknown[],
+  T4Unwrap extends boolean = false,
+  T4SelectData = Unwrap<T4Output, T4Unwrap>,
+  T4InitialData extends QueryData<Unwrap<T4Output, T4Unwrap>> | undefined =
+    undefined,
+>(
+  q1: UseQueriesItem<
+    T1Output,
+    T1QueryKey,
+    T1Unwrap,
+    T1SelectData,
+    T1InitialData
+  >,
+  q2: UseQueriesItem<
+    T2Output,
+    T2QueryKey,
+    T2Unwrap,
+    T2SelectData,
+    T2InitialData
+  >,
+  q3: UseQueriesItem<
+    T3Output,
+    T3QueryKey,
+    T3Unwrap,
+    T3SelectData,
+    T3InitialData
+  >,
+  q4: UseQueriesItem<
+    T4Output,
+    T4QueryKey,
+    T4Unwrap,
+    T4SelectData,
+    T4InitialData
+  >,
+): [
+  QueryResult<T1Output, T1InitialData, T1Unwrap, T1SelectData>,
+  QueryResult<T2Output, T2InitialData, T2Unwrap, T2SelectData>,
+  QueryResult<T3Output, T3InitialData, T3Unwrap, T3SelectData>,
+  QueryResult<T4Output, T4InitialData, T4Unwrap, T4SelectData>,
+];
+
+// 5 queries
+export function useQueries<
+  T1Output,
+  T1QueryKey extends unknown[] = unknown[],
+  T1Unwrap extends boolean = false,
+  T1SelectData = Unwrap<T1Output, T1Unwrap>,
+  T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
+    undefined,
+  T2Output = any,
+  T2QueryKey extends unknown[] = unknown[],
+  T2Unwrap extends boolean = false,
+  T2SelectData = Unwrap<T2Output, T2Unwrap>,
+  T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
+    undefined,
+  T3Output = any,
+  T3QueryKey extends unknown[] = unknown[],
+  T3Unwrap extends boolean = false,
+  T3SelectData = Unwrap<T3Output, T3Unwrap>,
+  T3InitialData extends QueryData<Unwrap<T3Output, T3Unwrap>> | undefined =
+    undefined,
+  T4Output = any,
+  T4QueryKey extends unknown[] = unknown[],
+  T4Unwrap extends boolean = false,
+  T4SelectData = Unwrap<T4Output, T4Unwrap>,
+  T4InitialData extends QueryData<Unwrap<T4Output, T4Unwrap>> | undefined =
+    undefined,
+  T5Output = any,
+  T5QueryKey extends unknown[] = unknown[],
+  T5Unwrap extends boolean = false,
+  T5SelectData = Unwrap<T5Output, T5Unwrap>,
+  T5InitialData extends QueryData<Unwrap<T5Output, T5Unwrap>> | undefined =
+    undefined,
+>(
+  q1: UseQueriesItem<
+    T1Output,
+    T1QueryKey,
+    T1Unwrap,
+    T1SelectData,
+    T1InitialData
+  >,
+  q2: UseQueriesItem<
+    T2Output,
+    T2QueryKey,
+    T2Unwrap,
+    T2SelectData,
+    T2InitialData
+  >,
+  q3: UseQueriesItem<
+    T3Output,
+    T3QueryKey,
+    T3Unwrap,
+    T3SelectData,
+    T3InitialData
+  >,
+  q4: UseQueriesItem<
+    T4Output,
+    T4QueryKey,
+    T4Unwrap,
+    T4SelectData,
+    T4InitialData
+  >,
+  q5: UseQueriesItem<
+    T5Output,
+    T5QueryKey,
+    T5Unwrap,
+    T5SelectData,
+    T5InitialData
+  >,
+): [
+  QueryResult<T1Output, T1InitialData, T1Unwrap, T1SelectData>,
+  QueryResult<T2Output, T2InitialData, T2Unwrap, T2SelectData>,
+  QueryResult<T3Output, T3InitialData, T3Unwrap, T3SelectData>,
+  QueryResult<T4Output, T4InitialData, T4Unwrap, T4SelectData>,
+  QueryResult<T5Output, T5InitialData, T5Unwrap, T5SelectData>,
+];
+
+// Fallback variadic
+export function useQueries<
+  T extends readonly UseQueriesItem<any, any, any, any, any>[],
+>(...queries: [...T]): QueriesResults<T>;
+export function useQueries(
+  ...queries: UseQueriesItem<any, any, any, any, any>[]
+) {
   const queryClient = useQueryClient();
 
-  // 1. Keep track of current query keys to avoid unnecessary resubscriptions
-  const keysRef = useRef<string[]>([]);
+  // 1. Stable query keys
   const keysStr = queries
     .map((q) => q.queryKey?.map(String).join("|"))
     .join(",");
+  const keysRef = useRef<string[]>([]);
   const stableKeys = useMemo(() => {
     const keys = queries.map((q) => (q.queryKey || []).map(String).join("|"));
     const changed =
@@ -32,19 +288,24 @@ export function useQueries<T extends UseQueriesConfig[]>(
     return keysRef.current;
   }, [keysStr]);
 
-  // 2. Keep a ref of callbacks and configurations
-  const configsRef = useRef(queries);
-  const keepPrevRef = useRef<boolean[]>([]);
-  useEffect(() => {
-    configsRef.current = queries;
-    keepPrevRef.current = queries.map((q) => q.keepPreviousData ?? true);
-  });
+  // Keep a mutable ref to stableKeys for use inside callbacks/effects
+  const stableKeysRef = useRef(stableKeys);
+  stableKeysRef.current = stableKeys;
 
-  // 3. Ensure initial states exist in the cache
+  // 2. Sync configs during render (not in useEffect) so fetchAll sees latest values
+  const configsRef = useRef(queries);
+  configsRef.current = queries;
+
+  // 3. Per-query race protection
+  const generationRef = useRef(new Map<string, number>());
+  const fetchingRef = useRef(new Set<string>());
+
+  // 4. Ensure initial states exist in cache before subscribing
   queries.forEach((q, index) => {
     const queryKey = stableKeys[index];
     if (!queryClient.getQueryState(queryKey)) {
       const resolvedInitialData =
+        //@ts-ignore
         typeof q.initialData === "function" ? q.initialData() : q.initialData;
       queryClient.setQueryState(
         queryKey,
@@ -62,87 +323,92 @@ export function useQueries<T extends UseQueriesConfig[]>(
     }
   });
 
-  // 4. Cache snapshot to avoid infinite loop warning from useSyncExternalStore
-  const cachedSnapshotRef = useRef<any[]>([]);
-  const stableKeysRef = useRef(stableKeys);
-  stableKeysRef.current = stableKeys;
+  // 5. Snapshot cache for referential stability in useSyncExternalStore
+  const snapshotRef = useRef<QueryState<any, any>[]>([]);
 
-  const refreshSnapshot = () => {
-    cachedSnapshotRef.current = stableKeysRef.current.map(
-      (key) => queryClient.getQueryState(key)!,
-    );
-  };
-
-  // 5. Set up the subscription store change listener
+  // 6. Subscribe to all query keys — resubscribes when keys change
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      refreshSnapshot();
       const keys = stableKeysRef.current;
-      const unsubs = configsRef.current.map((q, index) => {
-        const queryKey = keys[index];
+      const unsubs = keys.map((queryKey, index) => {
         return queryClient.subscribe(
           queryKey,
-          () => {
-            refreshSnapshot();
-            onStoreChange();
-          },
-          q.gcTime,
+          onStoreChange,
+          configsRef.current[index]?.gcTime,
         );
       });
       return () => {
         unsubs.forEach((unsub) => unsub());
       };
     },
-    [queryClient],
+    [queryClient, stableKeys],
   );
 
-  // 6. Get snapshot of all states (referentially stable via cachedSnapshotRef)
+  // 7. Get snapshot — return same array reference when values haven't changed
   const getSnapshot = useCallback(() => {
-    if (cachedSnapshotRef.current.length === 0) {
-      refreshSnapshot();
+    const next = stableKeysRef.current.map(
+      (key) => queryClient.getQueryState(key)!,
+    );
+    const prev = snapshotRef.current;
+    if (prev.length === next.length && prev.every((s, i) => s === next[i])) {
+      return prev; // same references -> no re-render
     }
-    return cachedSnapshotRef.current;
-  }, [queryClient]);
+    snapshotRef.current = next;
+    return next;
+  }, [queryClient, stableKeys]);
 
   const states = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  // 6. Fetch data using Promise.all
-  const fetchAll = useCallback(async () => {
-    const promises = configsRef.current.map(async (q, index) => {
-      const queryKey = stableKeysRef.current[index];
-      if (q.enabled === false) return;
+  // 8. Shared fetch-one logic used by fetchAll, window focus, reconnect, and refetch
+  const fetchOne = useCallback(
+    async (index: number, opts?: { skipStaleCheck?: boolean }) => {
+      const key = stableKeysRef.current[index];
+      const q = configsRef.current[index];
+      if (!key || q.enabled === false) return;
 
-      const state = queryClient.getQueryState(queryKey);
-      const staleTime = parseWindow(q.staleTime);
-      const refetchOnMount = q.refetchOnMount ?? true;
+      // Race protection — skip if already fetching this key
+      if (fetchingRef.current.has(key)) return;
+      fetchingRef.current.add(key);
+      const generation = (generationRef.current.get(key) ?? 0) + 1;
+      generationRef.current.set(key, generation);
 
-      let shouldFetch = true;
+      // Stale check (unless explicitly skipped)
+      if (!opts?.skipStaleCheck) {
+        const state = queryClient.getQueryState(key);
+        const staleTime = parseWindow(q.staleTime);
+        const refetchOnMount = q.refetchOnMount ?? true;
 
-      if (state?.isSuccess && state?.updatedAt) {
-        if (refetchOnMount === false) {
-          shouldFetch = false;
-        } else if (refetchOnMount !== "always") {
-          const isStale = Date.now() - state.updatedAt >= staleTime;
-          if (!isStale) {
-            shouldFetch = false;
+        if (state?.isSuccess && state?.updatedAt) {
+          if (refetchOnMount === false) {
+            fetchingRef.current.delete(key);
+            return;
+          } else if (refetchOnMount !== "always") {
+            if (Date.now() - state.updatedAt < staleTime) {
+              fetchingRef.current.delete(key);
+              return;
+            }
           }
         }
       }
 
-      if (!shouldFetch) return;
-
-      queryClient.setQueryState(queryKey, {
+      queryClient.setQueryState(key, {
         isFetching: true,
-        ...(keepPrevRef.current[index] === false && { data: undefined }),
+        ...((q.keepPreviousData ?? true) === false && { data: undefined }),
       });
 
       const fetcher = async () => await q.proc();
       let resultTuple: [any, null] | [null, ErrorResponse];
 
-      if (!queryKey.startsWith("__local__")) {
-        resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
+      if (!key.startsWith("__local__")) {
+        resultTuple = await globalRequestManager.fetch(key, fetcher);
       } else {
         resultTuple = await fetcher();
+      }
+
+      // Abort if a newer call superseded this one
+      if (generationRef.current.get(key) !== generation) {
+        fetchingRef.current.delete(key);
+        return;
       }
 
       const [result, err] = resultTuple;
@@ -150,8 +416,9 @@ export function useQueries<T extends UseQueriesConfig[]>(
       if (err) {
         const initData = configsRef.current[index].initialData;
         const resolvedInitData =
+          //@ts-ignore
           typeof initData === "function" ? initData() : initData;
-        queryClient.setQueryState(queryKey, {
+        queryClient.setQueryState(key, {
           error: err,
           isError: true,
           isSuccess: false,
@@ -159,7 +426,8 @@ export function useQueries<T extends UseQueriesConfig[]>(
           data: resolvedInitData,
           isFetched: true,
         });
-        q.onError?.(err);
+        configsRef.current[index].onError?.(err);
+        configsRef.current[index].onSettled?.(null, err);
       } else {
         const unwrapped =
           (q.unwrap as any) === true &&
@@ -169,7 +437,7 @@ export function useQueries<T extends UseQueriesConfig[]>(
             ? (result as any).data
             : result;
 
-        queryClient.setQueryState(queryKey, {
+        queryClient.setQueryState(key, {
           data: unwrapped,
           error: undefined,
           isError: false,
@@ -180,17 +448,20 @@ export function useQueries<T extends UseQueriesConfig[]>(
         });
 
         const finalData = q.select ? q.select(unwrapped) : unwrapped;
-        q.onSuccess?.(finalData);
-        q.onSettled?.(finalData, null);
+        configsRef.current[index].onSuccess?.(finalData);
+        configsRef.current[index].onSettled?.(finalData, null);
       }
 
-      if (err) {
-        q.onSettled?.(null, err);
-      }
-    });
+      fetchingRef.current.delete(key);
+    },
+    [queryClient],
+  );
 
+  // 9. Fetch all queries in parallel
+  const fetchAll = useCallback(async () => {
+    const promises = stableKeysRef.current.map((_, index) => fetchOne(index));
     await Promise.all(promises);
-  }, [queryClient]);
+  }, [fetchOne]);
 
   // Initial fetch effect
   useEffect(() => {
@@ -201,19 +472,16 @@ export function useQueries<T extends UseQueriesConfig[]>(
   useEffect(() => {
     let active = true;
 
-    const refetchableIndices = stableKeys
-      .map((_, i) => i)
-      .filter((i) => configsRef.current[i]?.refetchOnWindowFocus);
-
-    if (refetchableIndices.length === 0) return;
-
     const handleFocus = () => {
       if (!active) return;
-      refetchableIndices.forEach((i) => {
-        const q = configsRef.current[i];
-        const key = stableKeys[i];
+      stableKeysRef.current.forEach((_, index) => {
+        const q = configsRef.current[index];
+        if (!q?.refetchOnWindowFocus) return;
+        if (q.enabled === false) return;
+
+        const key = stableKeysRef.current[index];
         const state = queryClient.getQueryState(key);
-        if (!state || q.enabled === false) return;
+        if (!state) return;
 
         // Skip if data is still fresh
         const staleTime = parseWindow(q.staleTime);
@@ -224,47 +492,7 @@ export function useQueries<T extends UseQueriesConfig[]>(
         )
           return;
 
-        queryClient.setQueryState(key, {
-          isFetching: true,
-          ...((q.keepPreviousData ?? true) === false && {
-            data: undefined,
-          }),
-        });
-
-        const fetcher = async () => await q.proc();
-        globalRequestManager.fetch(key, fetcher).then(([result, err]) => {
-          if (!active) return;
-          if (err) {
-            queryClient.setQueryState(key, {
-              error: err,
-              isError: true,
-              isSuccess: false,
-              isFetching: false,
-              isFetched: true,
-            });
-            q.onError?.(err);
-          } else {
-            const unwrapped =
-              (q.unwrap as any) === true &&
-              result &&
-              typeof result === "object" &&
-              "data" in result
-                ? (result as any).data
-                : result;
-            queryClient.setQueryState(key, {
-              data: unwrapped,
-              error: undefined,
-              isError: false,
-              isSuccess: true,
-              isFetching: false,
-              updatedAt: Date.now(),
-              isFetched: true,
-            });
-            const finalData = q.select ? q.select(unwrapped) : unwrapped;
-            q.onSuccess?.(finalData);
-            q.onSettled?.(finalData, null);
-          }
-        });
+        fetchOne(index, { skipStaleCheck: true });
       });
     };
 
@@ -273,25 +501,26 @@ export function useQueries<T extends UseQueriesConfig[]>(
       active = false;
       window.removeEventListener("focus", handleFocus);
     };
-  }, [queryClient, stableKeys]);
+  }, [queryClient, stableKeys, fetchOne]);
 
   // Refetch on network reconnect
   useEffect(() => {
     let active = true;
 
-    const refetchableIndices = stableKeys
-      .map((_, i) => i)
-      .filter((i) => configsRef.current[i]?.refetchOnReconnect ?? true);
-
-    if (refetchableIndices.length === 0) return;
-
     const handleOnline = () => {
       if (!active) return;
-      refetchableIndices.forEach((i) => {
-        const q = configsRef.current[i];
-        const key = stableKeys[i];
+      stableKeysRef.current.forEach((_, index) => {
+        const q = configsRef.current[index];
+        if (
+          q?.refetchOnWindowFocus === false &&
+          q?.refetchOnReconnect !== "always"
+        )
+          return;
+        if (q.enabled === false) return;
+
+        const key = stableKeysRef.current[index];
         const state = queryClient.getQueryState(key);
-        if (!state || q.enabled === false) return;
+        if (!state) return;
 
         const staleTime = parseWindow(q.staleTime);
         if (
@@ -301,47 +530,7 @@ export function useQueries<T extends UseQueriesConfig[]>(
         )
           return;
 
-        queryClient.setQueryState(key, {
-          isFetching: true,
-          ...((q.keepPreviousData ?? true) === false && {
-            data: undefined,
-          }),
-        });
-
-        const fetcher = async () => await q.proc();
-        globalRequestManager.fetch(key, fetcher).then(([result, err]) => {
-          if (!active) return;
-          if (err) {
-            queryClient.setQueryState(key, {
-              error: err,
-              isError: true,
-              isSuccess: false,
-              isFetching: false,
-              isFetched: true,
-            });
-            q.onError?.(err);
-          } else {
-            const unwrapped =
-              (q.unwrap as any) === true &&
-              result &&
-              typeof result === "object" &&
-              "data" in result
-                ? (result as any).data
-                : result;
-            queryClient.setQueryState(key, {
-              data: unwrapped,
-              error: undefined,
-              isError: false,
-              isSuccess: true,
-              isFetching: false,
-              updatedAt: Date.now(),
-              isFetched: true,
-            });
-            const finalData = q.select ? q.select(unwrapped) : unwrapped;
-            q.onSuccess?.(finalData);
-            q.onSettled?.(finalData, null);
-          }
-        });
+        fetchOne(index, { skipStaleCheck: true });
       });
     };
 
@@ -350,75 +539,41 @@ export function useQueries<T extends UseQueriesConfig[]>(
       active = false;
       window.removeEventListener("online", handleOnline);
     };
-  }, [queryClient, stableKeys]);
+  }, [queryClient, stableKeys, fetchOne]);
 
-  // 7. Map states to QueryResults format
+  // 10. Map states to QueryResults format
   return useMemo(() => {
     return states.map((state, index) => {
-      const q = configsRef.current[index];
-      const queryKey = stableKeys[index];
-
       const refetch = async () => {
-        queryClient.setQueryState(queryKey, {
-          isFetching: true,
-          ...(keepPrevRef.current[index] === false && { data: undefined }),
-        });
-        const fetcher = async () => await configsRef.current[index].proc();
-        let resultTuple: [any, null] | [null, ErrorResponse];
-
-        if (!queryKey.startsWith("__local__")) {
-          resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
-        } else {
-          resultTuple = await fetcher();
+        // Invalidate generation to abort any in-flight fetch
+        const key = stableKeysRef.current[index];
+        if (key) {
+          generationRef.current.set(
+            key,
+            (generationRef.current.get(key) ?? 0) + 1,
+          );
         }
-
-        const [result, err] = resultTuple;
-        if (err) {
-          const initData = configsRef.current[index].initialData;
-          const resolvedInitData =
-            typeof initData === "function" ? initData() : initData;
-          queryClient.setQueryState(queryKey, {
-            error: err,
-            isError: true,
-            isSuccess: false,
-            isFetching: false,
-            data: resolvedInitData,
-            isFetched: true,
-          });
-          configsRef.current[index].onError?.(err);
-          configsRef.current[index].onSettled?.(null, err);
-        } else {
-          const unwrapped =
-            (configsRef.current[index].unwrap as any) === true &&
-            result &&
-            typeof result === "object" &&
-            "data" in result
-              ? result.data
-              : result;
-
-          queryClient.setQueryState(queryKey, {
-            data: unwrapped,
-            error: undefined,
-            isError: false,
-            isSuccess: true,
-            isFetching: false,
-            updatedAt: Date.now(),
-            isFetched: true,
-          });
-          const finalData = configsRef.current[index].select
-            ? configsRef.current[index].select!(unwrapped)
-            : unwrapped;
-          configsRef.current[index].onSuccess?.(finalData);
-          configsRef.current[index].onSettled?.(finalData, null);
-        }
-        return result;
+        await fetchOne(index, { skipStaleCheck: true });
+        return configsRef.current[index]?.proc;
       };
 
       const reset = () => {
-        const initData = configsRef.current[index].initialData;
+        const key = stableKeysRef.current[index];
+        // Invalidate any in-flight fetch
+        if (key) {
+          generationRef.current.set(
+            key,
+            (generationRef.current.get(key) ?? 0) + 1,
+          );
+          fetchingRef.current.delete(key);
+        }
+        const q = configsRef.current[index];
         const resolvedInitData =
-          typeof initData === "function" ? initData() : initData;
-        queryClient.setQueryState(queryKey, {
+          typeof q?.initialData === "function"
+            ? //@ts-ignore
+              q.initialData()
+            : q?.initialData;
+        queryClient.setQueryState(key, {
           data: resolvedInitData,
           error: undefined,
           isFetching: false,
@@ -429,8 +584,28 @@ export function useQueries<T extends UseQueriesConfig[]>(
         });
       };
 
+      // Optimistically update this query's cached data — accepts the new value
+      // directly or an updater function `(prev) => next` (React setState style).
+      const update = (valueOrUpdater: any) => {
+        const key = stableKeysRef.current[index];
+        const currentState = queryClient.getQueryState(key);
+        const prev = currentState?.data;
+        const next =
+          typeof valueOrUpdater === "function"
+            ? valueOrUpdater(prev)
+            : valueOrUpdater;
+        queryClient.setQueryState(key, {
+          data: next,
+          isSuccess: next !== undefined,
+          updatedAt: Date.now(),
+          isFetched: true,
+        });
+        return next;
+      };
+
       const isRefetching = state.isFetching && state.data !== undefined;
       const data = state.data;
+      const q = configsRef.current[index];
       const selectedData =
         data !== undefined && q?.select ? q.select(data) : data;
 
@@ -450,8 +625,9 @@ export function useQueries<T extends UseQueriesConfig[]>(
         isEmpty,
         refetch,
         reset,
+        update,
         data: selectedData,
       };
-    }) as unknown as QueriesResults<T>;
-  }, [states, stableKeys, queryClient]);
+    }) as any;
+  }, [states, stableKeys, queryClient, fetchOne]);
 }

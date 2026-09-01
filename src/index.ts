@@ -12,6 +12,7 @@ export type {
   ProcedureProps,
   InferContext,
   InferInput,
+  InferOutput,
 } from "./types/procedure.js";
 
 export type { Middleware, Plugin } from "./types/middleware.js";
@@ -28,7 +29,15 @@ export type {
   SSEEvent,
   ErrorResponse,
 } from "./types/misc.js";
-export type { CacheAdapter, CacheOptions } from "./core/cache/types.js";
+export type {
+  CacheAdapter,
+  CacheOptions,
+  CacheEntry,
+  WindowTime,
+  CacheConfig,
+  CacheMetadata,
+  RedisInstance,
+} from "./core/cache/types.js";
 export type {
   CompressionOptions,
   CompressorConfig,

@@ -3,6 +3,7 @@ export type ProgressOptions = {
   method?: string;
   body?: any;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 /**
@@ -12,7 +13,7 @@ export async function progressFetch(
   url: string | URL,
   options: ProgressOptions = {},
 ): Promise<Response> {
-  const { onProgress, method = "GET", body, headers = {} } = options;
+  const { onProgress, method = "GET", body, headers = {}, signal } = options;
 
   // Use XMLHttpRequest for Upload progress (Mutations)
   if (method === "POST" || method === "PUT" || method === "PATCH") {
@@ -25,17 +26,37 @@ export async function progressFetch(
         xhr.setRequestHeader(key, value);
       });
 
+      // Wire external abort signal to XHR
+      let onAbort: (() => void) | undefined;
+      if (signal) {
+        if (signal.aborted) {
+          reject(new DOMException("Aborted", "AbortError"));
+          return;
+        }
+        onAbort = () => {
+          xhr.abort();
+          reject(new DOMException("Aborted", "AbortError"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+
       // Upload progress
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
-            const percentComplete = Math.round((event.loaded / event.total) * 100);
+            const percentComplete = Math.round(
+              (event.loaded / event.total) * 100,
+            );
             onProgress(percentComplete);
           }
         };
       }
 
       xhr.onload = () => {
+        // Clean up abort listener to prevent leaks
+        if (onAbort && signal) {
+          signal.removeEventListener("abort", onAbort);
+        }
         // Mock a Response-like object for compatibility
         const response = new Response(xhr.response, {
           status: xhr.status,
@@ -54,7 +75,13 @@ export async function progressFetch(
         resolve(response);
       };
 
-      xhr.onerror = () => reject(new Error("Network Error"));
+      xhr.onerror = () => {
+        if (onAbort && signal) {
+          signal.removeEventListener("abort", onAbort);
+        }
+        reject(new DOMException("Network Error"));
+      };
+      xhr.onabort = () => reject(new DOMException("Aborted", "AbortError"));
       xhr.send(body);
     });
   }

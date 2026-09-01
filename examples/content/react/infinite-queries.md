@@ -31,7 +31,7 @@ function Feed() {
   } = useInfiniteQuery(
     getFeedPosts,
     {
-      initialInput: { limit: 10 },
+      input: { limit: 10 },
       initialPageParam: undefined, // Start at the beginning
       getNextPageParam: (lastPage) => lastPage.nextCursor,
       queryKey: ["feed"],
@@ -79,7 +79,7 @@ The `useInfiniteQuery` hook accepts two arguments:
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `initialInput` | `WithoutCursor<TInput>` | — | Base input parameters for the procedure (excluding the `cursor`). |
+| `input` | `WithoutCursor<TInput>` | — | Base input parameters for the procedure (excluding the `cursor`). |
 | `initialPageParam` | `string \| number` | `undefined` | The cursor parameter to use for the first page fetch. |
 | `getNextPageParam` | `(lastPage, allPages) => cursor` | — | Callback to determine the cursor parameter for the next page. If not specified, defaults to checking `lastPage.nextCursor`. |
 | `queryKey` | `unknown[]` | — | Unique array key for caching and invalidation. |
@@ -95,6 +95,8 @@ The `useInfiniteQuery` hook accepts two arguments:
 | `onError` | `(error) => void` | — | Callback run when a fetch fails. |
 | `onSettled` | `() => void` | — | Callback run when a query completes (success or failure). |
 | `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
+| `syncSelection` | `boolean \| ((a: TPage, b: TPage) => boolean)` | `false` | Keeps `selectedItem` in sync with latest query updates (matches by `id` by default or custom comparator). |
+| `args` | `TArgs` | — | Extra positional arguments passed to the procedure after the input object. |
 
 ---
 
@@ -107,6 +109,8 @@ The `useInfiniteQuery` hook accepts two arguments:
 | `pageParams` | `(string \| number)[]` | The array of cursors/page parameters fetched so far. |
 | `hasNext` | `boolean` | True if another page is available to fetch. |
 | `fetchNext` | `() => Promise<TFullPage \| undefined>` | Triggers fetching the next page of data. |
+| `selectedItem` | `TPage \| null` | The currently synchronized selected item (when `syncSelection` or `selectItem` is used). |
+| `selectItem` | `(item: TPage \| null \| ((prev: TPage \| null) => TPage \| null)) => void` | Setter to change or clear the active `selectedItem`. |
 | `isFetching` | `boolean` | Indicates if a fetch request is currently in progress. |
 | `isRefetching` | `boolean` | Indicates if a background refresh of the existing pages is in progress. |
 | `isSuccess` | `boolean` | True if the last fetch was successful. |
@@ -123,10 +127,11 @@ The `useInfiniteQuery` hook accepts two arguments:
 
 * **`remove(index | predicate)`**: Removes an item from the cache.
 * **`update(index | predicate, updater)`**: Updates an item in the cache.
-* **`prepend(item)`**: Inserts a new item at the beginning of the first page.
-* **`append(item)`**: Inserts a new item at the end of the last page.
-* **`insert(index, item)`**: Inserts an item at a specific flattened index.
+* **`prepend(item | items)`**: Inserts a new item (or array of items) at the beginning of the first page.
+* **`append(item | items)`**: Inserts a new item (or array of items) at the end of the last page.
+* **`insert(index, item | items)`**: Inserts an item (or array of items) at a specific flattened index.
 * **`setPages(updater)`**: Direct access to mutate the pages array.
 * **`snapshot()`**: Takes a snapshot of current cache state to restore later.
 
 For full examples of cache mutations and rollbacks, see the [Cache Mutations & Rollbacks](cache-mutations.md) documentation page.
+

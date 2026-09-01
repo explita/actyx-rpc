@@ -279,17 +279,18 @@ export class QueryClient {
     return queryKeyArr.map(String).join("|");
   }
 
-  prepend<T>(queryKeyArr: unknown[] | string, item: T): () => void {
+  prepend<T>(queryKeyArr: unknown[] | string, item: T | T[]): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
     const previousData = currentState?.data;
     const rollback = () => {
       this.setQueryState(queryKey, { data: previousData });
     };
+    const items = Array.isArray(item) ? item : [item];
 
     if (!currentState || currentState.data === undefined) {
       this.setQueryState(queryKey, {
-        data: [item],
+        data: items,
         isSuccess: true,
         updatedAt: Date.now(),
         isFetched: true,
@@ -308,7 +309,7 @@ export class QueryClient {
       const oldPages = (data as any).pages as any[];
       let newPages: any[] = [];
       if (oldPages.length === 0) {
-        newPages = [{ data: [item], nextCursor: null, hasMore: false }];
+        newPages = [{ data: items, nextCursor: null, hasMore: false }];
       } else {
         newPages = oldPages.map((page, idx) => {
           if (idx === 0) {
@@ -318,10 +319,10 @@ export class QueryClient {
               typeof pageData === "object" &&
               !Array.isArray(pageData)
             ) {
-              return { ...page, data: { ...item, ...pageData } };
+              return { ...page, data: { ...items[0], ...pageData } };
             }
             const arr = Array.isArray(pageData) ? pageData : [];
-            return { ...page, data: [item, ...arr] };
+            return { ...page, data: [...items, ...arr] };
           }
           return page;
         });
@@ -336,12 +337,12 @@ export class QueryClient {
     } else {
       if (Array.isArray(data)) {
         this.setQueryState(queryKey, {
-          data: [item, ...data],
+          data: [...items, ...data],
           updatedAt: Date.now(),
         });
       } else if (data && typeof data === "object") {
         this.setQueryState(queryKey, {
-          data: { ...item, ...data },
+          data: { ...items[0], ...data },
           updatedAt: Date.now(),
         });
       }
@@ -350,17 +351,18 @@ export class QueryClient {
     return rollback;
   }
 
-  append<T>(queryKeyArr: unknown[] | string, item: T): () => void {
+  append<T>(queryKeyArr: unknown[] | string, item: T | T[]): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
     const previousData = currentState?.data;
     const rollback = () => {
       this.setQueryState(queryKey, { data: previousData });
     };
+    const items = Array.isArray(item) ? item : [item];
 
     if (!currentState || currentState.data === undefined) {
       this.setQueryState(queryKey, {
-        data: [item],
+        data: items,
         isSuccess: true,
         updatedAt: Date.now(),
         isFetched: true,
@@ -379,7 +381,7 @@ export class QueryClient {
       const oldPages = (data as any).pages as any[];
       let newPages: any[] = [];
       if (oldPages.length === 0) {
-        newPages = [{ data: [item], nextCursor: null, hasMore: false }];
+        newPages = [{ data: items, nextCursor: null, hasMore: false }];
       } else {
         newPages = oldPages.map((page, idx) => {
           if (idx === oldPages.length - 1) {
@@ -389,10 +391,10 @@ export class QueryClient {
               typeof pageData === "object" &&
               !Array.isArray(pageData)
             ) {
-              return { ...page, data: { ...pageData, ...item } };
+              return { ...page, data: { ...pageData, ...items[0] } };
             }
             const arr = Array.isArray(pageData) ? pageData : [];
-            return { ...page, data: [...arr, item] };
+            return { ...page, data: [...arr, ...items] };
           }
           return page;
         });
@@ -407,12 +409,12 @@ export class QueryClient {
     } else {
       if (Array.isArray(data)) {
         this.setQueryState(queryKey, {
-          data: [...data, item],
+          data: [...data, ...items],
           updatedAt: Date.now(),
         });
       } else if (data && typeof data === "object") {
         this.setQueryState(queryKey, {
-          data: { ...data, ...item },
+          data: { ...data, ...items[0] },
           updatedAt: Date.now(),
         });
       }
@@ -424,7 +426,7 @@ export class QueryClient {
   insert<T>(
     queryKeyArr: unknown[] | string,
     index: number,
-    item: T,
+    item: T | T[],
   ): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
@@ -438,6 +440,7 @@ export class QueryClient {
     }
 
     const data = currentState.data;
+    const items = Array.isArray(item) ? item : [item];
 
     if (
       data &&
@@ -454,7 +457,7 @@ export class QueryClient {
       }
 
       if (oldPages.length === 0 || index <= 0) {
-        return this.prepend(queryKey, item);
+        return this.prepend(queryKey, items);
       }
 
       let targetIndex = index;
@@ -465,7 +468,7 @@ export class QueryClient {
       );
 
       if (targetIndex >= totalLength) {
-        return this.append(queryKey, item);
+        return this.append(queryKey, items);
       }
 
       const newPages = oldPages.map((page) => {
@@ -473,7 +476,7 @@ export class QueryClient {
         const pageLength = page.data.length;
         if (targetIndex < pageLength) {
           const newData = [...page.data];
-          newData.splice(targetIndex, 0, item);
+          newData.splice(targetIndex, 0, ...items);
           inserted = true;
           return { ...page, data: newData };
         }
@@ -490,13 +493,13 @@ export class QueryClient {
     } else {
       if (Array.isArray(data)) {
         if (index <= 0) {
-          return this.prepend(queryKey, item);
+          return this.prepend(queryKey, items);
         }
         if (index >= data.length) {
-          return this.append(queryKey, item);
+          return this.append(queryKey, items);
         }
         const newData = [...data];
-        newData.splice(index, 0, item);
+        newData.splice(index, 0, ...items);
         this.setQueryState(queryKey, {
           data: newData,
           updatedAt: Date.now(),
@@ -613,7 +616,12 @@ export class QueryClient {
     // Surgical changes log
     const changes: Array<
       | { type: "flat"; index: number; originalValue: any }
-      | { type: "pages"; pageIndex: number; itemIndex: number; originalValue: any }
+      | {
+          type: "pages";
+          pageIndex: number;
+          itemIndex: number;
+          originalValue: any;
+        }
     > = [];
 
     if (
@@ -627,7 +635,7 @@ export class QueryClient {
         return () => {};
       }
 
-      let targetIndex = typeof arg === "number" ? arg : -1;
+      const targetIndex = typeof arg === "number" ? arg : -1;
       let updatedCount = 0;
 
       const newPages = oldPages.map((page, pageIndex) => {

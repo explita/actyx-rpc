@@ -3,9 +3,10 @@
 import {
   useInfiniteQuery,
   usePaginatedQuery,
+  useQueries,
   useQueryClient,
 } from "@/dist/react";
-import { getTodos } from "@/lib/rpc/actions";
+import { getTodos, type Todo } from "@/lib/rpc/actions";
 import { getPosts } from "@/lib/rpc/pagination";
 import { Loader2, Wrench, Layers } from "lucide-react";
 import { useState } from "react";
@@ -72,7 +73,7 @@ function InfiniteSection() {
     snapshot,
     reset,
   } = useInfiniteQuery(getPosts, {
-    initialInput: { limit: 5 },
+    input: { limit: 5 },
     queryKey: INF_KEY,
   });
 
@@ -266,7 +267,7 @@ function PaginatedSection() {
     snapshot,
     reset,
   } = usePaginatedQuery(getPosts, {
-    initialInput: { limit: 5 },
+    input: { limit: 5 },
     queryKey: PAG_KEY,
   });
 
@@ -439,94 +440,99 @@ function PaginatedSection() {
   );
 }
 
-// function QueryCard({
-//   label,
-//   result,
-// }: {
-//   label: string;
-//   result: {
-//     data: unknown;
-//     isFetching: boolean;
-//     isError: boolean;
-//     isFetched: boolean;
-//   };
-// }) {
-//   return (
-//     <div className="bg-white dark:bg-slate-900/40 rounded-xl p-4 border border-slate-200 dark:border-slate-700 space-y-2">
-//       <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-//         {label}
-//       </p>
-//       {result.isFetching && !result.data ? (
-//         <div className="flex items-center gap-2 text-sm text-slate-400">
-//           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-//         </div>
-//       ) : result.isError ? (
-//         <p className="text-sm text-red-500">Error</p>
-//       ) : result.data !== undefined ? (
-//         <p className="text-sm text-slate-800 dark:text-slate-200">
-//           {Array.isArray(result.data)
-//             ? `${result.data.length} items`
-//             : JSON.stringify(result.data).slice(0, 60)}
-//         </p>
-//       ) : null}
-//       <div className="flex gap-2 text-xs text-slate-400">
-//         <span
-//           className={
-//             result.isFetching
-//               ? "text-amber-500 font-semibold"
-//               : "text-emerald-500"
-//           }
-//         >
-//           {result.isFetching ? "fetching…" : "idle"}
-//         </span>
-//         <span>·</span>
-//         <span>fetched: {String(result.isFetched)}</span>
-//       </div>
-//     </div>
-//   );
-// }
+function QueryCard({
+  label,
+  result,
+}: {
+  label: string;
+  result: {
+    data: unknown;
+    isFetching: boolean;
+    isError: boolean;
+    isFetched: boolean;
+  };
+}) {
+  return (
+    <div className="bg-white dark:bg-slate-900/40 rounded-xl p-4 border border-slate-200 dark:border-slate-700 space-y-2">
+      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+        {label}
+      </p>
+      {result.isFetching && !result.data ? (
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </div>
+      ) : result.isError ? (
+        <p className="text-sm text-red-500">Error</p>
+      ) : result.data !== undefined ? (
+        <p className="text-sm text-slate-800 dark:text-slate-200">
+          {Array.isArray(result.data)
+            ? `${result.data.length} items`
+            : JSON.stringify(result.data).slice(0, 60)}
+        </p>
+      ) : null}
+      <div className="flex gap-2 text-xs text-slate-400">
+        <span
+          className={
+            result.isFetching
+              ? "text-amber-500 font-semibold"
+              : "text-emerald-500"
+          }
+        >
+          {result.isFetching ? "fetching…" : "idle"}
+        </span>
+        <span>·</span>
+        <span>fetched: {String(result.isFetched)}</span>
+      </div>
+    </div>
+  );
+}
 
-// function QueriesSection() {
-//   const [d1, d2] = useQueries(
-//     {
-//       proc: getTodos,
-//       queryKey: ["todos"],
-//       refetchOnWindowFocus: true,
-//     },
-//     {
-//       proc: () => getPosts({ limit: 3 }),
-//       queryKey: ["posts-for-queries"],
-//     },
-//   );
-//   d1.data;
-//   return (
-//     <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/30 p-6 space-y-4">
-//       <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-//         <Layers size={20} className="text-purple-600 dark:text-purple-400" />
-//         useQueries (parallel)
-//       </h2>
-//       <p className="text-xs text-slate-500 dark:text-slate-400">
-//         Fetches both{" "}
-//         <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
-//           getTodos
-//         </code>{" "}
-//         and{" "}
-//         <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
-//           getPosts
-//         </code>{" "}
-//         in parallel. Todos has{" "}
-//         <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
-//           refetchOnWindowFocus
-//         </code>{" "}
-//         enabled.
-//       </p>
-//       <div className="grid grid-cols-2 gap-4">
-//         <QueryCard label="getTodos" result={d1} />
-//         <QueryCard label="getPosts" result={d2} />
-//       </div>
-//     </section>
-//   );
-// }
+function QueriesSection() {
+  const [d1, d2] = useQueries(
+    {
+      proc: getTodos,
+      queryKey: ["todos"],
+      initialData: [],
+      select(data) {
+        return data.map((i) => i.id);
+      },
+    },
+    {
+      proc: () => getPosts({ limit: 3 }),
+      queryKey: ["posts-for-queries"],
+      unwrap: true,
+      initialData: [],
+    },
+  );
+  d1.data;
+  return (
+    <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/30 p-6 space-y-4">
+      <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+        <Layers size={20} className="text-purple-600 dark:text-purple-400" />
+        useQueries (parallel)
+      </h2>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Fetches both{" "}
+        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
+          getTodos
+        </code>{" "}
+        and{" "}
+        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
+          getPosts
+        </code>{" "}
+        in parallel. Todos has{" "}
+        <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">
+          refetchOnWindowFocus
+        </code>{" "}
+        enabled.
+      </p>
+      <div className="grid grid-cols-2 gap-4">
+        <QueryCard label="getTodos" result={d1} />
+        <QueryCard label="getPosts" result={d2} />
+      </div>
+    </section>
+  );
+}
 
 function QueryClientSection() {
   const queryClient = useQueryClient();
@@ -690,7 +696,7 @@ export default function HelpersDemo() {
         </p>
       </div>
 
-      {/* <QueriesSection /> */}
+      <QueriesSection />
       <InfiniteSection />
       <PaginatedSection />
       <QueryClientSection />

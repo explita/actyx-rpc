@@ -18,12 +18,12 @@ import type {
 } from "../core/compression/types.js";
 import type { RetryConfig, RetryOptions } from "../core/retry/types.js";
 import type { TimeoutConfig, TimeoutOptions } from "../core/timeout/types.js";
-import { PubSubAdapter } from "../lib/pubsub.js";
 import type { Middleware, Plugin } from "./middleware.js";
 import type {
   BaseContext,
   ContextResult,
   ErrorResponse,
+  ExtraCtx,
   FailureReason,
   InputCtx,
   InputMode,
@@ -274,7 +274,7 @@ export interface ProcedureInstance<
   >;
 
   rateLimit: (
-    options?: RateLimitOptions<Ctx, TMeta, TName>,
+    options?: RateLimitOptions<Ctx, I, TMeta, TName>,
   ) => Pick<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     | "query"
@@ -380,40 +380,80 @@ export interface ProcedureInstance<
       "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
     >);
 
-  middleware: <ExpectedInput = unknown, NextCtx = Ctx>(
-    mw: Middleware<
-      Ctx,
-      TEnrich,
-      [I] extends [void]
-        ? Prettify<ExpectedInput & TEnrich>
-        : Prettify<I & TEnrich>,
-      Prettify<NextCtx>,
-      TMeta,
-      TName
-    >,
-  ) => typeof mw;
+  /**
+   * Declare a reusable middleware.
+   *
+   * - `middleware(mw)` infers `NextCtx` from `mw`'s return type.
+   * - `middleware<ExpectedInput>()(mw)` additionally constrains `input` to
+   *   `ExpectedInput`. The extra `()` is required because TypeScript cannot
+   *   infer a trailing type parameter (`NextCtx`) while an earlier one
+   *   (`ExpectedInput`) is supplied explicitly — the `()` defers `NextCtx`
+   *   inference to the inner call.
+   */
+  middleware: {
+    <NextCtx = Ctx>(
+      mw: Middleware<
+        Ctx,
+        TEnrich,
+        [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
+        Prettify<NextCtx>,
+        TMeta,
+        TName
+      >,
+    ): typeof mw;
+    <ExpectedInput = unknown>(
+      ...args: []
+    ): <NextCtx = Ctx>(
+      mw: Middleware<
+        Ctx,
+        TEnrich,
+        [I] extends [void]
+          ? Prettify<ExpectedInput & TEnrich>
+          : Prettify<I & TEnrich>,
+        Prettify<NextCtx>,
+        TMeta,
+        TName
+      >,
+    ) => typeof mw;
+  };
 
-  plugin: <ExpectedInput = unknown, NextCtx = Ctx>(
-    plugin: Plugin<
-      Ctx,
-      TEnrich,
-      [I] extends [void]
-        ? Prettify<ExpectedInput & TEnrich>
-        : Prettify<I & TEnrich>,
-      NextCtx,
-      TMeta,
-      TName
-    >,
-  ) => typeof plugin;
+  plugin: {
+    <NextCtx = Ctx>(
+      plugin: Plugin<
+        Ctx,
+        TEnrich,
+        [I] extends [void] ? TEnrich : Prettify<I & TEnrich>,
+        NextCtx,
+        TMeta,
+        TName
+      >,
+    ): typeof plugin;
+    <ExpectedInput = unknown>(
+      ...args: []
+    ): <NextCtx = Ctx>(
+      plugin: Plugin<
+        Ctx,
+        TEnrich,
+        [I] extends [void]
+          ? Prettify<ExpectedInput & TEnrich>
+          : Prettify<I & TEnrich>,
+        NextCtx,
+        TMeta,
+        TName
+      >,
+    ) => typeof plugin;
+  };
 
   // Terminals
   mutation: <T, P extends unknown[]>(
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
@@ -442,9 +482,11 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
@@ -473,9 +515,11 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
@@ -496,9 +540,11 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
@@ -527,9 +573,11 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
       },
@@ -547,16 +595,18 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> & {
-            pubsub: PubSubAdapter;
-          }
+          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
+            ExtraCtx<
+              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
+              [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+            >
         >;
         input: [I] extends [void] ? TEnrich : Prettify<I & TEnrich>;
         send: <T = any>(data: T) => void;
         broadcast: <T = any>(data: T) => void;
         onMessage: <T = any>(cb: (data: T) => void) => void;
-        onClose: (cb: () => void) => void;
-        onError: (cb: (err: any) => void) => void;
+        onClose: (cb: (evt: CloseEvent) => void) => void;
+        onError: (cb: (err: Event) => void) => void;
       },
       ...args: P
     ) => MaybePromise<void>,
@@ -698,8 +748,8 @@ export type ProcedureProps<
     req: Request,
     context: any,
   ) => MaybePromise<void>;
-  middlewares?: Middleware<TCtx, TEnrich, any, any, TTotalMeta>[];
-  plugins?: Plugin<TCtx, TEnrich, any, any, TTotalMeta>[];
+  middlewares?: Middleware<TCtx, NoInfer<TEnrich>, any, any, TTotalMeta>[];
+  plugins?: Plugin<TCtx, NoInfer<TEnrich>, any, any, TTotalMeta>[];
   inputMode?: GIM;
   cache?: CacheAdapter;
   compression?: Compressor;
@@ -716,15 +766,21 @@ export type ProcedureProps<
 export type InferContext<T> =
   T extends ProcedureInstance<
     infer Ctx,
-    any,
+    infer TEnrich,
     infer Meta,
-    any,
+    infer I,
     any,
     any,
     infer Name,
     any
   >
-    ? MergeMeta<Ctx, BaseContext<Meta, Name>>
+    ? Prettify<
+        MergeMeta<Ctx, BaseContext<Meta, Name>> &
+          ExtraCtx<
+            MergeMeta<Ctx, BaseContext<Meta, Name>>,
+            [I] extends [void] ? TEnrich : Prettify<I & TEnrich>
+          >
+      >
     : unknown;
 /**
  * Infers the final merged input type from a procedure instance.
@@ -748,3 +804,22 @@ export type InferInput<T> =
       ? TEnrich
       : Prettify<I & TEnrich>
     : unknown;
+
+/**
+ * Infers the resolved return data type from a finalized procedure.
+ * Extracts the `TOutput` from the internal `ProcedureDefinition` shape,
+ * stripping away the tuple wrapper and error types.
+ *
+ * @example
+ * ```ts
+ * const getActiveChats = procedure.query(async () => {
+ *   return { data: [...], hasMore: false };
+ * });
+ *
+ * type ActiveChats = InferOutput<typeof getActiveChats>;
+ * //   ^? { data: [...], hasMore: boolean }
+ * ```
+ */
+export type InferOutput<T> = T extends { _def: { output: infer O } }
+  ? O
+  : never;

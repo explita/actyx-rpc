@@ -4,6 +4,7 @@ import type { CacheAdapter, RateLimitOptions } from "./types.js";
 export async function checkRateLimit(
   cache: CacheAdapter,
   options: RateLimitOptions,
+  input: unknown,
   ctx: any,
   req: Request,
   context: any,
@@ -13,16 +14,16 @@ export async function checkRateLimit(
   const windowMs = parseWindow(windowStr);
   const getKey =
     options?.key ??
-    ((ctx: any) => ctx.id || ctx.userId || ctx.ip || "anonymous");
+    (({ ctx }: { ctx: any }) => ctx.id || ctx.userId || ctx.ip || "anonymous");
 
-  const key = (getKey as any)(ctx, req, context);
+  const key = await getKey({ ctx, input }, req, context);
   const cacheKey = `ratelimit:${key}`;
   const now = Date.now();
 
   const cached = await cache.get<{ count: number; resetTime: number }>(
     cacheKey,
   );
-  let entry = cached?.data;
+  const entry = cached?.data;
 
   if (!entry || now > entry.resetTime) {
     // New window

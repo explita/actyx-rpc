@@ -10,8 +10,9 @@ export function useWSInfiniteQuery<
   TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
   TQueryKey extends unknown[] = unknown[],
   TData = TPage,
+  TArgs extends unknown[] = [],
 >(
-  queryProcedure: (input: TInput) => Promise<QueryResult<TFullPage>>,
+  queryProcedure: (input: TInput, ...args: TArgs) => Promise<QueryResult<TFullPage>>,
   {
     queryOpts,
     onData,
@@ -19,8 +20,13 @@ export function useWSInfiniteQuery<
     onWindowFocus,
     onReconnect,
     ...wsOpts
-  }: WSAdapterOptions<TInput, TData, TPage, TQueryKey, TFullPage>,
+  }: WSAdapterOptions<TInput, TData, TPage, TQueryKey, TFullPage, TArgs>,
 ) {
+  const optsRef = useRef({ onData, arrange });
+  useEffect(() => {
+    optsRef.current = { arrange, onData };
+  });
+
   // 1. Instantiate the paginated query
   const queryResult = useInfiniteQuery(queryProcedure, queryOpts);
 
@@ -37,6 +43,7 @@ export function useWSInfiniteQuery<
           append: queryResult.append as any,
           prepend: queryResult.prepend as any,
           update: queryResult.update as any,
+          insert: queryResult.insert as any,
         });
       } else {
         queryResult.append(data as any);
@@ -51,21 +58,46 @@ export function useWSInfiniteQuery<
   onReconnectRef.current = onReconnect;
   const queryDataRef = useRef(queryResult.data);
   queryDataRef.current = queryResult.data;
+  const queryPagesRef = useRef(queryResult.pages);
+  queryPagesRef.current = queryResult.pages;
+  const queryPageParamsRef = useRef(queryResult.pageParams);
+  queryPageParamsRef.current = queryResult.pageParams;
 
   useEffect(() => {
-    const onFocus = () =>
-      onWindowFocusRef.current?.({
-        data: queryDataRef.current as unknown as TData[],
-        refetch: queryResult.refetch,
-      });
-    const onOnline = () =>
-      onReconnectRef.current?.({
-        data: queryDataRef.current as unknown as TData[],
-        refetch: queryResult.refetch,
-      });
+    const buildContext = () => ({
+      data: queryDataRef.current as unknown as TData[],
+      pages: queryPagesRef.current,
+      pageParams: queryPageParamsRef.current,
+      refetch: queryResult.refetch,
+      reset: queryResult.reset,
+      prepend: queryResult.prepend as (item: TData | TData[]) => () => void,
+      append: queryResult.append as (item: TData | TData[]) => () => void,
+      insert: queryResult.insert as (
+        index: number,
+        item: TData | TData[],
+      ) => () => void,
+      update: queryResult.update as (
+        arg: number | ((item: TData) => boolean),
+        updater: TData | ((item: TData) => TData),
+      ) => () => void,
+      remove: queryResult.remove as (
+        arg: number | ((item: TData) => boolean),
+      ) => () => void,
+      setPages: queryResult.setPages as (
+        updater: (
+          oldPages: typeof queryResult.pages,
+        ) => typeof queryResult.pages,
+      ) => () => void,
+      snapshot: queryResult.snapshot,
+    });
 
-    if (onWindowFocusRef.current) window.addEventListener("focus", onFocus);
-    if (onReconnectRef.current) window.addEventListener("online", onOnline);
+    const onFocus = () => onWindowFocusRef.current?.(buildContext());
+    const onOnline = () => onReconnectRef.current?.(buildContext());
+
+    // Always register — ref guards handle undefined callbacks,
+    // so late-provided callbacks work without re-subscribing.
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
 
     return () => {
       window.removeEventListener("focus", onFocus);
@@ -86,6 +118,7 @@ export function useWSInfiniteQuery<
     send: wsResult.send,
     unsubscribe: wsResult.unsubscribe,
     status: wsResult.status,
-    error: wsResult.error || queryResult.error,
+    error: wsResult.error,
+    queryError: queryResult.error,
   };
 }

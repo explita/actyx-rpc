@@ -1,8 +1,6 @@
 import Joi from "joi";
 import type { SchemaResolver } from "../../types/misc.js";
 
-type JoiInfer<T> = T extends Joi.Schema<infer U> ? U : never;
-
 /**
  * Wraps a Yup object schema into a procedure resolver.
  *

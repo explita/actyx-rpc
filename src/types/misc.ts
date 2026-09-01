@@ -1,3 +1,6 @@
+import { CacheContextHelper } from "../core/cache/types";
+import { PubSubAdapter } from "../lib/pubsub";
+
 export type WindowTime =
   | `${number}${"s" | "m" | "h" | "d" | "w" | "M"}`
   | number;
@@ -23,8 +26,6 @@ export type MergeMeta<T, U> = Prettify<
   } & U
 >;
 
-import { PubSubAdapter } from "../lib/pubsub.js";
-
 export type BaseContext<TMeta, TName extends string = string> = {
   handlerName: TName;
   meta: TMeta;
@@ -33,6 +34,11 @@ export type BaseContext<TMeta, TName extends string = string> = {
    * Uses Redis if configured, otherwise falls back to in-memory.
    */
   // pubsub: PubSubAdapter;
+};
+
+export type ExtraCtx<TCtx = unknown, TInput = unknown> = {
+  pubsub: PubSubAdapter;
+  cache: CacheContextHelper<TCtx, TInput>;
 };
 
 export type PlusMeta<T> = {
@@ -160,7 +166,7 @@ export type SSEEvent<T = any> = {
 
 export type SubscriptionEmit<T> = (data: T) => void;
 export type SubscriptionCleanup = () => void | Promise<void>;
-export type SubscriptionResult<T> = MaybePromise<SubscriptionCleanup>;
+export type SubscriptionResult = MaybePromise<SubscriptionCleanup>;
 
 export type WSServerHandler<Ctx = any, I = any, In = any, Out = any> = (opts: {
   ctx: Ctx;

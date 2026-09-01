@@ -32,7 +32,7 @@ export function normalizeInput(data: unknown) {
 export function parseJson<T = unknown>(data: string) {
   try {
     return JSON.parse(data) as T;
-  } catch (e) {
+  } catch {
     return data as T;
   }
 }
@@ -64,8 +64,14 @@ export function mergeConfigs<TCtx, TEnrich>(
 
   if (override.enrichInput) {
     merged.enrichInput = async (ctx: any, req?: any, context?: any) => {
-      const baseEnriched = base.enrichInput ? await base.enrichInput(ctx, req, context) : {};
-      return override.enrichInput({ ctx, previous: baseEnriched }, req, context);
+      const baseEnriched = base.enrichInput
+        ? await base.enrichInput(ctx, req, context)
+        : {};
+      return override.enrichInput(
+        { ctx, previous: baseEnriched },
+        req,
+        context,
+      );
     };
   }
 
@@ -149,7 +155,7 @@ export function parseWindow(window?: WindowTime): number {
       default:
         return 0;
     }
-  } catch (error) {
+  } catch {
     return 0;
   }
 }

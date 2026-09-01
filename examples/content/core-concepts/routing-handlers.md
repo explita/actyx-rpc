@@ -11,6 +11,51 @@ All handlers receive `{ ctx, input }` as the first argument, and can also accept
 
 ---
 
+## Terminal Handler Context
+
+Every terminal handler (`.query()`, `.mutation()`, `.stream()`, `.sse()`, `.webRoute()`, and `.ws()`) receives a `ctx` object containing the built-in fields below, merged with anything you add via `createContext`, `enrichInput`, or middleware `next()`.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `handlerName` | `string` | The literal name set via `.name()` — strictly typed as the exact string literal. |
+| `meta` | `object` | Deeply merged metadata from `.meta()` / `.extend()`. |
+| `pubsub` | `PubSubAdapter` | Publish/subscribe adapter (Memory or Redis). Use `ctx.pubsub.subscribe()` / `ctx.pubsub.publish()`. |
+| `cache` | `CacheContextHelper` | Direct access to the cache adapter (`get`, `set`, `delete`, `clear`, etc.) and `ctx.cache.invalidate()`. |
+
+### `ctx.cache.invalidate()`
+
+For invalidation from inside a terminal handler (e.g. after side effects), call `ctx.cache.invalidate()` with the same options as `.invalidate()`:
+
+```ts
+export const updatePost = procedure
+  .input(zodResolver(z.object({ id: z.string() })))
+  .mutation(async ({ ctx, input }) => {
+    const post = await db.posts.update(input);
+
+    // Invalidate the post's cache + the list cache in one call
+    await ctx.cache.invalidate({
+      keys: ({ input }) => [`post:${input.id}`, "posts:list"],
+      tags: ["posts"],
+    });
+
+    return { success: true, data: post };
+  });
+```
+
+### WebSocket socket controls
+
+The `.ws()` handler opts include raw socket controls alongside `ctx` and `input`:
+
+| Control | Type | Description |
+| :--- | :--- | :--- |
+| `send(data)` | `(data) => void` | Sends a message to the connected client. |
+| `broadcast(data)` | `(data) => void` | Sends a message to all other connected clients. |
+| `onMessage(cb)` | `(cb) => void` | Registers a callback for incoming client messages. |
+| `onClose(cb)` | `(cb: (evt: CloseEvent) => void) => void` | Registers a callback for socket disconnection. Receives the `CloseEvent`. |
+| `onError(cb)` | `(cb: (err: Event) => void) => void` | Registers a callback for socket errors. |
+
+---
+
 ## Queries and Mutations
 
 * Use `.query()` for read-only actions.

@@ -50,11 +50,26 @@ function CreatePostForm() {
 }
 ```
 
+### Configuration Options
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `mutationKey` | `unknown[] \| string` | Auto-generated | Unique key identifying this mutation. Enables per-key concurrency locking (concurrent calls for the same key return 429 "Already in progress"). |
+| `debounce` | `number` | `0` | Delay in ms to coalesce repeated `mutate()` calls. |
+| `abortController` | `AbortController` | — | External `AbortController` to cancel URL-based mutations from outside the hook. |
+| `onSuccess` | `(data, context, ...args) => void` | — | Callback run when the mutation succeeds. |
+| `onError` | `(error, context, ...args) => void` | — | Callback run when the mutation fails. |
+| `onSettled` | `(data, error, context, ...args) => void` | — | Callback run when the mutation finishes (success or error). |
+| `onValidationErrors` | `(errors) => void` | — | Callback run when resolver schema validation fails. |
+| `onProgress` | `(progress: number) => void` | — | Callback run with upload progress percentage (0-100) for URL endpoint mutations. |
+| `optimisticUpdate` | `(input) => void` | — | Perform immediate UI updates before server confirmation. |
+| `rollback` | `(input) => void` | — | Revert optimistic UI updates if the mutation fails. |
+
 ### Returned Values
 
 The hook returns the following control and state properties:
 
-* **`mutate`**: Trigger function to execute the mutation.
+* **`mutate`**: Trigger function to execute the mutation (`(input?, ...args?) => Promise<TData>`).
 * **`isPending`**: Boolean state tracking execution.
 * **`data`**: The result payload (on success).
 * **`error`**: Mapped execution error details.

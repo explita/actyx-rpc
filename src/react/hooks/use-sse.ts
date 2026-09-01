@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { SSEClient } from "../../client/sse.js";
 import type { ErrorResponse } from "../../types/misc.js";
 import type { UseSSEOpts, UseSSEResult } from "../types.js";
@@ -10,7 +10,7 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
     headers,
     signal,
     enabled = true,
-    maxHistory,
+    maxHistory = 100,
     onData,
     onError,
     arrange,
@@ -24,11 +24,9 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
 
   const activeClientRef = useRef<{ close: () => void } | null>(null);
 
-  const onDataRef = useRef(onData);
-  const onErrorRef = useRef(onError);
+  const callbacksRef = useRef({ onData, onError, arrange });
   useEffect(() => {
-    onDataRef.current = onData;
-    onErrorRef.current = onError;
+    callbacksRef.current = { onData, onError, arrange };
   });
 
   const paramsStr = JSON.stringify(params);
@@ -73,11 +71,13 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
       setIsConnected(true);
       setError(undefined);
 
+      let client: Awaited<ReturnType<typeof SSEClient<T>>> | null = null;
+
       try {
         const parsedParams = paramsStr ? JSON.parse(paramsStr) : undefined;
         const parsedHeaders = headersStr ? JSON.parse(headersStr) : undefined;
 
-        const client = await SSEClient<T>({
+        client = await SSEClient<T>({
           url,
           params: parsedParams,
           headers: parsedHeaders,
@@ -99,15 +99,13 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
 
           setData((prev) => {
             const next = [...prev, sseEvent.data];
-            if (maxHistory !== undefined && next.length > maxHistory) {
-              return arrange
-                ? arrange(next.slice(-maxHistory))
-                : next.slice(-maxHistory);
+            if (next.length > maxHistory) {
+              return next.slice(-maxHistory);
             }
-            return arrange ? arrange(next) : next;
+            return next;
           });
 
-          onDataRef.current?.(sseEvent.data, sseEvent.event);
+          callbacksRef.current.onData?.(sseEvent.data, sseEvent.event);
         }
       } catch (err: any) {
         if (!isAborted && err.name !== "AbortError") {
@@ -119,7 +117,7 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
             reason: "UNEXPECTED_ERROR",
           };
           setError(errResponse);
-          onErrorRef.current?.(errResponse);
+          callbacksRef.current.onError?.(errResponse);
         }
       } finally {
         if (!isAborted) {
@@ -136,12 +134,23 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
       if (signal) {
         signal.removeEventListener("abort", onAbort);
       }
-      close();
+
+      // Also closes client even if ref wasn't assigned yet (race window)
+      if (activeClientRef.current) {
+        activeClientRef.current.close();
+        activeClientRef.current = null;
+      }
+      setIsConnected(false);
     };
   }, [url, paramsStr, headersStr, enabled, signal, maxHistory, close]);
 
+  const arrangedData = useMemo(() => {
+    if (!callbacksRef.current.arrange) return data;
+    return callbacksRef.current.arrange(data);
+  }, [data]);
+
   return {
-    data,
+    data: arrangedData,
     lastData,
     event,
     isConnected,

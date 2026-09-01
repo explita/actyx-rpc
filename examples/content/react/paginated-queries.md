@@ -30,7 +30,7 @@ function ChatHistory({ channelId }) {
   } = usePaginatedQuery(
     getMessageHistory,
     {
-      initialInput: { channelId },
+      input: { channelId },
       initialPageParam: undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor,
       queryKey: ["chat", channelId],
@@ -79,7 +79,7 @@ function ChatHistory({ channelId }) {
 
 `usePaginatedQuery` shares the exact same configuration options (`UseInfiniteQueryOpts`) as `useInfiniteQuery`.
 
-For details on configuration options (e.g. `initialInput`, `staleTime`, `queryKey`), see the [Infinite Queries](infinite-queries.md#configuration-options) documentation.
+For details on configuration options (e.g. `input`, `staleTime`, `queryKey`), see the [Infinite Queries](infinite-queries.md#configuration-options) documentation.
 
 ---
 

@@ -58,7 +58,7 @@ describe("Infrastructure: Rate Limiting", () => {
       .rateLimit({
         limit: 1,
         window: "1m",
-        key: (ctx) => `limit:${ctx.ip}`,
+        key: ({ ctx }) => `limit:${ctx.ip}`,
       })
       .query(async () => "ok");
 

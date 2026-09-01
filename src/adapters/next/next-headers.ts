@@ -12,7 +12,7 @@ export async function nextAdapter() {
   try {
     h = await headers();
     c = await cookies();
-  } catch (e) {
+  } catch {
     h = new Headers();
     c = {
       get: () => undefined,
@@ -40,7 +40,7 @@ export async function nextAdapter() {
   if (!pathname && referer) {
     try {
       pathname = new URL(referer).pathname;
-    } catch (e) {}
+    } catch {}
   }
 
   let searchParams: Record<string, string> = {};
@@ -48,7 +48,7 @@ export async function nextAdapter() {
   try {
     const searchParamsRaw = h.get("x-search-params");
     searchParams = searchParamsRaw ? JSON.parse(searchParamsRaw) : {};
-  } catch (error) {}
+  } catch {}
 
   try {
     const search = referer
@@ -58,7 +58,7 @@ export async function nextAdapter() {
       ...search,
       ...searchParams,
     };
-  } catch (error) {}
+  } catch {}
 
   return {
     ip,

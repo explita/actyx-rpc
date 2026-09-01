@@ -137,7 +137,7 @@ export function webRouter(
             const clonedReq = req.clone();
             const body = await clonedReq.json();
             bodyParams = body.input !== undefined ? body.input : body;
-          } catch (e) {
+          } catch {
             bodyParams = {};
           }
         }

@@ -9,13 +9,13 @@ Procedures in Actyx RPC can invoke each other directly as standard functions. Th
 
 ```ts
 const getAuditLog = procedure
-  .input(z.object({ userId: z.string() }))
+  .input(zodResolver(z.object({ userId: z.string() })))
   .query(async ({ input }) => {
     return await db.auditLog.findMany({ where: { userId: input.userId } });
   });
 
 export const getUserDetails = procedure
-  .input(z.object({ id: z.string() }))
+  .input(zodResolver(z.object({ id: z.string() })))
   .query(async ({ input }) => {
     const user = await db.user.findUnique({ where: { id: input.id } });
 

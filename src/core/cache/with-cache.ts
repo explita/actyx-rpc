@@ -20,10 +20,13 @@ export function withCache<TInput, TOutput>(
     options?.key ??
     ((opts: { ctx: any; input: TInput }) => JSON.stringify(opts));
   const ttlValue = options?.ttl;
-  const ttl = typeof ttlValue === "number" ? ttlValue : ttlValue ? parseWindow(ttlValue) : undefined;
-  
+  const ttl = ttlValue ? parseWindow(ttlValue) : undefined;
+
   const staleTimeValue = options?.staleTime ?? "0m";
-  const staleTime = typeof staleTimeValue === "number" ? staleTimeValue : parseWindow(staleTimeValue);
+  const staleTime =
+    typeof staleTimeValue === "number"
+      ? staleTimeValue
+      : parseWindow(staleTimeValue);
   const staleWhileRevalidate = options?.staleWhileRevalidate ?? false;
 
   async function decompress(data: TOutput): Promise<TOutput> {
@@ -44,7 +47,7 @@ export function withCache<TInput, TOutput>(
     opts: { ctx: any; input: TInput },
     ...args: any[]
   ): Promise<TOutput> => {
-    let cacheKey = getCacheKey(opts);
+    let cacheKey = await getCacheKey(opts);
 
     if (!cacheKey) {
       throw new CacheKeyException("Cache key cannot be empty", {
@@ -52,18 +55,26 @@ export function withCache<TInput, TOutput>(
         statusCode: 400,
       });
     }
-    cacheKey = hashKey(cacheKey);
+    cacheKey = options?.key ? cacheKey : hashKey(cacheKey);
 
     // These now work with any adapter (sync or async)
     const cached = await cache.get<TOutput>(cacheKey);
 
     if (cached !== undefined && !cached.isStale) {
-      options?.onHit?.(cacheKey, { data: cached.data } as any);
+      options?.onHit?.(cacheKey, {
+        data: cached.data,
+        metadata: cached.metadata,
+        isStale: cached.isStale,
+      });
       return decompress(cached.data);
     }
 
     if (staleWhileRevalidate && cached !== undefined && cached.isStale) {
-      options?.onHit?.(cacheKey, { data: cached.data } as any);
+      options?.onHit?.(cacheKey, {
+        data: cached.data,
+        metadata: cached.metadata,
+        isStale: cached.isStale,
+      });
 
       (async () => {
         try {
@@ -71,11 +82,15 @@ export function withCache<TInput, TOutput>(
           if (!isErrorResponse(fresh)) {
             await cache.set(cacheKey, fresh, { ttl, staleTime });
             if (options?.tags) {
-              await cache.addTag?.(cacheKey, options.tags);
+              const tags =
+                typeof options.tags === "function"
+                  ? await options.tags(opts)
+                  : options.tags;
+              await cache.addTag?.(cacheKey, tags);
             }
           }
           options?.onMiss?.(cacheKey);
-        } catch (e) {
+        } catch {
           // Silently fail
         }
       })();
@@ -89,7 +104,11 @@ export function withCache<TInput, TOutput>(
     if (!isErrorResponse(fresh)) {
       await cache.set(cacheKey, fresh, { ttl, staleTime });
       if (options?.tags) {
-        await cache.addTag?.(cacheKey, options.tags);
+        const tags =
+          typeof options.tags === "function"
+            ? await options.tags(opts)
+            : options.tags;
+        await cache.addTag?.(cacheKey, tags);
       }
     }
 

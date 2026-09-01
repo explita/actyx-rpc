@@ -14,10 +14,15 @@ The rate limiting policy uses the cache adapter configured in `createProcedure` 
 
 ```ts
 const sendMessage = procedure
+  .input(
+    zodResolver(
+      z.object({ recipientId: z.string(), message: z.string() }),
+    ),
+  )
   .rateLimit({
     limit: 10,
     window: "1m",
-    key: (ctx) => ctx.userId,
+    key: ({ ctx, input }) => `${ctx.userId}:${input.recipientId}`,
   })
   .mutation(async ({ input }) => {
     // ...
@@ -26,13 +31,13 @@ const sendMessage = procedure
 
 ## Rate Limiting Options
 
-| Option          | Type                             | Default | Description                                                    |
-| :-------------- | :------------------------------- | :------ | :------------------------------------------------------------- |
-| `limit`         | `number`                         | `100`   | Number of requests allowed per window.                         |
-| `window`        | `WindowTime`                     | `"1m"`  | Time window (e.g. `"1m"`, `"5m"`, `"1h"`, `"1d"`).             |
-| `key`           | `(ctx) => string`                | —       | Custom key generator function. Defaults to user identity / IP. |
-| `message`       | `string`                         | —       | Custom error message to return when rate-limited.              |
-| `onRateLimited` | `(key, limit, windowMs) => void` | —       | Callback triggered when a rate limit is exceeded.              |
+| Option          | Type                                                                       | Default | Description                                                    |
+| :-------------- | :------------------------------------------------------------------------- | :------ | :------------------------------------------------------------- |
+| `limit`         | `number`                                                                   | `100`   | Number of requests allowed per window.                         |
+| `window`        | `WindowTime`                                                               | `"1m"`  | Time window (e.g. `"1m"`, `"5m"`, `"1h"`, `"1d"`).             |
+| `key`           | `(opts: { ctx, input }, req: Request, context: any) => MaybePromise<string>` | —       | Custom key generator function (receives both `ctx` and `input`). Can be async. Defaults to user identity / IP. |
+| `message`       | `string`                                                                   | —       | Custom error message to return when rate-limited.              |
+| `onRateLimited` | `(key, limit, windowMs) => void`                                           | —       | Callback triggered when a rate limit is exceeded.              |
 
 ## Default Key Strategy
 

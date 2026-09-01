@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery } from "./use-infinite-query.js";
 import type { InfiniteQueryPage, SSEAdapterOptions } from "../types.js";
 import type { QueryResult } from "../../types/misc.js";
@@ -19,6 +19,10 @@ export function useSSEInfiniteQuery<
     ...sseOpts
   }: SSEAdapterOptions<TInput, TData, TPage, TQueryKey, TFullPage>,
 ) {
+  const optsRef = useRef({ onData, arrange });
+  useEffect(() => {
+    optsRef.current = { arrange, onData };
+  });
   // 1. Instantiate the paginated query
   const queryResult = useInfiniteQuery(queryProcedure, queryOpts);
 
@@ -27,14 +31,15 @@ export function useSSEInfiniteQuery<
     ...sseOpts,
     enabled: sseOpts.enabled ?? true,
     onData: (data, event) => {
-      if (onData) {
-        onData({
+      if (optsRef.current.onData) {
+        optsRef.current.onData({
           data,
           allData: queryResult.data as unknown as TData[],
           action: "added",
           append: queryResult.append as any,
           prepend: queryResult.prepend as any,
           update: queryResult.update as any,
+          insert: queryResult.insert as any,
           event,
         });
       } else {
@@ -44,11 +49,11 @@ export function useSSEInfiniteQuery<
   });
 
   const arrangedData = useMemo(() => {
-    if (arrange) {
-      return arrange(queryResult.data as unknown as TData[]);
+    if (optsRef.current.arrange) {
+      return optsRef.current.arrange(queryResult.data as unknown as TData[]);
     }
     return queryResult.data;
-  }, [queryResult.data, arrange]);
+  }, [queryResult.data]);
 
   return {
     ...queryResult,

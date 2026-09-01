@@ -27,10 +27,14 @@ export function usePaginatedQuery<
   TInput = any,
   TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
   TQueryKey extends unknown[] = unknown[],
+  TArgs extends unknown[] = [],
 >(
-  proc: (input: WithoutCursor<TInput>) => Promise<QueryResult<TFullPage>>,
-  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+  proc: (input: WithoutCursor<TInput>, ...args: TArgs) => Promise<QueryResult<TFullPage>>,
+  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
 ): InfiniteQueryResult<TPage, TFullPage> {
+  const [selectedItem, setSelectedItem] = useState<TPage | undefined>(
+    undefined,
+  );
   const queryClient = useQueryClient();
   const localId = useId();
 
@@ -39,7 +43,7 @@ export function usePaginatedQuery<
     : `__local_pag__${localId}`;
 
   const {
-    initialInput,
+    input: baseInput,
     enabled = true,
     initialPageParam,
     initialData,
@@ -52,12 +56,15 @@ export function usePaginatedQuery<
     onSettled,
   } = opts;
 
+  const args = opts.args ?? ([] as unknown as TArgs);
+
   const callbacksRef = useRef({
     onSuccess,
     onError,
     onSettled,
     proc,
-    initialInput,
+    baseInput,
+    args,
     initialData,
   });
   useEffect(() => {
@@ -66,7 +73,8 @@ export function usePaginatedQuery<
       onError,
       onSettled,
       proc,
-      initialInput,
+      baseInput,
+      args,
       initialData,
     };
   });
@@ -113,27 +121,35 @@ export function usePaginatedQuery<
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
-  const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  // Use a ref for the authoritative index to avoid stale closures in callbacks.
+  // State only exists to trigger re-renders when the index changes.
+  const pageIndexRef = useRef(0);
+  const [, forceRender] = useState(0);
+  const setPageIndex = useCallback((value: number) => {
+    pageIndexRef.current = value;
+    forceRender((n) => n + 1);
+  }, []);
 
   const [lastKey, setLastKey] = useState(queryKey);
   if (queryKey !== lastKey) {
     setLastKey(queryKey);
-    setCurrentPageIndex(0);
+    pageIndexRef.current = 0;
+    forceRender((n) => n + 1);
     fetchedCursorsRef.current.clear();
   }
 
-  let adjustedIndex = currentPageIndex;
+  // Bound the index to valid range (handles pages shrinking after maxPages slice, etc.)
+  let adjustedIndex = pageIndexRef.current;
   if (pages.length === 0) {
-    if (currentPageIndex !== 0) {
-      adjustedIndex = 0;
-      setCurrentPageIndex(0);
-    }
-  } else if (currentPageIndex >= pages.length) {
-    adjustedIndex = pages.length - 1;
-    setCurrentPageIndex(adjustedIndex);
-  } else if (currentPageIndex < 0) {
     adjustedIndex = 0;
-    setCurrentPageIndex(0);
+  } else if (adjustedIndex >= pages.length) {
+    adjustedIndex = pages.length - 1;
+  } else if (adjustedIndex < 0) {
+    adjustedIndex = 0;
+  }
+  // Sync ref if it was out of bounds
+  if (pageIndexRef.current !== adjustedIndex) {
+    pageIndexRef.current = adjustedIndex;
   }
 
   const currentPage = pages[adjustedIndex];
@@ -149,16 +165,18 @@ export function usePaginatedQuery<
       currentPage &&
       (getNextPageParam?.(currentPage, pages) ?? currentPage.nextCursor)
     );
-  const hasPrevious =
-    adjustedIndex > 0 || !!(pages[0]?.previousCursor);
+  const hasPrevious = adjustedIndex > 0 || !!pages[0]?.previousCursor;
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
       const fetcher = async () =>
-        await callbacksRef.current.proc({
-          ...callbacksRef.current.initialInput,
-          cursor,
-        } as TInput);
+        await callbacksRef.current.proc(
+          {
+            ...callbacksRef.current.baseInput,
+            cursor,
+          } as TInput,
+          ...(callbacksRef.current.args as TArgs),
+        );
 
       const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
       let resultTuple: [TFullPage, null] | [null, ErrorResponse];
@@ -178,29 +196,12 @@ export function usePaginatedQuery<
   );
 
   const fetchNext = useCallback(async () => {
+    const currentPageIndex = pageIndexRef.current;
+
     // Cache hit: navigate to next already-loaded page
     if (currentPageIndex < pages.length - 1) {
       const targetIndex = currentPageIndex + 1;
-      setCurrentPageIndex(targetIndex);
-
-      // Background refetch if stale
-      const staleMs = parseWindow(opts.staleTime);
-      const isStale =
-        staleMs === 0 || !state.updatedAt || Date.now() - state.updatedAt >= staleMs;
-      if (isStale) {
-        const targetCursor = pageParams[targetIndex];
-        fetchPage(targetCursor).then((freshPage) => {
-          const latestData = queryClient.getQueryState(queryKey)?.data as any;
-          if (!latestData?.pages?.[targetIndex]) return;
-          const newPages = [...latestData.pages];
-          newPages[targetIndex] = freshPage;
-          queryClient.setQueryState(queryKey, {
-            data: { ...latestData, pages: newPages },
-            updatedAt: Date.now(),
-          });
-        }).catch(() => {/* silently ignore background refetch errors */});
-      }
-
+      setPageIndex(targetIndex);
       return pages[targetIndex];
     }
 
@@ -246,7 +247,7 @@ export function usePaginatedQuery<
         updatedAt: Date.now(),
         isFetched: true,
       });
-      setCurrentPageIndex(newPages.length - 1);
+      setPageIndex(newPages.length - 1);
       callbacksRef.current.onSuccess?.(newData);
       callbacksRef.current.onSettled?.();
       return newPage;
@@ -263,7 +264,6 @@ export function usePaginatedQuery<
       return undefined;
     }
   }, [
-    currentPageIndex,
     hasNext,
     state.isFetching,
     pages,
@@ -273,32 +273,16 @@ export function usePaginatedQuery<
     maxPages,
     queryClient,
     queryKey,
+    setPageIndex,
   ]);
 
   const fetchPrevious = useCallback(async () => {
+    const currentPageIndex = pageIndexRef.current;
+
     // Cache hit: navigate to previous already-loaded page
     if (currentPageIndex > 0) {
       const targetIndex = currentPageIndex - 1;
-      setCurrentPageIndex(targetIndex);
-
-      // Background refetch if stale
-      const staleMs = parseWindow(opts.staleTime);
-      const isStale =
-        staleMs === 0 || !state.updatedAt || Date.now() - state.updatedAt >= staleMs;
-      if (isStale) {
-        const targetCursor = pageParams[targetIndex];
-        fetchPage(targetCursor).then((freshPage) => {
-          const latestData = queryClient.getQueryState(queryKey)?.data as any;
-          if (!latestData?.pages?.[targetIndex]) return;
-          const newPages = [...latestData.pages];
-          newPages[targetIndex] = freshPage;
-          queryClient.setQueryState(queryKey, {
-            data: { ...latestData, pages: newPages },
-            updatedAt: Date.now(),
-          });
-        }).catch(() => {/* silently ignore background refetch errors */});
-      }
-
+      setPageIndex(targetIndex);
       return pages[targetIndex];
     }
 
@@ -345,7 +329,8 @@ export function usePaginatedQuery<
         updatedAt: Date.now(),
         isFetched: true,
       });
-      // Index stays at 0 — prepended page is now at index 0
+      // Explicitly set index to 0 — prepended page is now at index 0
+      setPageIndex(0);
       callbacksRef.current.onSuccess?.(newData);
       callbacksRef.current.onSettled?.();
       return newPage;
@@ -362,7 +347,6 @@ export function usePaginatedQuery<
       return undefined;
     }
   }, [
-    currentPageIndex,
     hasPrevious,
     state.isFetching,
     pages,
@@ -371,6 +355,7 @@ export function usePaginatedQuery<
     maxPages,
     queryClient,
     queryKey,
+    setPageIndex,
   ]);
 
   const refetch = useCallback(async () => {
@@ -398,7 +383,7 @@ export function usePaginatedQuery<
         updatedAt: Date.now(),
         isFetched: true,
       });
-      setCurrentPageIndex(0);
+      setPageIndex(0);
       callbacksRef.current.onSuccess?.(newData);
     } catch (err) {
       const errorRes = err as ErrorResponse;
@@ -412,7 +397,7 @@ export function usePaginatedQuery<
     } finally {
       callbacksRef.current.onSettled?.();
     }
-  }, [fetchPage, initialPageParam, queryClient, queryKey]);
+  }, [fetchPage, initialPageParam, queryClient, queryKey, setPageIndex]);
 
   const reset = useCallback(() => {
     const initData = callbacksRef.current.initialData;
@@ -430,9 +415,9 @@ export function usePaginatedQuery<
       // updatedAt: resolvedInitData ? Date.now() : undefined,
       isFetched: false,
     });
-    setCurrentPageIndex(0);
+    setPageIndex(0);
     fetchedCursorsRef.current.clear();
-  }, [initialPageParam, queryClient, queryKey]);
+  }, [initialPageParam, queryClient, queryKey, setPageIndex]);
 
   const snapshot = useCallback(
     () => queryClient.snapshot(queryKey),
@@ -457,21 +442,21 @@ export function usePaginatedQuery<
   );
 
   const prepend = useCallback(
-    (item: TPage) => {
+    (item: TPage | TPage[]) => {
       return queryClient.prepend(queryKey, item);
     },
     [queryClient, queryKey],
   );
 
   const append = useCallback(
-    (item: TPage) => {
+    (item: TPage | TPage[]) => {
       return queryClient.append(queryKey, item);
     },
     [queryClient, queryKey],
   );
 
   const insert = useCallback(
-    (index: number, item: TPage) => {
+    (index: number, item: TPage | TPage[]) => {
       return queryClient.insert(queryKey, index, item);
     },
     [queryClient, queryKey],
@@ -616,6 +601,9 @@ export function usePaginatedQuery<
     error: state.error,
     isFetched: state.isFetched,
     isEmpty,
+    selectedItem,
+    selectItem: (item: TPage | undefined | null) =>
+      setSelectedItem(item ?? undefined),
     refetch,
     reset,
     remove,

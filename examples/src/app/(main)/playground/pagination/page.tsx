@@ -7,7 +7,7 @@ import { Loader2, Layers } from "lucide-react";
 export default function PaginationDemo() {
   const { data, hasNext, fetchNext, isFetching, error, isError } =
     useInfiniteQuery(getPosts, {
-      initialInput: { limit: 5 },
+      input: { limit: 5 },
       queryKey: ["posts"],
     });
 

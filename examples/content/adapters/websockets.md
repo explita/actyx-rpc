@@ -62,10 +62,10 @@ The procedure uses these methods to interact with the socket:
 ```ts
 // Example procedure
 export const onChatEvent = procedure
-  .input(z.string())
+  .input(zodResolver(z.object({ userId: z.string() })))
   .ws(({ ctx, input, send, broadcast, onMessage, onClose }) => {
     // Welcome just this client
-    send({ type: "subscribed", data: { userId: input } });
+    send({ type: "subscribed", data: { userId: input.userId } });
 
     // Notify others that someone joined
     broadcast({ type: "event", data: { message: "A user joined!" } });

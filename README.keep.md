@@ -599,10 +599,10 @@ Creates a reusable, fully typed middleware without attaching it immediately.
 
 Use it when you want to define a middleware once and apply it to multiple procedures with `.use()` or to keep your procedure definition clean.
 
-If your middleware depends on a specific input shape, you can strictly type it using the `ExpectedInput` generic:
+If your middleware depends on a specific input shape, you can strictly type it using the `ExpectedInput` generic. Note the extra `()` call — it lets TypeScript infer the middleware's added context (`NextCtx`) from the `next()` call while you provide `ExpectedInput` explicitly:
 
 ```ts
-const requirePostOwnership = procedure.middleware<{ postId: string }>(
+const requirePostOwnership = procedure.middleware<{ postId: string }>()(
   async ({ ctx, input, next }) => {
     // input.postId is strictly typed!
     const post = await db.post.find(input.postId);
@@ -657,7 +657,7 @@ Use it when you want to define a plugin once and apply it to multiple procedures
 Just like middlewares, if your plugin depends on a specific input shape, you can strictly type it using the `ExpectedInput` generic:
 
 ```ts
-const withAudit = procedure.plugin<{ postId: string }>({
+const withAudit = procedure.plugin<{ postId: string }>()({
   validate: (input) => {
     // input.postId is strictly typed!
     return {
@@ -2229,7 +2229,7 @@ function PostsList() {
     hasNext,
     isFetching,
   } = useInfiniteQuery(getPosts, {
-    initialInput: { limit: 10 },
+    input: { limit: 10 },
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
 

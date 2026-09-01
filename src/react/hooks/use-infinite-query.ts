@@ -5,6 +5,7 @@ import {
   useId,
   useSyncExternalStore,
   useMemo,
+  useState,
 } from "react";
 import type { ErrorResponse, QueryResult } from "../../types/misc.js";
 import type {
@@ -12,6 +13,7 @@ import type {
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
 } from "../types.js";
+import { defaultSyncSelection } from "../types.js";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { parseWindow } from "../../lib/utils.js";
@@ -26,13 +28,17 @@ export function useInfiniteQuery<
   TInput = any,
   TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
   TQueryKey extends unknown[] = unknown[],
+  TArgs extends unknown[] = [],
 >(
-  proc: (input: TInput) => Promise<QueryResult<TFullPage>>,
-  opts?: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+  proc: (input: TInput, ...args: TArgs) => Promise<QueryResult<TFullPage>>,
+  opts?: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
 ): Omit<
   InfiniteQueryResult<TPage, TFullPage>,
   "fetchPrevious" | "hasPrevious"
 > {
+  const [selectedItem, setSelectedItem] = useState<TPage | undefined>(
+    undefined,
+  );
   const queryClient = useQueryClient();
   const localId = useId();
 
@@ -41,7 +47,7 @@ export function useInfiniteQuery<
     : `__local_inf__${localId}`;
 
   const {
-    initialInput,
+    input: baseInput,
     enabled = true,
     initialPageParam,
     initialData,
@@ -54,6 +60,8 @@ export function useInfiniteQuery<
     onError,
     onSettled,
     arrange,
+    syncSelection = false,
+    args = [] as unknown as TArgs,
   } = opts || {};
 
   const callbacksRef = useRef({
@@ -62,9 +70,11 @@ export function useInfiniteQuery<
     onSettled,
     arrange,
     proc,
-    initialInput,
+    baseInput,
+    args,
     initialData,
     keepPreviousData,
+    syncSelection,
   });
   useEffect(() => {
     callbacksRef.current = {
@@ -73,9 +83,11 @@ export function useInfiniteQuery<
       onSettled,
       arrange,
       proc,
-      initialInput,
+      baseInput,
+      args,
       initialData,
       keepPreviousData,
+      syncSelection,
     };
   });
 
@@ -121,6 +133,7 @@ export function useInfiniteQuery<
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
+  const fetchingRef = useRef(false);
 
   const flattenedData = pages.flatMap((page) => page.data);
   const hasNext =
@@ -134,10 +147,13 @@ export function useInfiniteQuery<
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
       const fetcher = async () =>
-        await callbacksRef.current.proc({
-          ...callbacksRef.current.initialInput,
-          cursor,
-        } as TInput);
+        await callbacksRef.current.proc(
+          {
+            ...callbacksRef.current.baseInput,
+            cursor,
+          } as TInput,
+          ...(callbacksRef.current.args as TArgs),
+        );
 
       const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
       let resultTuple: [TFullPage, null] | [null, ErrorResponse];
@@ -157,7 +173,8 @@ export function useInfiniteQuery<
   );
 
   const fetchNext = useCallback(async () => {
-    if (!hasNext || state.isFetching) return undefined;
+    if (!hasNext || state.isFetching || fetchingRef.current) return undefined;
+    fetchingRef.current = true;
     queryClient.setQueryState(queryKey, { isFetching: true });
 
     const lastPage = pages[pages.length - 1];
@@ -166,6 +183,7 @@ export function useInfiniteQuery<
 
     if (!nextCursor || fetchedCursorsRef.current.has(nextCursor)) {
       queryClient.setQueryState(queryKey, { isFetching: false });
+      fetchingRef.current = false;
       return undefined;
     }
 
@@ -204,6 +222,8 @@ export function useInfiniteQuery<
       callbacksRef.current.onError?.(errorRes);
       callbacksRef.current.onSettled?.();
       return undefined;
+    } finally {
+      fetchingRef.current = false;
     }
   }, [
     hasNext,
@@ -217,6 +237,9 @@ export function useInfiniteQuery<
   ]);
 
   const refetch = useCallback(async () => {
+    if (queryClient.isFetching(queryKey) || fetchingRef.current) return;
+
+    fetchingRef.current = true;
     queryClient.setQueryState(queryKey, {
       isFetching: true,
       error: undefined,
@@ -255,6 +278,7 @@ export function useInfiniteQuery<
       });
       callbacksRef.current.onError?.(errorRes);
     } finally {
+      fetchingRef.current = false;
       callbacksRef.current.onSettled?.();
     }
   }, [fetchPage, initialPageParam, queryClient, queryKey]);
@@ -276,6 +300,7 @@ export function useInfiniteQuery<
       isFetched: false,
     });
     fetchedCursorsRef.current.clear();
+    setSelectedItem(undefined);
   }, [initialPageParam, queryClient, queryKey]);
 
   const snapshot = useCallback(
@@ -301,21 +326,21 @@ export function useInfiniteQuery<
   );
 
   const prepend = useCallback(
-    (item: TPage) => {
+    (item: TPage | TPage[]) => {
       return queryClient.prepend(queryKey, item);
     },
     [queryClient, queryKey],
   );
 
   const append = useCallback(
-    (item: TPage) => {
+    (item: TPage | TPage[]) => {
       return queryClient.append(queryKey, item);
     },
     [queryClient, queryKey],
   );
 
   const insert = useCallback(
-    (index: number, item: TPage) => {
+    (index: number, item: TPage | TPage[]) => {
       return queryClient.insert(queryKey, index, item);
     },
     [queryClient, queryKey],
@@ -429,11 +454,24 @@ export function useInfiniteQuery<
   const isEmpty = state.isFetched && flattenedData.length === 0;
 
   const arrangedData = useMemo(() => {
-    if (callbacksRef.current.arrange) {
-      return callbacksRef.current.arrange(flattenedData);
+    if (arrange) {
+      return arrange(flattenedData);
     }
     return flattenedData;
-  }, [flattenedData]);
+  }, [flattenedData, arrange]);
+
+  // Sync selectedItem with latest data instance
+  useEffect(() => {
+    const cleanup = callbacksRef.current.syncSelection;
+    if (!cleanup) return;
+
+    setSelectedItem((prev) => {
+      if (prev === undefined) return prev;
+      const matches =
+        typeof cleanup === "function" ? cleanup : defaultSyncSelection;
+      return arrangedData.find((item) => matches(item, prev));
+    });
+  }, [arrangedData]);
 
   return {
     data: arrangedData,
@@ -448,6 +486,9 @@ export function useInfiniteQuery<
     error: state.error,
     isFetched: state.isFetched,
     isEmpty,
+    selectedItem,
+    selectItem: (item: TPage | undefined | null) =>
+      setSelectedItem(item ?? undefined),
     refetch,
     reset,
     remove,

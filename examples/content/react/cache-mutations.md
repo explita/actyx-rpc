@@ -45,30 +45,48 @@ update(
 ```
 
 ### `prepend(item)`
-Inserts a new item at the beginning of the first page.
+Inserts a new item or array of items at the beginning of the first page.
+- **Arguments**: `item: TPage | TPage[]`
 - **Returns**: A `rollback()` function.
 
 ```typescript
 const { prepend } = useInfiniteQuery(getPosts);
+
+// Single item
 prepend(newPost);
+
+// Batch prepend
+prepend([postA, postB]);
 ```
 
 ### `append(item)`
-Inserts a new item at the end of the last page.
+Inserts a new item or array of items at the end of the last page.
+- **Arguments**: `item: TPage | TPage[]`
 - **Returns**: A `rollback()` function.
 
 ```typescript
 const { append } = useInfiniteQuery(getPosts);
+
+// Single item
 append(newPost);
+
+// Batch append
+append([postA, postB]);
 ```
 
 ### `insert(index, item)`
-Inserts an item at a specific index in the flattened list.
+Inserts an item or array of items at a specific index in the flattened list.
+- **Arguments**: `index: number`, `item: TPage | TPage[]`
 - **Returns**: A `rollback()` function.
 
 ```typescript
 const { insert } = useInfiniteQuery(getPosts);
+
+// Single item at index 2
 insert(2, newPost);
+
+// Batch insert at index 2
+insert(2, [postA, postB]);
 ```
 
 ### `setPages(updater)`
@@ -78,6 +96,25 @@ Exposes direct access to the entire pages structure for custom updates.
 ```typescript
 const { setPages } = useInfiniteQuery(getPosts);
 setPages(oldPages => oldPages.map(page => ...));
+```
+
+---
+
+## Standalone `QueryClient` Cache Mutations
+
+You can also perform mutations outside of hooks directly on `QueryClient` using a `queryKey`:
+
+```typescript
+import { useQueryClient } from "@explita/actyx-rpc/react";
+
+const queryClient = useQueryClient();
+
+// Mutate infinite query cache by key
+queryClient.prepend(["posts"], newPost);
+queryClient.append(["posts"], [postA, postB]);
+queryClient.insert(["posts"], 2, newPost);
+queryClient.update(["posts"], post => post.id === id, updated);
+queryClient.remove(["posts"], post => post.id === id);
 ```
 
 ---

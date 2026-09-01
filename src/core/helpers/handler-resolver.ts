@@ -7,7 +7,12 @@ import {
 import { type Middleware } from "../../types/middleware.js";
 import type { ProcedureConfig, ProcedureProps } from "../../types/procedure.js";
 import { checkRateLimit } from "../cache/rate-limit.js";
-import type { CacheAdapter } from "../cache/types.js";
+import type {
+  CacheAdapter,
+  CacheInvalidationOptions,
+  WindowTime,
+} from "../cache/types.js";
+import { invalidateCache } from "../cache/invalidate.js";
 import { startSpan, recordError } from "../telemetry/tracer.js";
 import { runMiddlewares } from "./run-middlewares.js";
 import { PubSubAdapter } from "../../lib/pubsub.js";
@@ -124,6 +129,7 @@ export function handlerResolver<O, P = any>(
         const result = await checkRateLimit(
           cache,
           config.rateLimit.options!,
+          input,
           currentCtx,
           originalArgs[0] as any,
           originalArgs[1],
@@ -132,7 +138,7 @@ export function handlerResolver<O, P = any>(
         if (!result.allowed) return [null, { ...baseError, ...result.error }];
       }
 
-      let isMock = config.mock && process.env.ACTYX_MOCK === "true";
+      const isMock = config.mock && process.env.ACTYX_MOCK === "true";
 
       // 4. Validation
       if (config.resolver && !isMock) {
@@ -205,6 +211,30 @@ export function handlerResolver<O, P = any>(
         }
       }
 
+      // Attach cache helper to ctx for full manual cache access & invalidation
+      currentCtx.cache = {
+        get: <T>(key: string) => cache.get<T>(key),
+        set: <T>(
+          key: string,
+          data: T,
+          opts?: { ttl?: WindowTime; staleTime?: WindowTime },
+        ) => cache.set(key, data, opts),
+        has: (key: string) => cache.has(key),
+        delete: (key: string) => cache.delete(key),
+        clear: () => cache.clear(),
+        clearByPattern: cache.clearByPattern
+          ? (pattern: string) => cache.clearByPattern!(pattern)
+          : undefined,
+        invalidateByTag: cache.invalidateByTag
+          ? (tag: string) => cache.invalidateByTag!(tag)
+          : undefined,
+        invalidate: (options: CacheInvalidationOptions) =>
+          invalidateCache(cache, options, {
+            ctx: currentCtx,
+            input: enrichedData,
+          }),
+      };
+
       const next = (newCtx?: any) => ({
         _isNext: true,
         ctx: newCtx ?? currentCtx,
@@ -251,16 +281,25 @@ export function handlerResolver<O, P = any>(
       const isError = isErrorResponse(result);
 
       if (isError) {
-        // Run plugin.onError() hooks
+        // Run plugin.onError() hooks — may return an error response override
         for (const plugin of config.plugins ?? []) {
-          Promise.resolve(
+          const pluginErrorRes = await Promise.resolve(
             plugin.onError?.({
               error: result,
               ctx: currentCtx,
               input: enrichedData,
               args,
             }),
-          ).catch((err) => console.error(err));
+          ).catch(() => undefined);
+          if (pluginErrorRes && typeof pluginErrorRes === "object") {
+            return [
+              null,
+              {
+                ...baseError,
+                ...pluginErrorRes,
+              },
+            ];
+          }
         }
         if (opts.onError) {
           const onErrorRes = await (opts.onError as any)(
@@ -330,16 +369,25 @@ export function handlerResolver<O, P = any>(
 
       return [result as any, null];
     } catch (error: any) {
-      // Run plugin.onError() hooks
+      // Run plugin.onError() hooks — may return an error response override
       for (const plugin of config.plugins ?? []) {
-        Promise.resolve(
+        const pluginErrorRes = await Promise.resolve(
           plugin.onError?.({
             error,
             ctx: currentCtx,
             input,
             args,
           }),
-        ).catch((err) => console.error(err));
+        ).catch(() => undefined);
+        if (pluginErrorRes && typeof pluginErrorRes === "object") {
+          return [
+            null,
+            {
+              ...baseError,
+              ...pluginErrorRes,
+            },
+          ];
+        }
       }
 
       if (span) {
@@ -350,7 +398,7 @@ export function handlerResolver<O, P = any>(
       if (opts.onError) {
         const onErrorRes = await (opts.onError as any)(
           {
-            error,
+            error: typeof error === "string" ? { message: error } : error,
             //@ts-ignore
             ctx: { ...baseCtx, ...rootCtx?.ctx },
             input,

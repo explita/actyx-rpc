@@ -14,7 +14,7 @@ import {
   useSuspenseQuery,
   useInfiniteQuery,
   useMutation,
-  useQueryClient,
+  getCachedQueryClient,
 } from "../react/index.js";
 
 export interface CreateClientOptions {
@@ -32,7 +32,6 @@ export type ClientQueryCall<I, O> = [I] extends [void] | [undefined] | [never]
         opts?: UseQueryOpts<O, unknown[], TUnwrap, TSelectData>,
       ) => QueryResult<O, undefined, TUnwrap, TSelectData>;
       useSuspenseQuery: <TUnwrap extends boolean = false, TSelectData = O>(
-        // input?: undefined,
         opts?: UseQueryOpts<O, unknown[], TUnwrap, TSelectData>,
       ) => UseSuspenseQueryResult<O, TUnwrap, TSelectData>;
       useInfiniteQuery: (
@@ -58,7 +57,7 @@ export type ClientQueryCall<I, O> = [I] extends [void] | [undefined] | [never]
       useSuspenseQuery: <TUnwrap extends boolean = false, TSelectData = O>(
         input: I,
         opts?: UseQueryOpts<O, unknown[], TUnwrap, TSelectData>,
-      ) => QueryResult<O, undefined, TUnwrap, TSelectData>;
+      ) => UseSuspenseQueryResult<O, TUnwrap, TSelectData>;
       useInfiniteQuery: (
         input: I,
         opts?: UseInfiniteQueryOpts<I, O>,
@@ -443,16 +442,9 @@ function createProxy(
       }
       if (prop === "invalidate") {
         return (input?: any) => {
-          try {
-            const queryClient = useQueryClient();
-            const queryKey = input !== undefined ? [...path, input] : [...path];
-            queryClient.invalidate(queryKey);
-          } catch (e) {
-            console.warn(
-              "invalidate was called outside of React Context or QueryProvider",
-              e,
-            );
-          }
+          const qc = getCachedQueryClient();
+          const queryKey = input !== undefined ? [...path, input] : [...path];
+          qc.invalidate(queryKey);
         };
       }
       if (prop === "fetch") {

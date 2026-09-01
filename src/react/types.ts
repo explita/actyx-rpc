@@ -1,17 +1,37 @@
 import type {
   ErrorResponse,
   MaybePromise,
+  MutationResult,
   Prettify,
   WindowTime,
 } from "../types/misc.js";
 
+/**
+ * Lifecycle status of a mutation.
+ * - `"idle"` — no mutation has run yet.
+ * - `"pending"` — a mutation is currently executing.
+ * - `"success"` — the last mutation completed successfully.
+ * - `"error"` — the last mutation failed.
+ */
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
+/**
+ * Configuration options for the `useMutation` hook.
+ *
+ * @template TOutput - Data type returned by the procedure on success.
+ * @template TArgs - Tuple of arguments accepted by `mutate` / `mutateAsync`.
+ * @template TContext - Value returned by `onMutate` and forwarded to callbacks.
+ * @template TMutationKey - Shape of the mutation key array used for tracking/invalidation.
+ * @template TAction - The action passed to the hook (a procedure function or a URL string).
+ */
 export type UseMutationOpts<
   TOutput,
   TArgs extends any[] = any[],
   TContext = unknown,
   TMutationKey extends unknown[] = unknown[],
+  TAction extends
+    | ((...args: TArgs) => Promise<MutationResult<TOutput>>)
+    | string = (...args: TArgs) => Promise<MutationResult<TOutput>>,
 > = {
   /**
    * Callback function to be executed when the procedure is successful.
@@ -67,14 +87,13 @@ export type UseMutationOpts<
   /**
    * Optimistic update function.
    * @param args The arguments for the procedure.
-   * @returns The optimistic update for the procedure.
+   * @returns A partial representation of the expected output (without `message` or `success` fields).
    */
   optimisticUpdate?: (
     ...args: TArgs
   ) =>
     | Omit<TOutput, "message" | "success">
-    | Promise<Omit<TOutput, "message" | "success">>
-    | TOutput;
+    | Promise<Omit<TOutput, "message" | "success">>;
   /**
    * Debounce time in milliseconds.
    */
@@ -87,10 +106,98 @@ export type UseMutationOpts<
    * Optional key to identify the mutation, allowing `useIsMutating` to filter by this key.
    */
   mutationKey?: TMutationKey;
+
+  /**
+   * An external `AbortController` to cancel the mutation from outside the hook.
+   *
+   * Only available when `action` is a URL string — not applicable for server action functions.
+   *
+   * When provided, the hook uses this controller instead of creating an internal one:
+   * - Calling `controller.abort()` cancels the in-flight `XMLHttpRequest` immediately.
+   * - The hook's returned `abort()` method also calls `.abort()` on this controller.
+   * - The controller persists across calls (not recreated per mutation).
+   * - `AbortController` is one-shot — once aborted, it's permanent. However, subsequent
+   *   `mutate()` calls still work: they fall back to a fresh internal controller.
+   *   Pass a new `AbortController` if you need external cancellation again.
+   *
+   * @example
+   * ```tsx
+   * const controller = useRef(new AbortController()).current;
+   * const mutation = useMutation("/api/upload", { abortController: controller });
+   *
+   * mutation.mutate(file);
+   * controller.abort(); // cancel the upload
+   *
+   * // Next mutate() still works — uses an internal controller
+   * mutation.mutate(otherFile);
+   * ```
+   */
+  abortController?: TAction extends string ? AbortController : undefined;
 };
 
+/**
+ * Return type of the `useMutation` hook.
+ *
+ * @template TOutput - data returned by the procedure on success.
+ * @template TArgs - tuple of arguments accepted by `mutate`/`mutateAsync`.
+ * @template TContext - value returned by `onMutate`.
+ * @template TAction - the action passed to the hook (function or URL string).
+ *   `abort` is only defined when `TAction` is a string (URL-based mutation).
+ */
+export interface UseMutationResult<
+  TOutput,
+  TArgs extends any[] = any[],
+  TContext = unknown,
+  TAction extends
+    | ((...args: TArgs) => Promise<MutationResult<TOutput>>)
+    | string = string,
+> {
+  /**
+   * Execute the mutation.
+   * Returns `[data, null]` on success and `[null, error]` on failure.
+   * @param args - The arguments accepted by the procedure.
+   */
+  mutate: (...args: TArgs) => Promise<MutationResult<TOutput>>;
+  /**
+   * Execute the mutation and resolve with the data, throwing on failure.
+   * @param args - The arguments accepted by the procedure.
+   */
+  mutateAsync: (...args: TArgs) => Promise<TOutput>;
+  /** Whether a mutation is currently executing. */
+  isPending: boolean;
+  /** The current lifecycle status of the mutation. */
+  status: MutationStatus;
+  /** The data returned by the last successful mutation, or `null`. */
+  data: TOutput | null;
+  /** The error response of the last failed mutation, or `null`. */
+  error: ErrorResponse | null;
+  /** Field-level validation errors from the last failure, or `null`. */
+  validationErrors: Partial<Record<keyof TArgs[0], string>> | null;
+  /** Upload progress percentage (0-100). Only populated for URL-based mutations. */
+  progress: number;
+  /** Resets the mutation back to its idle state and clears data/error/context. */
+  reset: () => void;
+  /**
+   * Abort the in-flight request. Only available for URL (string) mutations.
+   * Not applicable (undefined) for procedure (function) actions.
+   */
+  abort: TAction extends string ? () => void : undefined;
+  /** The context value returned by `onMutate`, if any. */
+  context: TContext | undefined;
+}
+
+/**
+ * Removes the `cursor` key from an input shape.
+ * Used by paginated/infinite queries to keep page params separate from the base input.
+ */
 export type WithoutCursor<TInput> = Omit<TInput, "cursor">;
 
+/**
+ * A single page of data produced by infinite/paginated queries.
+ * The `success` key is stripped from the raw page shape.
+ *
+ * @template TData - The type of items contained in the page.
+ */
 export type InfiniteQueryPage<TData> = Omit<
   {
     data: TData[];
@@ -112,12 +219,24 @@ export type UseInfiniteQueryOpts<
   TPage,
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TPage>,
+  TArgs extends unknown[] = [],
 > = {
   /**
-   * Initial input parameters for the query (excluding cursor/page parameters)
-   * Used as the base parameters for the first page fetch
+   * Input parameters for the query (excluding cursor/page parameters).
+   * Merged into every page fetch alongside the cursor.
    */
-  initialInput?: WithoutCursor<TInput>;
+  input?: WithoutCursor<TInput>;
+
+  /**
+   * Extra arguments passed after input to the procedure on every fetch.
+   * Use this when your procedure accepts additional parameters beyond the input object.
+   * @example
+   * ```ts
+   * // procedure: (input: { limit: number; cursor: string }, includeMeta: boolean) => ...
+   * useInfiniteQuery(proc, { input: { limit: 5 }, args: [true] })
+   * ```
+   */
+  args?: TArgs;
 
   /**
    * Whether the query should be enabled and automatically fetch
@@ -242,7 +361,45 @@ export type UseInfiniteQueryOpts<
    * @default true
    */
   refetchOnReconnect?: boolean | "always";
+
+  /**
+   * Keeps `selectedItem` in sync with the current data.
+   *
+   * When enabled, `selectedItem` automatically updates to point to the
+   * latest matching instance in the data after changes (e.g., mutations,
+   * refetches). If the item is no longer present, selection is cleared.
+   *
+   * You can also pass a custom equality function to match items across
+   * different object references (useful when data is re-fetched).
+   *
+   * @example
+   * ```ts
+   * // Use default matcher (by `id` property)
+   * syncSelection: true
+   *
+   * // Use a custom comparator (e.g. by `uuid`)
+   * syncSelection: (a, b) => a.uuid === b.uuid
+   * ```
+   *
+   * When `true`, the default matcher assumes items have an `id` property:
+   * `(a, b) => a.id === b.id`. See {@link defaultSyncSelection}.
+   *
+   * @default false
+   */
+  syncSelection?: boolean | ((a: TPage, b: TPage) => boolean);
 };
+
+/**
+ * Default matcher for {@link UseInfiniteQueryOpts.syncSelection}.
+ * Compares items by their `id` property.
+ * Used automatically when `syncSelection: true` is set.
+ */
+export function defaultSyncSelection<TPage extends { id: unknown }>(
+  a: TPage,
+  b: TPage,
+): boolean {
+  return a.id === b.id;
+}
 
 /**
  * Return type for infinite query hooks that handle paginated data fetching
@@ -259,6 +416,18 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
 
   /** Array of all fetched pages with their original structure */
   pages: TFullPage[];
+
+  /**
+   * The currently selected item from the flattened data.
+   *
+   * Can be undefined if no item is selected.
+   */
+  selectedItem: TPage | undefined;
+
+  /** Callback to select an item from the flattened data.
+   * @param item - The item to select, or undefined/null to clear selection
+   */
+  selectItem: (item: TPage | undefined | null) => void;
 
   /** Parameters used for each page fetch (cursors/offsets) */
   pageParams: (string | number)[];
@@ -343,21 +512,21 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    *
    * Returns a rollback function to revert this update.
    */
-  prepend: (item: TPage) => () => void;
+  prepend: (item: TPage | TPage[]) => () => void;
 
   /**
    * Manually appends an item to the last page.
    *
    * Returns a rollback function to revert this update.
    */
-  append: (item: TPage) => () => void;
+  append: (item: TPage | TPage[]) => () => void;
 
   /**
    * Manually inserts an item at a specific flattened index.
    *
    * Returns a rollback function to revert this update.
    */
-  insert: (index: number, item: TPage) => () => void;
+  insert: (index: number, item: TPage | TPage[]) => () => void;
 
   /**
    * Manually updates the cached pages structure using an updater function.
@@ -374,6 +543,14 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   snapshot: () => () => void;
 };
 
+/**
+ * Configuration options for the `useQuery` hook.
+ *
+ * @template TOutput - The raw output type returned by the procedure.
+ * @template TQueryKey - The type of the query key array (defaults to `unknown[]`).
+ * @template TUnwrap - Whether `unwrap: true` was passed.
+ * @template TSelectData - The final data type after `select` (defaults to `Unwrap<TOutput, TUnwrap>`).
+ */
 export type UseQueryOpts<
   TOutput,
   TQueryKey extends unknown[] = unknown[],
@@ -462,6 +639,14 @@ export type UseQueryOpts<
 };
 
 /**
+ * Acceptable `initialData` shapes for a query: the resolved data itself or a
+ * lazy initializer that returns it.
+ *
+ * @template T - The resolved data type (the `success` key is stripped).
+ */
+export type QueryData<T> = Omit<T, "success"> | (() => Omit<T, "success">);
+
+/**
  * Automatically unwrap the 'data' field from standard RPC success responses.
  */
 export type Unwrap<T, DoUnwrap extends boolean = false> = DoUnwrap extends true
@@ -469,6 +654,24 @@ export type Unwrap<T, DoUnwrap extends boolean = false> = DoUnwrap extends true
     ? D
     : T
   : T;
+
+/**
+ * The argument accepted by {@link QueryResult.update}: either the new data
+ * value directly, or an updater function that receives the current value and
+ * returns the new one. Mirrors React's `SetStateAction` and TanStack Query's
+ * `setQueryData` updaters.
+ *
+ * @template T - The resolved (selected) data type.
+ * @template TAlwaysDefined - Whether the query always has data (i.e. `initialData`
+ *   was provided). When `true`, `undefined` is excluded from both the value and
+ *   the updater's `prev` parameter.
+ */
+type QuerySetStateAction<
+  T,
+  TAlwaysDefined extends boolean = false,
+> = TAlwaysDefined extends true
+  ? T | ((prev: T) => T)
+  : T | undefined | ((prev: T | undefined) => T | undefined);
 
 /**
  * The result object returned by the useQuery hook.
@@ -538,13 +741,51 @@ export type QueryResult<
    * Resets the query state to its initial values.
    */
   reset: () => void;
+
+  /**
+   * Optimistically updates the query's cached data.
+   *
+   * Accepts either the new data directly or an updater function that receives
+   * the current cached data and returns the new data — mirroring React's
+   * `setState` and TanStack Query's `setQueryData`. The resolved value is
+   * written straight into the query cache, so this component — and any other
+   * consumer of the same `queryKey` — re-renders immediately. Useful for
+   * optimistic updates after a mutation, or for adjusting cached values
+   * without a network round-trip.
+   *
+   * The value/updater operates on the raw cached data (after `unwrap`, before
+   * `select`) — identical to the exposed `data` only when no `unwrap`/`select`
+   * is configured. When `select` is used, pass/return the raw (untransformed)
+   * cached data; `select` is re-applied when reading `data`.
+   *
+   * When `initialData` is provided, the data (and the updater's `prev`) is
+   * always defined; otherwise it may be `undefined` until the first successful
+   * fetch.
+   *
+   * @param value - The new raw cached data, or a function `(prev) => next` producing it.
+   * @returns The new raw cached data stored in the cache.
+   * @example
+   * ```ts
+   * const query = useQuery(getTodos, { queryKey: ["todos"] });
+   *
+   * query.update((todos) => [...(todos ?? []), newTodo]); // functional
+   * query.update([newTodo]);                             // direct value
+   * ```
+   */
+  update: (
+    value: QuerySetStateAction<
+      Unwrap<TOutput, TUnwrap>,
+      TInitialData extends undefined ? false : true
+    >,
+  ) => TInitialData extends undefined
+    ? Unwrap<TOutput, TUnwrap> | undefined
+    : Unwrap<TOutput, TUnwrap>;
 };
 
 /**
- * Options for the usews hook.
+ * Options for the `useWS` hook.
  *
- * @template TOutput - The type of data received from the ws.
- * @template TInitialData - The type of initial data.
+ * @template TOutput - The type of data received over the WebSocket.
  */
 export type UseWSOpts<TOutput> = {
   /**
@@ -583,8 +824,9 @@ export type UseWSOpts<TOutput> = {
 
   /**
    * Callback triggered when the ws connection is closed.
+   * @param CloseEvent - Info about the close event, including code, reason, and whether the close was clean.
    */
-  onUnsubscribed?: () => void;
+  onUnsubscribed?: (evt: CloseEvent) => void;
 
   /**
    * Callback triggered when the browser window regains focus.
@@ -602,7 +844,7 @@ export type UseWSOpts<TOutput> = {
 
   /**
    * Callback fired before each reconnection attempt.
-   * @param attempt - The current attempt number (0-indexed).
+   * @param attempt - The current attempt number (1-indexed).
    */
   onReconnectAttempt?: (attempt: number) => void;
 
@@ -650,14 +892,14 @@ export type UseWSOpts<TOutput> = {
      * Can be a number or a function that receives the current attempt count (0-indexed).
      * @default (attempt) => Math.min(1000 * Math.pow(2, attempt), 30000)
      */
-    delay?: number | ((attempt: number) => number);
+    delay?: WindowTime | ((attempt: number) => WindowTime);
   };
 };
 
 /**
- * Return shape of the usews hook.
+ * Return shape of the `useWS` hook.
  *
- * @template TOutput - The type of data received from the ws.
+ * @template TOutput - The type of data received over the WebSocket.
  */
 export type UseWSResult<TOutput> = {
   /**
@@ -694,37 +936,113 @@ export type UseWSResult<TOutput> = {
   isFetchingInitialData: boolean;
 };
 
-export type UseQueriesConfig<
-  TOutput = any,
+/**
+ * Per-element config used by `useQueries` overloads.
+ *
+ * Leverages `UseQueryOpts` directly so that `unwrap` and `select` flow through
+ * properly — just like `useQuery`.
+ *
+ * @template TOutput  – raw proc output (inferred from `proc._def.output` or
+ *                      the callable return type).
+ * @template TUnwrap  – whether `unwrap: true` was passed (defaults `false`).
+ * @template TSelectData – the final data type after `select` (defaults to
+ *                          `Unwrap<TOutput, TUnwrap>` when no `select`).
+ */
+export type UseQueriesItem<
+  TOutput,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
-  TInitialData extends Omit<Unwrap<TOutput, TUnwrap>, "success"> | undefined =
-    undefined,
   TSelectData = Unwrap<TOutput, TUnwrap>,
-> = Prettify<
-  {
-    proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>;
-    // queryKey: TQueryKey;
-  } & UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
-      initialData?: TInitialData | (() => TInitialData);
-    }
->;
+  TInitialData extends QueryData<Unwrap<TOutput, TUnwrap>> | undefined =
+    undefined,
+> = {
+  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>;
+  initialData?: TInitialData | (() => TInitialData);
+} & UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData>;
 
-export type QueriesResults<T extends readonly any[]> = {
-  [K in keyof T]: T[K] extends UseQueriesConfig<
-    infer TOut,
-    any,
-    infer TUnwrap,
-    infer TInit,
-    any
-  >
-    ? QueryResult<TOut, TInit, TUnwrap, TOut>
-    : T[K] extends {
-          proc: () => Promise<[infer TOut, null] | [null, ErrorResponse]>;
-        }
-      ? QueryResult<TOut, undefined, false, TOut>
-      : never;
-};
+/**
+ * Check if a useQueries item has `unwrap: true` — robust to contextual
+ * widening (the constraint makes `unwrap` optional, so it can become
+ * `boolean | undefined` instead of literal `true`).
+ *
+ * Uses `true extends U` instead of `U extends true` so that
+ * `true extends (boolean | undefined)` resolves correctly.
+ */
+type _IsUnwrapTrue<T> = T extends { unwrap: infer U }
+  ? true extends U
+    ? true
+    : false
+  : false;
+
+/**
+ * Map a single raw useQueries item into the corresponding `QueryResult`.
+ * Everything is inlined and repeated per-branch so TypeScript evaluates
+ * the conditionals in one pass (avoiding deferred inference with Unwrap).
+ */
+export type UseQueriesResult<TItem> = TItem extends {
+  proc: { _def: { output: infer TOutput } };
+}
+  ? TItem extends { select: (...args: any[]) => infer R }
+    ? QueryResult<
+        TOutput,
+        TItem extends { initialData: infer I } ? I : undefined,
+        _IsUnwrapTrue<TItem>,
+        R
+      >
+    : _IsUnwrapTrue<TItem> extends true
+      ? QueryResult<
+          TOutput,
+          TItem extends { initialData: infer I } ? I : undefined,
+          true,
+          TOutput extends { data: infer D } ? D : TOutput
+        >
+      : QueryResult<
+          TOutput,
+          TItem extends { initialData: infer I } ? I : undefined,
+          false,
+          TOutput
+        >
+  : TItem extends {
+        proc: (...args: any[]) => Promise<[infer TOutput, any]>;
+      }
+    ? TItem extends { select: (...args: any[]) => infer R }
+      ? QueryResult<
+          TOutput,
+          TItem extends { initialData: infer I } ? I : undefined,
+          _IsUnwrapTrue<TItem>,
+          R
+        >
+      : _IsUnwrapTrue<TItem> extends true
+        ? QueryResult<
+            TOutput,
+            TItem extends { initialData: infer I } ? I : undefined,
+            true,
+            TOutput extends { data: infer D } ? D : TOutput
+          >
+        : QueryResult<
+            TOutput,
+            TItem extends { initialData: infer I } ? I : undefined,
+            false,
+            TOutput
+          >
+    : QueryResult<unknown, undefined, false, unknown>;
+
+/**
+ * Map each element of a tuple of raw useQueries items to its `QueryResult`.
+ * Uses a simple homomorphic mapped type — avoids recursive conditional types
+ * so that `UseQueriesResult` is evaluated eagerly for each position.
+ *
+ * @example
+ * ```ts
+ * type R = QueriesResults<[{ proc: getTodos, unwrap: true }, { proc: getUser }]>
+ * // → [QueryResult<Todo[], undefined, true, Todo[]>, QueryResult<User, undefined, false, User>]
+ * ```
+ */
+export type QueriesResults<T extends readonly any[]> = T extends readonly []
+  ? readonly []
+  : { readonly [K in keyof T]: UseQueriesResult<T[K]> };
+
+// ─── end TanStack-inspired helpers ───
 
 /**
  * Options for the useSSE hook.
@@ -827,6 +1145,15 @@ export type UseSSEResult<T = any> = {
   clear: () => void;
 };
 
+/**
+ * Return shape of the `useSuspenseQuery` hook.
+ * Data is always present; loading/error states are handled by `Suspense` and
+ * the nearest error boundary rather than returned to the component.
+ *
+ * @template TOutput - The raw output type returned by the procedure.
+ * @template TUnwrap - Whether `unwrap: true` was passed.
+ * @template TSelectData - The final data type after `select`.
+ */
 export type UseSuspenseQueryResult<
   TOutput,
   TUnwrap extends boolean = false,
@@ -841,28 +1168,48 @@ export type UseSuspenseQueryResult<
   isSuccess: true;
 };
 
+/**
+ * Context passed to the `onData` callback of the WS/SSE infinite query adapters.
+ * Provides the received item, the full dataset, the dedup `action`, and cache
+ * mutation helpers backed by the underlying infinite query.
+ *
+ * @template TData - The type of items flowing over the socket/stream.
+ */
 export interface WSEventContext<TData = any> {
   data: TData;
   allData: TData[];
   action: "updated" | "added";
-  append: (item: TData) => void;
-  prepend: (item: TData) => void;
+  append: (item: TData | TData[]) => void;
+  prepend: (item: TData | TData[]) => void;
+  insert: (index: number, item: TData | TData[]) => void;
   update: (
     predicate: number | ((item: TData) => boolean),
     updater: (item: TData) => TData,
   ) => void;
 }
 
+/**
+ * Options for `useWSInfiniteQuery` — combines WebSocket options with the
+ * underlying infinite query configuration.
+ *
+ * @template TInput - Input type for the query procedure (excluding cursor).
+ * @template TData - Item type flowing over the socket.
+ * @template TPage - Item type contained in each page.
+ * @template TQueryKey - Query key array type.
+ * @template TFullPage - The full page shape (defaults to `InfiniteQueryPage<TData>`).
+ * @template TArgs - Extra positional args passed to the query procedure after input.
+ */
 export interface WSAdapterOptions<
   TInput,
   TData,
   TPage,
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
+  TArgs extends unknown[] = [],
 > extends Omit<UseWSOpts<TData>, "onData" | "onWindowFocus" | "onReconnect"> {
   // Infinite Query options
   queryOpts?: Omit<
-    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
     "arrange"
   >;
 
@@ -875,24 +1222,59 @@ export interface WSAdapterOptions<
 
   /**
    * Callback triggered when the browser window regains focus.
-   * Receives the current infinite query data and a refetch function.
-   * @param opts.data - The current infinite query data array.
-   * @param opts.refetch - Function to manually refetch the query.
+   * Receives the current infinite query data and cache manipulation helpers.
    */
   onWindowFocus?: (opts: {
     data: TData[];
+    pages: TFullPage[];
+    pageParams: (string | number)[];
     refetch: () => Promise<void>;
+    reset: () => void;
+    prepend: (item: TData | TData[]) => () => void;
+    append: (item: TData | TData[]) => () => void;
+    insert: (index: number, item: TData | TData[]) => () => void;
+    update: (
+      arg: number | ((item: TData) => boolean),
+      updater: TData | ((item: TData) => TData),
+    ) => () => void;
+    remove: (arg: number | ((item: TData) => boolean)) => () => void;
+    setPages: (updater: (oldPages: TFullPage[]) => TFullPage[]) => () => void;
+    snapshot: () => () => void;
   }) => void;
 
   /**
    * Callback triggered when the network connection is restored after being offline.
-   * Receives the current infinite query data and a refetch function.
-   * @param opts.data - The current infinite query data array.
-   * @param opts.refetch - Function to manually refetch the query.
+   * Receives the current infinite query data and cache manipulation helpers.
    */
-  onReconnect?: (opts: { data: TData[]; refetch: () => Promise<void> }) => void;
+  onReconnect?: (opts: {
+    data: TData[];
+    pages: TFullPage[];
+    pageParams: (string | number)[];
+    refetch: () => Promise<void>;
+    reset: () => void;
+    prepend: (item: TData | TData[]) => () => void;
+    append: (item: TData | TData[]) => () => void;
+    insert: (index: number, item: TData | TData[]) => () => void;
+    update: (
+      arg: number | ((item: TData) => boolean),
+      updater: TData | ((item: TData) => TData),
+    ) => () => void;
+    remove: (arg: number | ((item: TData) => boolean)) => () => void;
+    setPages: (updater: (oldPages: TFullPage[]) => TFullPage[]) => () => void;
+    snapshot: () => () => void;
+  }) => void;
 }
 
+/**
+ * Options for `useSSEInfiniteQuery` — combines SSE options with the underlying
+ * infinite query configuration.
+ *
+ * @template TInput - Input type for the query procedure (excluding cursor).
+ * @template TData - Item type flowing over the SSE stream.
+ * @template TPage - Item type contained in each page.
+ * @template TQueryKey - Query key array type.
+ * @template TFullPage - The full page shape (defaults to `InfiniteQueryPage<TData>`).
+ */
 export interface SSEAdapterOptions<
   TInput,
   TData,

@@ -1,4 +1,10 @@
-import type { BaseContext, MaybePromise, MergeMeta, Prettify } from "./misc.js";
+import type {
+  BaseContext,
+  ErrorResponse,
+  MaybePromise,
+  MergeMeta,
+  Prettify,
+} from "./misc.js";
 
 export type MiddlewareResult<NextCtx> =
   | { _isNext: true; ctx: NextCtx }
@@ -44,7 +50,7 @@ export type Plugin<
     ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
     input: unknown;
     args: any;
-  }) => Promise<void> | void;
+  }) => MaybePromise<Partial<ErrorResponse> | void>;
   validate?: (
     input: Prettify<I & TEnrich>,
   ) =>

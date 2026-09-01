@@ -1,6 +1,10 @@
 import { mergeConfigs } from "../lib/utils.js";
 import { MemoryCache } from "./cache/memory-cache.js";
-import { MemoryPubSub, RedisPubSub, type PubSubAdapter } from "../lib/pubsub.js";
+import {
+  MemoryPubSub,
+  RedisPubSub,
+  type PubSubAdapter,
+} from "../lib/pubsub.js";
 import type {
   CacheInvalidationOptions,
   RateLimitOptions,
@@ -173,7 +177,7 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      rateLimit: (options?: RateLimitOptions<Ctx, TLocalMeta>) => {
+      rateLimit: (options?: RateLimitOptions<Ctx, I, TLocalMeta>) => {
         return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           rateLimit: {
@@ -224,12 +228,13 @@ export function createProcedure<
         return getContext();
       },
 
-      middleware(mw) {
-        return mw;
+      middleware(mw?: any) {
+        // Supports both `middleware(mw)` and `middleware<ExpectedInput>()(mw)`.
+        return mw === undefined ? (inner: any) => inner : mw;
       },
 
-      plugin(plugin) {
-        return plugin;
+      plugin(plugin?: any) {
+        return plugin === undefined ? (inner: any) => inner : plugin;
       },
 
       //@ts-ignore
@@ -471,8 +476,8 @@ export function createProcedure<
             send: (data: any) => void;
             broadcast: (data: any) => void;
             onMessage: (cb: (data: any) => void) => void;
-            onClose: (cb: () => void) => void;
-            onError: (cb: (err: any) => void) => void;
+            onClose: (cb: (evt: CloseEvent) => void) => void;
+            onError: (cb: (err: Event) => void) => void;
           }) => {
             const resolvedFn = handlerResolver(
               async ({ ctx, input }) => {
