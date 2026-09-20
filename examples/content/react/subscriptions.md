@@ -16,7 +16,7 @@ This hook manages opening the WebSocket client connection, sending/receiving mes
 To establish a client-side subscription or bi-directional socket connection:
 
 ```tsx
-import { useWS } from "@explita/actyx-rpc/react";
+import { useWS } from "@explita/actyx-rpc-react";
 import { onRoomEvent } from "@/backend/procedures";
 
 function ChatRoom({ roomId }) {

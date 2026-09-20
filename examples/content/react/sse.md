@@ -14,7 +14,7 @@ Actyx RPC provides native client-side hooks to connect to Server-Sent Event (SSE
 Connect and subscribe to a reactive backend SSE stream:
 
 ```tsx
-import { useSSE } from "@explita/actyx-rpc/react";
+import { useSSE } from "@explita/actyx-rpc-react";
 
 function StockTicker({ symbol }) {
   const {

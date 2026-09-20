@@ -1,7 +1,6 @@
 "use client";
 
-import { SSEClient } from "@/dist/client/sse";
-import { useSSE } from "@/dist/react";
+import { useSSE, SSEClient } from "@/dist/react";
 import { useEffect, useState, useRef } from "react";
 import {
   Activity,

@@ -31,23 +31,50 @@ No code generation steps. No duplicate schemas leaking across directories. Just 
 
 ---
 
+## Package Architecture
+
+Actyx RPC is split into two specialized, lightweight packages:
+
+| Package | Purpose | Typical Environment |
+| :--- | :--- | :--- |
+| **`@explita/actyx-rpc`** | Core RPC engine, procedure builders, middleware, execution policies, validation resolvers, and server adapters | Node.js, Next.js Server Actions, Express, Cloudflare Workers |
+| **`@explita/actyx-rpc-react`** | React integration, built-in `QueryClient`, in-memory cache, reactive hooks (`useQuery`, `useMutation`, etc.), and streaming clients | Next.js Client Components, Vite, React SPA |
+
+---
+
 ## Installation
 
-Install `@explita/actyx-rpc` using your preferred package manager:
+Choose the packages you need based on your architecture:
 
+### Fullstack (Next.js, Remix, TanStack Start)
+Install both packages to build server procedures and consume them in React:
+```bash
+npm install @explita/actyx-rpc @explita/actyx-rpc-react
+```
+
+### Backend / Server API Only
+If you are building a standalone API or server actions without React client hooks:
 ```bash
 npm install @explita/actyx-rpc
 ```
 
-### Peer Dependencies
+### Frontend / React App Only
+If you are consuming Actyx RPC procedures from a React client application:
+```bash
+npm install @explita/actyx-rpc-react
+```
 
-Install the resolver library you want to use as a peer dependency: `zod`, `valibot`, `arktype`, `joi`, `yup`, or supply a custom resolver function.
+### Peer Dependencies
+Install your schema validation library of choice (e.g. `zod`, `valibot`, `arktype`, `joi`, or `yup`):
+```bash
+npm install zod
+```
 
 ---
 
 ## Quick Start
 
-Create a base procedure configuration:
+### 1. Define Server Procedures (`@explita/actyx-rpc`)
 
 ```ts
 import { createProcedure } from "@explita/actyx-rpc";
@@ -64,46 +91,10 @@ const procedure = createProcedure({
       },
     };
   },
-  enrichInput(ctx) {
-    return { userId: ctx.userId };
-  },
-  async onError(props) {
-    console.error("Procedure error:", props);
-  },
-  inputMode: "form", // "strict" | "form" | "partial"
 });
 
-// 1. Create a Mutation Procedure
-const createPost = procedure
-  .input(
-    zodResolver(
-      z.object({
-        title: z.string().min(1, "Title is required"),
-        body: z.string().min(10, "Body is too short"),
-      }),
-    ),
-  )
-  .mutation(async ({ ctx, input }) => {
-    // Your DB operations here.
-    return {
-      success: true,
-      data: {
-        id: "post_1",
-        title: input.title,
-        body: input.body,
-        authorId: ctx.userId,
-      },
-    };
-  });
-
-// Calling a Mutation
-const [result, error] = await createPost({
-  title: "Hello World",
-  body: "This is my first post.",
-});
-
-// 2. Create a Query Procedure
-const getPost = procedure
+// Create a query procedure
+export const getPost = procedure
   .input(
     zodResolver(
       z.object({
@@ -111,22 +102,55 @@ const getPost = procedure
       }),
     ),
   )
-  .query(async ({ ctx, input }, includeDrafts: boolean) => {
-    // Your DB operations here.
+  .query(async ({ ctx, input }) => {
     return {
       id: input.id,
+      title: "Hello from Actyx RPC",
       authorId: ctx.userId,
-      includeDrafts,
     };
   });
+```
 
-// Calling a Query
-const [post, queryError] = await getPost({ id: "post_1" }, true);
+### 2. Consume in React (`@explita/actyx-rpc-react`)
+
+Wrap your application in `ActyxProvider` and call the procedure directly in components:
+
+```tsx
+"use client";
+
+import { QueryClient, ActyxProvider, useQuery } from "@explita/actyx-rpc-react";
+import { getPost } from "@/server/procedures";
+
+const queryClient = new QueryClient({
+  queries: {
+    staleTime: "5m", // cache fresh for 5 minutes
+  },
+});
+
+export function App() {
+  return (
+    <ActyxProvider client={queryClient}>
+      <PostDetail postId="post_1" />
+    </ActyxProvider>
+  );
+}
+
+function PostDetail({ postId }: { postId: string }) {
+  const { data: post, isLoading, isError, error } = useQuery(
+    () => getPost({ id: postId }),
+    { queryKey: ["post", postId] }
+  );
+
+  if (isLoading) return <div>Loading post...</div>;
+  if (isError) return <div>Error: {error?.message}</div>;
+
+  return <h1>{post.title}</h1>;
+}
 ```
 
 ---
 
-## Core Documentation
+## Documentation Sections
 
 import { Cards } from "nextra/components";
 

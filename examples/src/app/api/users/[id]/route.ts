@@ -2,7 +2,7 @@ import { procedure, procedure2 } from "@/lib/rpc/init";
 import { zodResolver } from "@/dist/resolvers/zod";
 import { z } from "zod";
 import { NextResponse } from "next/server";
-import { createRouteHandler } from "@/dist/adapters/next";
+// import { createRouteHandler } from "@/dist/adapters/next";
 import { redirect } from "next/navigation";
 
 // A mock user database
@@ -36,38 +36,36 @@ const mockUsers: Record<string, User> = {
  * 2. Return of a custom NextResponse/Response for HTTP control (e.g. 404 Not Found)
  * 3. Automatic success response wrapping for returned plain JS objects.
  */
-export const GET = createRouteHandler(
-  procedure
-    .input(
-      zodResolver(
-        z.object({
-          id: z.string(),
-          fields: z.string().optional(),
-        }),
-      ),
-    )
-    .webRoute(async ({ ctx, input }, req, context) => {
-      // console.log("Actyx RPC GET nextRoute executed. Procedure context:", ctx);
-      // console.log({ req, context, input });
-      const user = mockUsers[input.id];
-      if (!user) {
-        return NextResponse.json({ error: "User not found" }, { status: 404 });
-      }
+export const GET = procedure
+  .input(
+    zodResolver(
+      z.object({
+        params: z.object({ id: z.string() }),
+        query: z.object({ fields: z.string().optional() }).optional(),
+      }),
+    ),
+  )
+  .webRoute(async ({ ctx, input }, req, context) => {
+    // console.log("Actyx RPC GET nextRoute executed. Procedure context:", ctx);
+    // console.log({ req, context, input });
+    const user = mockUsers[input.params.id];
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
-      if (input.fields) {
-        const allowedFields = input.fields.split(",");
-        const filteredUser: any = {};
-        allowedFields.forEach((field) => {
-          if (field in user) {
-            filteredUser[field] = user[field as keyof User];
-          }
-        });
-        return NextResponse.json(filteredUser);
-      }
+    if (input.query?.fields) {
+      const allowedFields = input.query.fields.split(",");
+      const filteredUser: any = {};
+      allowedFields.forEach((field) => {
+        if (field in user) {
+          filteredUser[field] = user[field as keyof User];
+        }
+      });
+      return NextResponse.json(filteredUser);
+    }
 
-      return NextResponse.json(user);
-    }),
-);
+    return NextResponse.json(user);
+  });
 
 /**
  * POST /api/users/[id]
@@ -77,46 +75,30 @@ export const GET = createRouteHandler(
  * 2. Automatic schema validation for both path and body properties.
  */
 
-export const POST = createRouteHandler(
-  procedure
-    .input(
-      zodResolver(
-        z.object({
-          id: z.string(),
-          name: z.string().min(2).optional(),
-          email: z.email().optional(),
-          fields: z.string().optional(),
-          // file: z.instanceof(File).check((ctx) => {
-          //   if (ctx.value.size <= 0) {
-          //     ctx.issues.push({
-          //       code: "custom",
-          //       message: "File size must be greater than 0",
-          //       path: ["file"],
-          //       input: ctx.value,
-          //     });
-          //   }
-          // }),
-        }),
-      ),
-    )
-    .use(({ input, next, ctx }, req, context) => {
-      console.log("mw", req, context);
-      return next({ item: "from middleware" });
-    })
-    .webRoute(async ({ ctx, input }, req, context) => {
-      // console.log("Actyx RPC POST nextRoute executed. Procedure context:", ctx);
-      // console.log({ req, context, input });
-      // console.log(await req.json());
-      // console.log(await context.params);
+export const POST = procedure
+  .input(
+    zodResolver(
+      z.object({
+        params: z.object({ id: z.string() }),
+        query: z.object({ fields: z.string().optional() }).optional(),
+        name: z.string().min(2).optional(),
+        email: z.email().optional(),
+      }),
+    ),
+  )
+  .use(({ input, next, ctx }, req, context) => {
+    console.log("mw", req, context);
+    return next({ item: "from middleware" });
+  })
+  .webRoute(async ({ ctx, input }, req, context) => {
+    const user = mockUsers[input.params.id];
+    if (!user) {
+      return Response.json({ error: "User not found" }, { status: 404 });
+    }
 
-      const user = mockUsers[input.id];
-      if (!user) {
-        return Response.json({ error: "User not found" }, { status: 404 });
-      }
+    if (input.name) user.name = input.name;
+    if (input.email) user.email = input.email;
 
-      if (input.name) user.name = input.name;
-      if (input.email) user.email = input.email;
+    return NextResponse.json({ success: true, user });
+  });
 
-      return NextResponse.json({ success: true, user });
-    }),
-);

@@ -85,21 +85,39 @@ For procedures that need to act directly as HTTP route endpoints (receiving stan
 
 This is ideal for exposing raw HTTP endpoints (like webhooks, direct file downloads, or binary stream ingestion) and keeps your procedures framework-agnostic.
 
+### Input Structure in `.webRoute()`
+
+In `.webRoute()`, `input` provides clean, explicit isolation across your request sources:
+
+```ts
+input: {
+  ...bodyParams,        // JSON / FormData body fields at the root
+  params: routeParams,  // Dynamic path params e.g. [id] -> input.params.id
+  query: queryParams,   // URL search params e.g. ?page=1 -> input.query.page
+}
+```
+
+This allows you to validate body, path parameters, and query parameters in a single unified schema with complete precision:
+
 ```ts
 import { procedure } from "@/lib/rpc/init";
+import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
 import { z } from "zod";
 
-export const handleWebhook = procedure
-  .input(zodResolver(z.object({ event: z.string() })))
+export const handleUpdateUser = procedure
+  .input(
+    zodResolver(
+      z.object({
+        name: z.string(), // Validates JSON body: { "name": "Alice" }
+        params: z.object({ id: z.string() }), // Validates dynamic route param: /api/users/[id]
+        query: z.object({ notify: z.string().optional() }).optional(), // Validates query param: ?notify=true
+      })
+    )
+  )
   .webRoute(async ({ ctx, input }, req, context) => {
-    // req is the standard Web Request instance
-    // context contains adapter-provided metadata (like params, cookies, headers)
-    console.log(`Processing event ${input.event} on path ${context.pathname}`);
+    console.log(`Updating user ${input.params.id} to ${input.name} (notify: ${input.query?.notify})`);
 
-    return new Response(JSON.stringify({ received: true }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ success: true });
   });
 ```
 

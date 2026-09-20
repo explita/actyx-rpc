@@ -14,7 +14,7 @@ Use the `useMutation` hook to run write-style procedures, track load states, che
 Execute state-changing mutations with validation tracking:
 
 ```tsx
-import { useMutation } from "@explita/actyx-rpc/react";
+import { useMutation } from "@explita/actyx-rpc-react";
 import { createPost } from "@/backend/procedures";
 
 function CreatePostForm() {
@@ -152,29 +152,26 @@ For direct octet binary streams, you access the standard Web `Request` body stre
 
 ```ts
 import { procedure } from "@/lib/rpc/init";
-import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
 import { Readable } from "stream";
 import fs from "fs";
 
-export const POST = createRouteHandler(
-  procedure.webRoute(async ({ input, ctx }, req) => {
-    const stream = req.body; // Native Web ReadableStream
-    if (!stream) {
-      throw new Error("No payload stream provided");
-    }
+export const POST = procedure.webRoute(async ({ input, ctx }, req) => {
+  const stream = req.body; // Native Web ReadableStream
+  if (!stream) {
+    throw new Error("No payload stream provided");
+  }
 
-    // Pipe the web stream to disk/storage
-    const nodeStream = Readable.fromWeb(stream as any);
-    const writeStream = fs.createWriteStream("./uploads/file.png");
-    await new Promise((resolve, reject) => {
-      nodeStream.pipe(writeStream);
-      writeStream.on("finish", resolve);
-      writeStream.on("error", reject);
-    });
+  // Pipe the web stream to disk/storage
+  const nodeStream = Readable.fromWeb(stream as any);
+  const writeStream = fs.createWriteStream("./uploads/file.png");
+  await new Promise((resolve, reject) => {
+    nodeStream.pipe(writeStream);
+    writeStream.on("finish", resolve);
+    writeStream.on("error", reject);
+  });
 
-    return { success: true };
-  })
-);
+  return { success: true };
+});
 ```
 
 #### 2. Handling Multipart Form-Data
@@ -182,27 +179,24 @@ For standard Form-Data requests, files are automatically parsed by the core rout
 
 ```ts
 import { procedure } from "@/lib/rpc/init";
-import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
 import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
 import { z } from "zod";
 import fs from "fs";
 
-export const POST = createRouteHandler(
-  procedure
-    .input(
-      zodResolver(
-        z.object({
-          file: z.instanceof(File),
-          description: z.string().optional(),
-        })
-      )
+export const POST = procedure
+  .input(
+    zodResolver(
+      z.object({
+        file: z.instanceof(File),
+        description: z.string().optional(),
+      })
     )
-    .webRoute(async ({ input }) => {
-      const file = input.file; // Fully resolved standard File instance
-      const arrayBuffer = await file.arrayBuffer();
-      
-      await fs.promises.writeFile("./uploads/file.png", Buffer.from(arrayBuffer));
-      return { success: true };
-    })
-);
+  )
+  .webRoute(async ({ input }) => {
+    const file = input.file; // Fully resolved standard File instance
+    const arrayBuffer = await file.arrayBuffer();
+    
+    await fs.promises.writeFile("./uploads/file.png", Buffer.from(arrayBuffer));
+    return { success: true };
+  });
 ```

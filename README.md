@@ -1,36 +1,47 @@
-# Actyx RPC
+# Actyx RPC Monorepo
 
-**Type-safe RPC for composable server actions in TypeScript.**
+**Type-safe RPC and React query toolkit for composable server actions in TypeScript.**
 
-Actyx RPC lets you build server-side procedures with full type safety, minimal boilerplate, and a clean, composable API. It bridges client-side queries and server-side execution seamlessly.
-
-[![NPM Version](https://img.shields.io/npm/v/@explita/actyx-rpc?style=flat-square&color=blue)](https://www.npmjs.com/package/@explita/actyx-rpc)
-[![License](https://img.shields.io/npm/l/@explita/actyx-rpc?style=flat-square&color=lightgray)](https://github.com/explita/actyx-rpc/blob/main/LICENSE)
+[![License](https://img.shields.io/npm/l/@explita/actyx-rpc?style=flat-square&color=lightgray)](https://github.com/explita/actyx-rpc/blob/master/LICENSE)
 [![Documentation](https://img.shields.io/badge/docs-actyx.explita.ng-blueviolet?style=flat-square)](https://actyx.explita.ng)
 
 ---
 
 ## 📖 Complete Documentation
 
-Visit our documentation portal for the complete guide, API references, execution policies, and integration adapters:
+Visit our full documentation portal and interactive playground:
 
 👉 **[actyx.explita.ng](https://actyx.explita.ng)**
+
+---
+
+## Packages in this Monorepo
+
+| Package                                                      | Version                                                                                                                                              | Description                                                                                                                      |
+| :----------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------- |
+| [**`@explita/actyx-rpc`**](./packages/server/README.md)      | [![npm](https://img.shields.io/npm/v/@explita/actyx-rpc?style=flat-square&color=blue)](https://www.npmjs.com/package/@explita/actyx-rpc)             | Core RPC engine, procedure builders, middleware, execution policies, validation resolvers, and server adapters                   |
+| [**`@explita/actyx-rpc-react`**](./packages/react/README.md) | [![npm](https://img.shields.io/npm/v/@explita/actyx-rpc-react?style=flat-square&color=blue)](https://www.npmjs.com/package/@explita/actyx-rpc-react) | First-class React client, zero-dependency `QueryClient`, reactive hooks (`useQuery`, `useMutation`, etc.), and streaming clients |
 
 ---
 
 ## Installation
 
 ```bash
-npm install @explita/actyx-rpc
-```
+# Fullstack (Next.js / Remix / TanStack Start):
+npm install @explita/actyx-rpc @explita/actyx-rpc-react
 
-Install your schema validation library of choice (such as Zod, Valibot, ArkType, Joi, or Yup) as a peer dependency.
+# Server / Backend API Only:
+npm install @explita/actyx-rpc
+
+# React Frontend Only:
+npm install @explita/actyx-rpc-react
+```
 
 ---
 
-## Quick Start
+## Quick Overview
 
-Define a reusable procedure builder with context injection (e.g. database, authentication context):
+### 1. Define Server Procedures (`@explita/actyx-rpc`)
 
 ```ts
 // server/procedures.ts
@@ -40,67 +51,40 @@ import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";
 
 const procedure = createProcedure({
   async createContext() {
-    return {
-      ok: true,
-      ctx: { userId: "user_123" }
-    };
-  }
+    return { ok: true, ctx: { userId: "user_123" } };
+  },
 });
 
-// Build a validated query procedure
-export const getUserProfile = procedure
+export const getUser = procedure
   .input(zodResolver(z.object({ id: z.string() })))
   .query(async ({ ctx, input }) => {
-    return {
-      id: input.id,
-      userId: ctx.userId,
-      name: "Ade Explita"
-    };
+    return { id: input.id, name: "Ade Explita", userId: ctx.userId };
   });
 ```
 
-Execute the procedure on the client (or in Server Actions) returning a safe `[data, error]` tuple:
+### 2. Consume in React (`@explita/actyx-rpc-react`)
 
-```ts
-import { getUserProfile } from "./server/procedures";
+```tsx
+// app/users.tsx
+"use client";
 
-const [profile, error] = await getUserProfile({ id: "user_456" });
+import { useQuery } from "@explita/actyx-rpc-react";
+import { getUser } from "@/server/procedures";
 
-if (error) {
-  console.error("Failed to load profile:", error.message);
-} else {
-  console.log("Loaded profile:", profile.name);
+export function UserProfile({ id }: { id: string }) {
+  const {
+    data: user,
+    isLoading,
+    error,
+  } = useQuery(() => getUser({ id }), { queryKey: ["user", id] });
+
+  if (isLoading) return <p>Loading...</p>;
+  if (error) return <p>Error: {error.message}</p>;
+  return <h1>{user.name}</h1>;
 }
 ```
 
 ---
-
-## 💖 Support the Mission
-
-Actyx RPC is built to simplify building type-safe, distributed systems with minimal boilerplate. If it has helped you build better APIs faster, please consider supporting the project to ensure its continued growth and maintenance!
-
-<p align="left">
-  <a href="https://github.com/sponsors/explita">
-    <img src="https://img.shields.io/badge/Sponsor_on_GitHub-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white" />
-  </a>
-  <a href="https://ko-fi.com/explita">
-    <img src="https://img.shields.io/badge/Buy_Me_A_Coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white" />
-  </a>
-</p>
-
-### 🚀 Ways to Contribute
-
-- **Give us a ⭐**: It helps others discover the project.
-- **Join the Discussion**: Report [bugs](https://github.com/explita/actyx-rpc/issues) or suggest new [features](https://github.com/explita/actyx-rpc/discussions).
-- **Spread the Word**: Share your experience with Actyx RPC on social media.
-
-### 🙏 Our Amazing Supporters
-
-_A huge thank you to everyone helping us build the future of type-safe server actions!_
-
-[![Contributors](https://contrib.rocks/image?repo=explita/actyx-rpc)](https://github.com/explita/actyx-rpc/graphs/contributors)
-
-#
 
 ## License
 

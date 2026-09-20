@@ -38,9 +38,6 @@ const TodoList = () => {
     queryKey: ["todos"],
   });
   const qc = useQueryClient();
-  // const { data: todos } = client.todo.get.useSuspenseQuery({
-  //   queryKey: ["todos"],
-  // });
 
   function updateItem(id: string) {
     //optimistic ui update

@@ -14,7 +14,7 @@ For lists that load more data as the user scrolls or clicks a "Load More" button
 To fetch forward-only paginated data:
 
 ```tsx
-import { useInfiniteQuery } from "@explita/actyx-rpc/react";
+import { useInfiniteQuery } from "@explita/actyx-rpc-react";
 import { getFeedPosts } from "@/backend/procedures";
 
 function Feed() {
@@ -35,6 +35,7 @@ function Feed() {
       initialPageParam: undefined, // Start at the beginning
       getNextPageParam: (lastPage) => lastPage.nextCursor,
       queryKey: ["feed"],
+      staleTime: "5m", // Keep cached pages fresh across navigation
     }
   );
 

@@ -14,7 +14,7 @@ For lists requiring bi-directional scrolling/pagination (such as loading older i
 To fetch bi-directional paginated data:
 
 ```tsx
-import { usePaginatedQuery } from "@explita/actyx-rpc/react";
+import { usePaginatedQuery } from "@explita/actyx-rpc-react";
 import { getMessageHistory } from "@/backend/procedures";
 
 function ChatHistory({ channelId }) {

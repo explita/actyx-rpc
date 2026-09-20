@@ -16,7 +16,7 @@ These hooks attach a real-time transport stream on top of the `useInfiniteQuery`
 Combines `useInfiniteQuery` with `useWS` for bi-directional WebSocket-powered infinite lists.
 
 ```tsx
-import { useWSInfiniteQuery } from "@explita/actyx-rpc/react";
+import { useWSInfiniteQuery } from "@explita/actyx-rpc-react";
 import { getFeedPosts } from "@/backend/procedures";
 
 function LiveFeed() {
@@ -116,7 +116,7 @@ All cache mutation helpers (`remove`, `update`, `prepend`, `append`, `insert`, `
 Combines `useInfiniteQuery` with `useSSE` for one-way SSE-powered infinite lists.
 
 ```tsx
-import { useSSEInfiniteQuery } from "@explita/actyx-rpc/react";
+import { useSSEInfiniteQuery } from "@explita/actyx-rpc-react";
 import { getNotifications } from "@/backend/procedures";
 
 function NotificationFeed() {

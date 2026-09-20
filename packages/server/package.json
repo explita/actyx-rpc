@@ -1,0 +1,142 @@
+{
+  "name": "@explita/actyx-rpc",
+  "version": "0.9.0",
+  "author": "Explita",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "description": "Actyx RPC — type-safe RPC for composable server actions in TypeScript",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "actyx",
+    "rpc",
+    "typescript",
+    "action",
+    "procedure",
+    "nodejs"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./adapters/next": {
+      "import": "./dist/adapters/next/index.js",
+      "require": "./dist/adapters/next/index.js",
+      "types": "./dist/adapters/next/index.d.ts"
+    },
+    "./adapters/ws": {
+      "import": "./dist/adapters/ws/index.js",
+      "require": "./dist/adapters/ws/index.js",
+      "types": "./dist/adapters/ws/index.d.ts"
+    },
+    "./resolvers": {
+      "import": "./dist/resolvers/index.js",
+      "require": "./dist/resolvers/index.js",
+      "types": "./dist/resolvers/index.d.ts"
+    },
+    "./resolvers/arktype": {
+      "import": "./dist/resolvers/arktype/index.js",
+      "require": "./dist/resolvers/arktype/index.js",
+      "types": "./dist/resolvers/arktype/index.d.ts"
+    },
+    "./resolvers/joi": {
+      "import": "./dist/resolvers/joi/index.js",
+      "require": "./dist/resolvers/joi/index.js",
+      "types": "./dist/resolvers/joi/index.d.ts"
+    },
+    "./resolvers/valibot": {
+      "import": "./dist/resolvers/valibot/index.js",
+      "require": "./dist/resolvers/valibot/index.js",
+      "types": "./dist/resolvers/valibot/index.d.ts"
+    },
+    "./resolvers/yup": {
+      "import": "./dist/resolvers/yup/index.js",
+      "require": "./dist/resolvers/yup/index.js",
+      "types": "./dist/resolvers/yup/index.d.ts"
+    },
+    "./resolvers/zod": {
+      "import": "./dist/resolvers/zod/index.js",
+      "require": "./dist/resolvers/zod/index.js",
+      "types": "./dist/resolvers/zod/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/explita/actyx-rpc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/explita/actyx-rpc/issues"
+  },
+  "homepage": "https://actyx.explita.ng",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "node scripts/gen-version.js && npm run clean && tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@types/node": "^25.0.8",
+    "arktype": "^2",
+    "ioredis": "^5",
+    "joi": "^18",
+    "next": "^16",
+    "rimraf": "^6.1.2",
+    "typescript": "^7.0.2",
+    "valibot": "^1",
+    "yup": "^1",
+    "zod": "^4"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1",
+    "arktype": "^2",
+    "ioredis": "^5",
+    "joi": "^18",
+    "next": ">=16.0.0",
+    "valibot": "^1",
+    "yup": "^1",
+    "zod": "^4"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/api": {
+      "optional": true
+    },
+    "arktype": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "joi": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "valibot": {
+      "optional": true
+    },
+    "yup": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

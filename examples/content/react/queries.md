@@ -14,7 +14,7 @@ Actyx RPC provides hooks for fetching, parallel loading, and caching remote serv
 Fetch and monitor single procedure states:
 
 ```tsx
-import { useQuery } from "@explita/actyx-rpc/react";
+import { useQuery } from "@explita/actyx-rpc-react";
 import { getUser } from "@/backend/procedures";
 
 function UserProfile({ userId }) {
@@ -131,7 +131,7 @@ const { data } = useQuery(getSettings, {
 For applications leveraging React Suspense boundaries:
 
 ```tsx
-import { useSuspenseQuery } from "@explita/actyx-rpc/react";
+import { useSuspenseQuery } from "@explita/actyx-rpc-react";
 import { Suspense } from "react";
 
 function TodoList() {
@@ -164,7 +164,7 @@ export default function Page() {
 Fetch multiple independent queries in parallel with a single hook call. Uses rest parameters for full tuple type inference:
 
 ```tsx
-import { useQueries } from "@explita/actyx-rpc/react";
+import { useQueries } from "@explita/actyx-rpc-react";
 import { getTodos, getUser } from "@/backend/procedures";
 
 const [todosResult, userResult] = useQueries(
@@ -193,7 +193,7 @@ Each config accepts all `useQuery` options; `queryKey` is optional (omitted keys
 Track whether any query is currently fetching globally or by a specific key prefix:
 
 ```tsx
-import { useIsFetching } from "@explita/actyx-rpc/react";
+import { useIsFetching } from "@explita/actyx-rpc-react";
 
 function GlobalLoader() {
   const isFetching = useIsFetching();

@@ -105,7 +105,7 @@ setPages(oldPages => oldPages.map(page => ...));
 You can also perform mutations outside of hooks directly on `QueryClient` using a `queryKey`:
 
 ```typescript
-import { useQueryClient } from "@explita/actyx-rpc/react";
+import { useQueryClient } from "@explita/actyx-rpc-react";
 
 const queryClient = useQueryClient();
 

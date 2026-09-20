@@ -6,10 +6,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig({
+  test: {
+    environment: "jsdom",
+  },
   resolve: {
     alias: {
-      "react": path.resolve(__dirname, "examples/node_modules/react"),
-      "react-dom": path.resolve(__dirname, "examples/node_modules/react-dom"),
+      "@explita/actyx-rpc": path.resolve(__dirname, "packages/server/src"),
+      "@explita/actyx-rpc-react": path.resolve(__dirname, "packages/react/src"),
     },
   },
 });

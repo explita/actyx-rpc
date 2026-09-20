@@ -5,7 +5,7 @@ title: React Utilities
 
 # React Utilities
 
-Additional helper hooks and path imports to streamline state tracking and client bundler optimization.
+Additional helper hooks and client utilities to streamline state tracking and client-side streaming.
 
 ---
 
@@ -14,7 +14,7 @@ Additional helper hooks and path imports to streamline state tracking and client
 Track active mutations globally or filter specifically by a mutation key. This is useful for displaying global syncing spinners, loading bars, or button disables.
 
 ```tsx
-import { useIsMutating } from "@explita/actyx-rpc/react";
+import { useIsMutating } from "@explita/actyx-rpc-react";
 
 function GlobalSpinner() {
   const isMutating = useIsMutating();
@@ -35,7 +35,7 @@ function GlobalSpinner() {
 Track whether any query is currently fetching globally or filtered by a specific key prefix:
 
 ```tsx
-import { useIsFetching } from "@explita/actyx-rpc/react";
+import { useIsFetching } from "@explita/actyx-rpc-react";
 
 function GlobalLoader() {
   const isFetching = useIsFetching();
@@ -53,10 +53,10 @@ function GlobalLoader() {
 
 ## `getCachedQueryClient()`
 
-Access the active `QueryClient` outside of React components (such as within external SDK methods, event handlers, or vanilla JS utilities) without violating React hook rules:
+Access the active `QueryClient` outside of React components (such as within external event handlers or vanilla JS utilities) without violating React hook rules:
 
 ```ts
-import { getCachedQueryClient } from "@explita/actyx-rpc/react";
+import { getCachedQueryClient } from "@explita/actyx-rpc-react";
 
 export function handleExternalEvent() {
   const queryClient = getCachedQueryClient();
@@ -68,16 +68,18 @@ export function handleExternalEvent() {
 
 ---
 
-## Client-Only Subpaths
+## Standalone Streaming Clients (`SSEClient` & `WSClient`)
 
-When developing for browser environments (such as Next.js Client Components) or building single-page applications, you can import clients directly from subpaths. 
-
-This prevents your client bundlers from pulling in node-only/server-side dependencies (like `fs`, `node:async_hooks`, etc.), keeping your JS bundle size minimal.
+The `@explita/actyx-rpc-react` package includes lightweight, zero-dependency browser clients for SSE and WebSocket connections that can be used directly with or without React hooks:
 
 ```tsx
-// Safely import SSEClient without pulling in server/node code:
-import { SSEClient } from "@explita/actyx-rpc/client/sse";
+import { SSEClient, WSClient } from "@explita/actyx-rpc-react";
 
-// Safely import WebSocket client:
-import { WSClient } from "@explita/actyx-rpc/client/ws";
+// Native browser SSE client with typed events and reconnect handling:
+const sse = new SSEClient("/api/rpc/sse");
+sse.onMessage((data) => console.log("SSE update:", data));
+
+// Native browser WebSocket client:
+const ws = new WSClient("wss://example.com/api/ws");
+ws.send("chat:join", { roomId: "general" });
 ```

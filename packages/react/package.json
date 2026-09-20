@@ -1,0 +1,59 @@
+{
+  "name": "@explita/actyx-rpc-react",
+  "version": "0.1.0",
+  "author": "Explita",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "description": "React client for Actyx RPC — type-safe queries, mutations, streaming, and server actions",
+  "keywords": [
+    "actyx",
+    "rpc",
+    "typescript",
+    "react",
+    "hooks",
+    "query",
+    "mutation",
+    "sse",
+    "websocket"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/explita/actyx-rpc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/explita/actyx-rpc/issues"
+  },
+  "homepage": "https://actyx.explita.ng",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "node scripts/gen-version.js && npm run clean && tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.8",
+    "@types/react": "^19",
+    "react": "^19",
+    "rimraf": "^6.1.2",
+    "typescript": "^7.0.2"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
+}

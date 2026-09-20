@@ -1,10 +1,9 @@
 import { procedure } from "@/lib/rpc/init";
-import { createRouteHandler } from "@/dist/adapters/next";
 import fs from "fs";
 import path from "path";
 import { Readable } from "stream";
 
-const streamHandler = procedure.webRoute(async ({ input, ctx }, req) => {
+export const POST = procedure.webRoute(async ({ input, ctx }, req) => {
   const stream = req.body;
   if (!stream) {
     return new Response(
@@ -43,5 +42,3 @@ const streamHandler = procedure.webRoute(async ({ input, ctx }, req) => {
     },
   };
 });
-
-export const POST = createRouteHandler(streamHandler);
