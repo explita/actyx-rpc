@@ -35,6 +35,8 @@ import type {
   Prettify,
   QueryResult,
   SchemaResolver,
+  SchemaOrStandard,
+  InferSchemaOutput,
   SSEEvent,
 } from "./misc.js";
 
@@ -140,19 +142,28 @@ export interface ProcedureInstance<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     "description" | "summary"
   >;
-  output: (
-    resolver: SchemaResolver<any>,
+  output: <S extends SchemaOrStandard<any>>(
+    resolver: S,
   ) => Omit<
     ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
     "output" | "description" | "summary"
   >;
 
   // Validation
-  input: <T, NextICtx extends InputCtx>(
-    resolver: SchemaResolver<T>,
+  input: <S extends SchemaOrStandard<any>, NextICtx extends InputCtx>(
+    resolver: S,
     options?: NextICtx,
   ) => Omit<
-    ProcedureInstance<Ctx, TEnrich, TMeta, T, NextICtx, GIM, TName, TMocked>,
+    ProcedureInstance<
+      Ctx,
+      TEnrich,
+      TMeta,
+      InferSchemaOutput<S>,
+      NextICtx,
+      GIM,
+      TName,
+      TMocked
+    >,
     "input" | "extend" | "middleware" | "plugin" | "name" | "meta"
   >;
   invalidate: (

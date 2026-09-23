@@ -106,17 +106,15 @@ const getData = proc
   .name("getData")
   .meta({ ahahahah: "none" })
   .input(
-    zodResolver(
-      z.object({
-        name: z.string().min(2, { error: "required" }),
-        id: z.string(),
-        contact: z.array(z.object({ name: z.string(), email: z.string() })),
-        hobbies: z.array(z.string()),
-        settings: z.object({
-          showLogo: z.boolean(),
-        }),
+    z.object({
+      name: z.string().min(2, { error: "required" }),
+      id: z.string(),
+      contact: z.array(z.object({ name: z.string(), email: z.string() })),
+      hobbies: z.array(z.string()),
+      settings: z.object({
+        showLogo: z.boolean(),
       }),
-    ),
+    }),
     { mode: "strict" },
   )
   // .authorize(async (ctx) => {
@@ -196,13 +194,11 @@ const getData = proc
   //   };
   // })
   .output(
-    zodResolver(
-      z.object({
-        id: z.coerce.string(),
-        name: z.string(),
-        date: z.string(),
-      }),
-    ),
+    z.object({
+      id: z.coerce.string(),
+      name: z.string(),
+      date: z.string(),
+    }),
   )
   .query(async ({ ctx, input }, id: string, name: string) => {
     return {
@@ -242,23 +238,21 @@ const streamData = proc
 const arkSchema = type({ name: "string", age: "number" });
 const arktypeData = proc
   .name("arktypeData")
-  .input(arktypeResolver(arkSchema))
+  .input(arkSchema)
   .query(async ({ input }) => ({ success: true, input }));
 
 const valibotData = proc
   .name("valibotData")
-  .input(valibotResolver(v.object({ title: v.string(), active: v.boolean() })))
+  .input(v.object({ title: v.string(), active: v.boolean() }))
   .query(async ({ input }) => ({ success: true, input }));
 
 const yupData = proc
   .name("yupData")
   .input(
-    yupResolver(
-      yup.object({
-        email: yup.string().email().required(),
-        code: yup.number(),
-      }),
-    ),
+    yup.object({
+      email: yup.string().email().required(),
+      code: yup.number(),
+    }),
   )
   .query(async ({ input }) => ({ success: true, input }));
 

@@ -5,13 +5,67 @@ title: Input Resolvers & Validation
 
 # Input Resolvers & Validation
 
-Actyx RPC leverages adapter resolvers to support popular schema validation libraries out-of-the-box, ensuring type safety both on client-side compilation and server-side execution.
+Actyx RPC natively supports the [@standard-schema](https://standardschema.dev) specification. You can pass schemas from **Zod (v3.24+)**, **Valibot (v1+)**, or **ArkType (v2+)** directly into `.input()` and `.output()` without any wrapper functions.
+
+Legacy and non-Standard validation libraries (like Joi and Yup) continue to work seamlessly via resolver adapters.
 
 ---
 
-## Supported Resolvers
+## Native Standard Schemas (No Resolver Needed)
+
+Modern schema validation libraries implementing the `@standard-schema` specification work directly:
 
 ### Zod
+```ts
+import { z } from "zod";
+
+const action = procedure
+  .input(
+    z.object({
+      name: z.string().min(1, "Name is required"),
+      description: z.string().optional(),
+    }),
+  )
+  .mutation(({ input }) => {
+    return { name: input.name, description: input.description };
+  });
+```
+
+### Valibot
+```ts
+import * as v from "valibot";
+
+const action = procedure
+  .input(
+    v.object({
+      name: v.pipe(v.string(), v.minLength(1, "Name is required")),
+      description: v.optional(v.string()),
+    }),
+  )
+  .mutation(({ input }) => { ... });
+```
+
+### ArkType
+```ts
+import { type } from "arktype";
+
+const action = procedure
+  .input(
+    type({
+      name: "string > 1",
+      "description?": "string",
+    }),
+  )
+  .mutation(({ input }) => { ... });
+```
+
+---
+
+## Resolver Adapters (Backward Compatibility & Non-Standard Libraries)
+
+If you are using existing resolver wrappers, or validation libraries that do not implement `@standard-schema` (such as Joi or Yup), use Actyx RPC's dedicated resolver adapters:
+
+### Zod Resolver
 ```ts
 import { z } from "zod";
 import { zodResolver } from "@explita/actyx-rpc/resolvers/zod";

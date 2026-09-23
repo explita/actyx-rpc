@@ -54,6 +54,9 @@ export type ResolverResult<T> =
   | { success: true; data: T }
   | { success: false; errors: Record<string, string>; message?: string };
 
+export type { StandardSchemaV1 } from "./standard-schema.js";
+import type { StandardSchemaV1 } from "./standard-schema.js";
+
 /**
  * A schema resolver wraps any validation library into a single unified
  * interface. Use `zodResolver()` or `resolver()` from `./resolvers` to
@@ -65,6 +68,35 @@ export type SchemaResolver<T = unknown> = {
   ) => Promise<ResolverResult<T>> | ResolverResult<T>;
   toJsonSchema?: () => Record<string, unknown>;
 };
+
+/**
+ * Either a modern Standard Schema V1 instance (Zod v3.24+, Valibot, ArkType)
+ * or a classic Actyx RPC SchemaResolver adapter.
+ */
+export type SchemaOrStandard<T = any> =
+  | SchemaResolver<T>
+  | StandardSchemaV1<any, T>;
+
+/**
+ * Inactive/fallback type inference for schemas and resolvers.
+ */
+export type InferSchemaOutput<S> = S extends StandardSchemaV1<any, infer Output>
+  ? Output
+  : S extends SchemaResolver<infer Output>
+    ? Output
+    : S extends {
+          parse: (
+            ...args: any[]
+          ) =>
+            | ResolverResult<infer Output>
+            | Promise<ResolverResult<infer Output>>;
+        }
+      ? Output
+      : unknown;
+
+export type InferSchemaInput<S> = S extends StandardSchemaV1<infer Input, any>
+  ? Input
+  : InferSchemaOutput<S>;
 
 export type InputMode = "strict" | "form" | "partial" | "patch";
 

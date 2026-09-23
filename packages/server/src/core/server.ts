@@ -31,15 +31,11 @@ import type {
   ProcedureProps,
 } from "../types/procedure.js";
 import { withInvalidation } from "./cache/with-invalidation.js";
-import type {
-  InputMode,
-  InputCtx,
-  SchemaResolver,
-  Prettify,
-} from "../types/misc.js";
+import type { InputMode, InputCtx, Prettify } from "../types/misc.js";
 import { RedisCache } from "./cache/redis-cache.js";
 import { getContext } from "./helpers/get-context.js";
 import { webRouter } from "./helpers/web-router.js";
+import { toSchemaResolver } from "./helpers/to-schema-resolver.js";
 import { parseFrameworkError } from "../lib/parse-framework-error.js";
 
 export function createProcedure<
@@ -220,7 +216,7 @@ export function createProcedure<
       output: (resolver) => {
         return procedureBuilder({
           ...nextConfig,
-          outputResolver: resolver,
+          outputResolver: toSchemaResolver(resolver),
         });
       },
 
@@ -256,10 +252,10 @@ export function createProcedure<
         return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>(nextConfig);
       },
 
-      input<T, NextICtx extends InputCtx>(r: SchemaResolver<T>) {
-        return procedureBuilder<T, Ctx, TLocalMeta, NextICtx, TName>({
+      input(r: any, options?: any) {
+        return procedureBuilder({
           ...config,
-          resolver: r,
+          resolver: toSchemaResolver(r),
         });
       },
 
