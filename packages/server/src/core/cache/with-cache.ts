@@ -1,10 +1,5 @@
 import { CacheKeyException } from "../../lib/error.js";
-import {
-  hashKey,
-  isErrorResponse,
-  parseWindow,
-  toBuffer,
-} from "../../lib/utils.js";
+import { isErrorResponse, parseWindow, toBuffer } from "../../lib/utils.js";
 import { Compressor } from "../compression/compressor.js";
 import type { CacheAdapter, WithCacheOptions } from "./types.js";
 
@@ -14,11 +9,9 @@ export function withCache<TInput, TOutput>(
     ...args: any[]
   ) => Promise<TOutput>,
   cache: CacheAdapter, // ← Works with any CacheAdapter
-  options?: WithCacheOptions<any, TInput>,
+  options: WithCacheOptions<any, TInput>,
 ): (opts: { ctx: any; input: TInput }, ...args: any[]) => Promise<TOutput> {
-  const getCacheKey =
-    options?.key ??
-    ((opts: { ctx: any; input: TInput }) => JSON.stringify(opts));
+  const getCacheKey = options.key;
   const ttlValue = options?.ttl;
   const ttl = ttlValue ? parseWindow(ttlValue) : undefined;
 
@@ -47,7 +40,7 @@ export function withCache<TInput, TOutput>(
     opts: { ctx: any; input: TInput },
     ...args: any[]
   ): Promise<TOutput> => {
-    let cacheKey = await getCacheKey(opts);
+    const cacheKey = await getCacheKey(opts);
 
     if (!cacheKey) {
       throw new CacheKeyException("Cache key cannot be empty", {
@@ -55,7 +48,6 @@ export function withCache<TInput, TOutput>(
         statusCode: 400,
       });
     }
-    cacheKey = options?.key ? cacheKey : hashKey(cacheKey);
 
     // These now work with any adapter (sync or async)
     const cached = await cache.get<TOutput>(cacheKey);

@@ -148,6 +148,48 @@ function PostDetail({ postId }: { postId: string }) {
 }
 ```
 
+### 3. Or Use the Client Proxy & API Endpoint
+
+If you prefer calling your procedures via an HTTP API endpoint (`/api/rpc/...`) rather than direct Server Action imports:
+
+```ts
+// 1. Define your router (backend/router.ts)
+import { createRouter } from "@explita/actyx-rpc";
+import { getPost } from "./procedures";
+
+export const appRouter = createRouter({
+  posts: createRouter({
+    get: getPost,
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+```
+
+```ts
+// 2. Mount the router in Next.js App Router (app/api/rpc/[...rpc]/route.ts)
+import { createHandler } from "@explita/actyx-rpc/adapters/next";
+import { appRouter } from "@/backend/router";
+
+export const { GET, POST } = createHandler(appRouter);
+```
+
+```tsx
+// 3. Initialize the client proxy (lib/rpc.ts)
+import { createClient } from "@explita/actyx-rpc-react";
+import type { AppRouter } from "@/backend/router";
+
+export const rpc = createClient<AppRouter>({ baseUrl: "/api/rpc" });
+
+// 4. Call procedures directly or with hooks anywhere in your app:
+function MyComponent() {
+  const { data: post, isLoading } = rpc.posts.get.useQuery({ id: "post_1" });
+
+  if (isLoading) return <div>Loading...</div>;
+  return <h1>{post?.title}</h1>;
+}
+```
+
 ---
 
 ## Documentation Sections

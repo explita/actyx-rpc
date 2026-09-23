@@ -124,6 +124,36 @@ const { data } = useQuery(getSettings, {
   initialData: { name: "Default Company", branches: [] },
 });
 ```
+
+### Optimistic Array Mutation Helpers
+
+When your query resolves to an array (or unwraps to an array), `useQuery` automatically provides built-in optimistic mutation helpers directly on the returned query object:
+
+```tsx
+const todos = useQuery(getTodos);
+
+// 1. Append one or multiple items to the end:
+const rollback = todos.append({ id: "new-1", text: "New Task" });
+
+// 2. Prepend to the beginning:
+todos.prepend({ id: "new-0", text: "Urgent Task" });
+
+// 3. Insert at a specific index:
+todos.insert(1, { id: "new-mid", text: "Priority Task" });
+
+// 4. Update an item by index or predicate function:
+todos.update(
+  (item) => item.id === "new-1",
+  (item) => ({ ...item, completed: true })
+);
+
+// 5. Remove an item by index or predicate function:
+todos.remove((item) => item.id === "new-1");
+
+// Each array helper returns a rollback() function to undo optimistic changes if a mutation fails:
+// if (mutationFailed) rollback();
+```
+
 ---
 
 ## `useSuspenseQuery`

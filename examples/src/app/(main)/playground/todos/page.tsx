@@ -101,7 +101,8 @@ export default function Page() {
 
   const { mutate, isPending } = useMutation(addTodo, {
     mutationKey: ["addTodo"],
-    onMutate: () => {
+    onSuccess(data) {},
+    onMutate: (input) => {
       const rollback = qc.snapshot("todos");
 
       qc.append<Todo>(["todos"], {
@@ -187,7 +188,7 @@ export default function Page() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="h-[60px] bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse"
+                className="h-15 bg-slate-100 dark:bg-slate-800 rounded-xl animate-pulse"
               />
             ))}
           </div>

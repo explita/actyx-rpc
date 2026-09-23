@@ -11,7 +11,7 @@ describe("Infrastructure: Caching", () => {
     let callCount = 0;
     const proc = procedure
       .name("cached-query")
-      .cache({ ttl: 1000 })
+      .cache({ key: () => "cached-query", ttl: 1000 })
       .query(async () => {
         callCount++;
         return "data";
@@ -29,7 +29,7 @@ describe("Infrastructure: Caching", () => {
     let value = 1;
     const getVal = procedure
       .name("get-with-tag")
-      .cache({ tags: ["data-tag"], ttl: 10000 })
+      .cache({ key: () => "get-with-tag", tags: ["data-tag"], ttl: 10000 })
       .query(async () => value);
 
     const increment = procedure

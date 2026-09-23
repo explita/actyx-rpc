@@ -4,10 +4,11 @@ import { procedure } from "./init";
 import { zodResolver } from "@/dist/resolvers/zod";
 import { z } from "zod";
 
-type Post = {
+export type Post = {
   id: string;
   title: string;
   excerpt: string;
+  _tag?: string;
 };
 
 // Generate 50 mock posts

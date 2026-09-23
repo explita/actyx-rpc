@@ -216,7 +216,7 @@ function InfiniteSection() {
       )}
 
       <div className="space-y-2 max-h-72 overflow-auto pr-1">
-        {data.map((post: any, i) => (
+        {data.map((post, i) => (
           <PostRow
             key={post.id}
             post={post}
@@ -497,6 +497,7 @@ function QueriesSection() {
         return data.map((i) => i.id);
       },
     },
+
     {
       proc: () => getPosts({ limit: 3 }),
       queryKey: ["posts-for-queries"],
@@ -504,7 +505,7 @@ function QueriesSection() {
       initialData: [],
     },
   );
-  d1.data;
+
   return (
     <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/30 p-6 space-y-4">
       <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">

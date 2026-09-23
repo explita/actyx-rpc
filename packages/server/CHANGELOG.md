@@ -3,6 +3,25 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-09-23
+
+### Added
+
+- **Server-Only `webRoute` Type Isolation**:
+  - Procedures configured with `.webRoute()` now explicitly tag their return signature with `readonly _def?: { type: "webRoute" }`.
+  - Enables client proxy typings and TypeScript mapped types to automatically omit server-only endpoints from client-side autocomplete and typecheck.
+- **Next.js 15+ Async Route & Search Parameters**:
+  - Full support for Next.js 15/16 async `options.params` and `options.searchParams` inside `.webRoute()` terminal handlers.
+
+### Fixed
+
+- **Procedure Input Brand Preservation**:
+  - Restored `readonly _input?: TInput;` brand on `ProcedureConfig` to guarantee exact input type discrimination between zero-argument and input-bearing procedures.
+- **Procedure Resolver & Body Parser Modularization**:
+  - Modularized request resolution and payload extraction for enhanced maintainability and tree-shaking.
+
+---
+
 ## [0.9.0] - 2026-09-20
 
 ### Changed (Breaking Changes)
@@ -23,7 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
     - `input.params`: Dynamic route parameters (e.g. `[id]` -> `input.params.id`).
     - `input.query`: URL search parameters (e.g. `?page=1` -> `input.query.page`).
   - Enables dedicated, type-safe schema validation for path and query parameters without risk of query parameter injection.
-- **Direct Standalone Route Handler Export**: Procedures defined with `.webRoute()` implement the standard Web / Next.js App Router handler signature `(req: Request, context?: any) => Promise<Response>` natively. They can now be directly exported as `export const GET = procedure.webRoute(...)` and `export const POST = procedure.input(...).webRoute(...)` without needing `createRouteHandler(...)` wrappers.
+- **Direct Standalone Route Handler Export**: Procedures defined with `.webRoute()` implement the standard Web / Next.js App Router handler signature `(req: Request, context?: any) => Promise<Response>` natively. They can now be directly exported as `export const GET = procedure.webRoute(...)` and `export const POST = procedure.input(...).webRoute(...)` without needing `createHandler(...)` wrappers.
 
 ---
 

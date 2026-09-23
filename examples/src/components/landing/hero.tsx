@@ -8,7 +8,7 @@ import { VERSION } from "@/dist/version";
 export function Hero() {
   return (
     <section className="relative overflow-hidden pt-20 pb-16 md:pt-32 md:pb-24 flex flex-col items-center justify-center text-center px-4">
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-[500px] bg-linear-to-b from-blue-500/10 via-cyan-500/5 to-transparent blur-3xl pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-125 bg-linear-to-b from-blue-500/10 via-cyan-500/5 to-transparent blur-3xl pointer-events-none" />
 
       <div className="absolute -top-10 -left-10 w-72 h-72 bg-blue-300/10 dark:bg-blue-950/20 rounded-full blur-3xl pointer-events-none animate-pulse" />
       <div className="absolute top-20 right-0 w-80 h-80 bg-teal-300/10 dark:bg-teal-950/20 rounded-full blur-3xl pointer-events-none animate-pulse duration-5000" />
@@ -21,11 +21,10 @@ export function Hero() {
           />
           <span>Actyx RPC v{VERSION} is officially here</span>
         </div>
-
         <h1 className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight leading-tight sm:leading-none text-slate-900 dark:text-white">
           Type-Safe RPC.
           <span className="block mt-4 bg-clip-text text-transparent bg-linear-to-r from-blue-600 via-cyan-600 to-teal-500 dark:from-blue-400 dark:via-cyan-400 dark:to-teal-400">
-            Composable Server Actions.
+            API framework for TypeScript
           </span>
         </h1>
 
@@ -34,7 +33,6 @@ export function Hero() {
           boilerplate, and a clean, composable API. Bridges client-side queries
           and server-side execution seamlessly.
         </p>
-
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
           <Link
             href="/docs"
@@ -55,7 +53,6 @@ export function Hero() {
             />
           </Link>
         </div>
-
         <div className="pt-10 flex flex-wrap items-center justify-center gap-y-4 gap-x-8 text-xs font-semibold text-slate-500 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-blue-500" />

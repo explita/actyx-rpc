@@ -60,6 +60,34 @@ export async function nextAdapter() {
     };
   } catch {}
 
+  try {
+    Object.defineProperty(h, Symbol.for("nodejs.util.inspect.custom"), {
+      value: function () {
+        try {
+          return Object.fromEntries(this.entries?.() ?? []);
+        } catch {
+          return "[Headers]";
+        }
+      },
+      configurable: true,
+      writable: true,
+    });
+  } catch {}
+
+  try {
+    Object.defineProperty(c, Symbol.for("nodejs.util.inspect.custom"), {
+      value: function () {
+        try {
+          return this.getAll?.() ?? [];
+        } catch {
+          return "[Cookies]";
+        }
+      },
+      configurable: true,
+      writable: true,
+    });
+  } catch {}
+
   return {
     ip,
     host,

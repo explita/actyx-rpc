@@ -1,16 +1,21 @@
 import { useEffect, useId, useRef } from "react";
 import { useQuery } from "./use-query.js";
-import { UseQueryOpts, Unwrap, UseSuspenseQueryResult } from "../types/main.js";
-import { ErrorResponse } from "../types/main.js";
+import {
+  UseQueryOpts,
+  Unwrap,
+  UseSuspenseQueryResult,
+  ExtractProcOutput,
+} from "../types/main.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 
 export function useSuspenseQuery<
-  TOutput,
+  TProc extends (...args: any[]) => Promise<any>,
+  TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  proc: TProc,
   opts?: Omit<
     UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData>,
     "initialData" | "enabled"
@@ -27,10 +32,11 @@ export function useSuspenseQuery<
         .join("|")
     : `__local__${localId}`;
 
-  const result = useQuery<TOutput, TQueryKey, TUnwrap, undefined, TSelectData>(
-    proc,
-    { ...opts, enabled: true, initialData: undefined },
-  );
+  const result = useQuery(proc, {
+    ...opts,
+    enabled: true,
+    initialData: undefined,
+  });
 
   // Track whether useQuery has initiated its first fetch via useEffect.
   // On the very first render, useQuery's fetch hasn't started yet (effects are

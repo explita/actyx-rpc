@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery } from "./use-infinite-query.js";
 import { useWS } from "./use-ws.js";
-import type { InfiniteQueryPage, WSAdapterOptions } from "../types/main.js";
-import type { QueryResult } from "../types/misc.js";
+import type {
+  ExtractInfiniteItem,
+  ExtractInfinitePage,
+  WSAdapterOptions,
+} from "../types/main.js";
 
 export function useWSInfiniteQuery<
-  TFullPage extends InfiniteQueryPage<any> = InfiniteQueryPage<any>,
-  TInput = any,
-  TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
+  TProc extends (...args: any[]) => Promise<any>,
+  TFullPage = ExtractInfinitePage<TProc>,
+  TPage = ExtractInfiniteItem<TFullPage>,
+  TInput = Parameters<TProc>[0],
   TQueryKey extends unknown[] = unknown[],
   TData = TPage,
-  TArgs extends unknown[] = [],
+  TArgs extends unknown[] = Parameters<TProc> extends [any, ...infer Rest]
+    ? Rest
+    : [],
 >(
-  queryProcedure: (
-    input: TInput,
-    ...args: TArgs
-  ) => Promise<QueryResult<TFullPage>>,
+  queryProcedure: TProc,
   {
     queryOpts,
     onData,
@@ -25,6 +28,7 @@ export function useWSInfiniteQuery<
     ...wsOpts
   }: WSAdapterOptions<TInput, TData, TPage, TQueryKey, TFullPage, TArgs>,
 ) {
+
   const optsRef = useRef({ onData, arrange });
   useEffect(() => {
     optsRef.current = { arrange, onData };

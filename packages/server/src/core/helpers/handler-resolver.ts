@@ -1,4 +1,4 @@
-import { rpcStorage } from "./rpc-storage.js";
+import { rpcStorage, httpStorage } from "./rpc-storage.js";
 import {
   getFinalStatusCode,
   isErrorResponse,
@@ -52,9 +52,26 @@ export function handlerResolver<O, P = any>(
       handlerName: config.name,
     };
 
-    const baseCtx = {
+    // Ambient HTTP context resolution (from httpStorage or caller binding)
+    const httpScope = httpStorage.getStore();
+    const isFirstArgRequest =
+      typeof Request !== "undefined" && originalArgs[0] instanceof Request;
+    const req: Request | undefined =
+      httpScope?.req ??
+      (this as any)?.req ??
+      (isFirstArgRequest ? (originalArgs[0] as Request) : undefined);
+
+    const context: any =
+      httpScope?.context ??
+      (this as any)?.context ??
+      (this as any)?.options ??
+      (isFirstArgRequest ? originalArgs[1] : undefined);
+
+    const baseCtx: Record<string, any> = {
       handlerName: config.name,
       meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
+      ...(req ? { req } : {}),
+      ...(context !== undefined ? { context } : {}),
     };
 
     let currentCtx: any = baseCtx;
@@ -67,7 +84,10 @@ export function handlerResolver<O, P = any>(
       if (existingCtx) {
         rootCtx = { ok: true, ctx: existingCtx };
       } else {
-        rootCtx = await (opts.createContext as any)(baseCtx, ...originalArgs);
+        rootCtx =
+          req !== undefined || context !== undefined
+            ? await (opts.createContext as any)(baseCtx, req, context)
+            : await (opts.createContext as any)(baseCtx, ...originalArgs);
       }
 
       if (!rootCtx.ok) {
@@ -76,7 +96,8 @@ export function handlerResolver<O, P = any>(
             reason: rootCtx.reason,
             ctx: { ...baseCtx, ...rootCtx },
           },
-          ...originalArgs,
+          req ?? originalArgs[0],
+          context ?? originalArgs[1],
         );
 
         if (customError) {
@@ -105,7 +126,8 @@ export function handlerResolver<O, P = any>(
       if (config.authorize) {
         const authResult = await (config.authorize as any)(
           currentCtx,
-          ...originalArgs,
+          req ?? originalArgs[0],
+          context ?? originalArgs[1],
         );
         if (
           authResult === false ||
@@ -131,8 +153,8 @@ export function handlerResolver<O, P = any>(
           config.rateLimit.options!,
           input,
           currentCtx,
-          originalArgs[0] as any,
-          originalArgs[1],
+          (req ?? originalArgs[0]) as any,
+          context ?? originalArgs[1],
         );
 
         if (!result.allowed) return [null, { ...baseError, ...result.error }];
@@ -182,9 +204,10 @@ export function handlerResolver<O, P = any>(
         if (config.type === "webRoute") {
           input = payload ?? {};
         } else {
-          input = {};
+          const rawData = normalizeInput(payload);
+          input = rawData ?? {};
           if (payload !== undefined && payload !== null) {
-            args = [payload as any, ...args];
+            args = [rawData as any, ...args];
           }
         }
       }
@@ -195,12 +218,27 @@ export function handlerResolver<O, P = any>(
             ...rootCtx.ctx,
             meta: baseCtx.meta,
           },
-          ...originalArgs,
+          req ?? originalArgs[0],
+          context ?? originalArgs[1],
         )) ?? {};
-      let enrichedData = {
-        ...enrichment,
-        ...(typeof input === "object" && input !== null ? input : {}),
-      };
+
+      const isBinary =
+        (typeof Blob !== "undefined" && input instanceof Blob) ||
+        (typeof File !== "undefined" && input instanceof File) ||
+        (typeof FormData !== "undefined" && input instanceof FormData);
+
+      let enrichedData =
+        !isBinary &&
+        typeof input === "object" &&
+        input !== null &&
+        !Array.isArray(input)
+          ? {
+              ...enrichment,
+              ...input,
+            }
+          : input !== undefined
+            ? input
+            : enrichment;
 
       // Run plugin.validate() hooks
       for (const plugin of config.plugins ?? []) {

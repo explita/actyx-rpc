@@ -17,8 +17,16 @@ export * from "./client/index.js";
 
 export type {
   InfiniteQueryPage,
+  ExtractInfinitePage,
+  ExtractInfiniteItem,
+  ExtractProcOutput,
+  ExtractProcInput,
+  ExtractTupleData,
+  IsPaginated,
+  ExtractPaginatedItem,
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
+
   UseMutationOpts,
   UseMutationResult,
   MutationStatus,

@@ -6,7 +6,7 @@ import { parseFrameworkError } from "../../lib/parse-framework-error.js";
  * formatted for the Server-Sent Events protocol.
  */
 export function createSSEResponse<TEventData = any>(
-  iterator: AsyncIterable<SSEEvent<TEventData>>,
+  iterator: AsyncIterable<SSEEvent<TEventData, any>>,
 ) {
   const encoder = new TextEncoder();
   let isClosed = false;

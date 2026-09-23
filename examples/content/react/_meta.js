@@ -1,5 +1,6 @@
 export default {
   setup: "Setup & Provider",
+  "client-proxy": "Client Proxy SDK",
   queries: "Queries & Parallel Fetching",
   "infinite-queries": "Infinite Queries",
   "paginated-queries": "Paginated Queries",

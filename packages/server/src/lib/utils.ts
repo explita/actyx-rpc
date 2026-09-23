@@ -3,8 +3,91 @@ import crypto from "crypto";
 import type { CacheEntry, WindowTime } from "../core/cache/types.js";
 import type { ProcedureProps } from "../types/procedure.js";
 
+export function convertNumericKeysToArrays(val: any): any {
+  if (typeof val !== "object" || val === null) return val;
+  if (
+    val instanceof Blob ||
+    val instanceof FormData ||
+    (typeof File !== "undefined" && val instanceof File)
+  ) {
+    return val;
+  }
+  if (Array.isArray(val)) return val.map(convertNumericKeysToArrays);
+  const processed: any = {};
+  for (const [k, v] of Object.entries(val)) {
+    processed[k] = convertNumericKeysToArrays(v);
+  }
+  const keys = Object.keys(processed);
+  if (keys.length === 0) return processed;
+  const isNumeric = keys.every((k) => {
+    const num = Number(k);
+    return Number.isInteger(num) && num >= 0 && String(num) === k;
+  });
+  if (isNumeric) {
+    const max = Math.max(...keys.map(Number));
+    const arr = new Array(max + 1);
+    for (const [k, v] of Object.entries(processed)) {
+      arr[Number(k)] = v;
+    }
+    return arr;
+  }
+  return processed;
+}
+
+/**
+ * Converts a FormData instance into a structured object,
+ * parsing bracket notation (`files[0]`, `user[name]`), repeated keys as arrays,
+ * and converting numeric keys into real arrays.
+ */
+export function formDataToObject(formData: any): Record<string, any> {
+  const obj: Record<string, any> = {};
+  for (const [key, value] of formData.entries()) {
+    if (key === "__direct_file__" || key === "args") continue;
+
+    let parsedValue: any = value;
+    if (
+      typeof value === "string" &&
+      (value.startsWith("{") || value.startsWith("["))
+    ) {
+      try {
+        parsedValue = JSON.parse(value);
+      } catch {}
+    }
+
+    const parts = key.split(/[\[\]\.]/).filter(Boolean);
+    let current = obj;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (i === parts.length - 1) {
+        if (current[part] !== undefined) {
+          if (Array.isArray(current[part])) {
+            current[part].push(parsedValue);
+          } else {
+            current[part] = [current[part], parsedValue];
+          }
+        } else {
+          current[part] = parsedValue;
+        }
+      } else {
+        current[part] = current[part] || {};
+        current = current[part];
+      }
+    }
+  }
+
+  return convertNumericKeysToArrays(obj);
+}
+
 export function normalizeInput(data: unknown) {
   if (!data) return {};
+
+  // Direct File/Blob check: preserve as-is
+  if (
+    (typeof Blob !== "undefined" && data instanceof Blob) ||
+    (typeof File !== "undefined" && data instanceof File)
+  ) {
+    return data;
+  }
 
   // Robust FormData check
   if (
@@ -13,18 +96,12 @@ export function normalizeInput(data: unknown) {
       "entries" in data &&
       typeof (data as any).entries === "function")
   ) {
-    const obj: Record<string, any> = {};
-    for (const [key, value] of (data as any).entries()) {
-      if (key in obj) {
-        if (!Array.isArray(obj[key])) {
-          obj[key] = [obj[key]];
-        }
-        obj[key].push(value);
-      } else {
-        obj[key] = value;
-      }
+    const fd = data as any;
+    if (typeof fd.get === "function" && fd.get("__direct_file__") === "true") {
+      return fd.get("file");
     }
-    return obj;
+
+    return formDataToObject(fd);
   }
   return data as Record<string, unknown>;
 }

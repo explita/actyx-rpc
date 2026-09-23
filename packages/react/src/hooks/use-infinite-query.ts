@@ -9,6 +9,8 @@ import {
 } from "react";
 import type {
   ErrorResponse,
+  ExtractInfiniteItem,
+  ExtractInfinitePage,
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
@@ -16,7 +18,7 @@ import type {
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { defaultSyncSelection, parseWindow } from "../lib/utils.js";
-import { QueryResult, Timeout } from "../types/misc.js";
+import { Timeout } from "../types/misc.js";
 
 type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   pages: TFullPage[];
@@ -24,14 +26,18 @@ type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
 };
 
 export function useInfiniteQuery<
-  TFullPage extends InfiniteQueryPage<any>,
-  TInput = any,
-  TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
+  TProc extends (...args: any[]) => Promise<any>,
+  TFullPage = ExtractInfinitePage<TProc>,
+  TPage = ExtractInfiniteItem<TFullPage>,
+  TInput = Parameters<TProc>[0],
   TQueryKey extends unknown[] = unknown[],
-  TArgs extends unknown[] = [],
+  TArgs extends unknown[] = Parameters<TProc> extends [any, ...infer Rest]
+    ? Rest
+    : [],
 >(
-  proc: (input: TInput, ...args: TArgs) => Promise<QueryResult<TFullPage>>,
+  proc: TProc,
   opts?: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
+  ...extraArgs: unknown[]
 ): Omit<
   InfiniteQueryResult<TPage, TFullPage>,
   "fetchPrevious" | "hasPrevious"
@@ -63,8 +69,9 @@ export function useInfiniteQuery<
     onSettled,
     arrange,
     syncSelection = false,
-    args = [] as unknown as TArgs,
   } = opts || {};
+
+  const resolvedArgs = extraArgs as unknown as TArgs;
 
   const staleTime = opts?.staleTime ?? queryDefaults?.staleTime ?? 0;
   const gcTime = opts?.gcTime ?? queryDefaults?.gcTime;
@@ -89,7 +96,7 @@ export function useInfiniteQuery<
     arrange,
     proc,
     baseInput,
-    args,
+    args: resolvedArgs,
     initialData,
     keepPreviousData,
     syncSelection,
@@ -112,7 +119,7 @@ export function useInfiniteQuery<
       arrange,
       proc,
       baseInput,
-      args,
+      args: resolvedArgs,
       initialData,
       keepPreviousData,
       syncSelection,
@@ -120,7 +127,14 @@ export function useInfiniteQuery<
   });
 
   // Initialize cache
-  if (!queryClient.getQueryState(queryKey)) {
+  const existingState = queryClient.getQueryState(queryKey);
+  const existingData = existingState?.data;
+  const hasValidInfData =
+    existingData !== null &&
+    typeof existingData === "object" &&
+    Array.isArray((existingData as any).pages);
+
+  if (!existingState || !hasValidInfData) {
     const resolvedInitialData =
       typeof initialData === "function" ? initialData() : initialData;
     queryClient.setQueryState(
@@ -128,7 +142,9 @@ export function useInfiniteQuery<
       {
         data: resolvedInitialData || {
           pages: [],
-          pageParams: [initialPageParam].filter(Boolean),
+          pageParams: (initialPageParam !== undefined
+            ? [initialPageParam]
+            : []) as (string | number)[],
         },
         error: undefined,
         isFetching: false,
@@ -152,34 +168,66 @@ export function useInfiniteQuery<
   );
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const data = (state.data as InfData<TPage, TFullPage>) || {
-    pages: [],
-    pageParams: [],
-  };
-  const pages = data.pages;
-  const pageParams = data.pageParams;
+  const rawData = state?.data;
+  const isInfData =
+    rawData !== null &&
+    typeof rawData === "object" &&
+    Array.isArray((rawData as any).pages);
+  const data: InfData<TPage, TFullPage> = isInfData
+    ? (rawData as InfData<TPage, TFullPage>)
+    : {
+        pages: [],
+        pageParams: (initialPageParam !== undefined
+          ? [initialPageParam]
+          : []) as (string | number)[],
+      };
+  const pages: TFullPage[] = Array.isArray(data.pages) ? data.pages : [];
+  const pageParams: (string | number)[] = Array.isArray(data.pageParams)
+    ? data.pageParams
+    : [];
 
   const intervalRef = useRef<Timeout | null>(null);
   const fetchedCursorsRef = useRef<Set<string | number>>(new Set());
   const fetchingRef = useRef(false);
 
-  const flattenedData = pages.flatMap((page) => page.data);
-  const hasNext =
-    pages.length > 0
-      ? !!(
-          getNextPageParam?.(pages[pages.length - 1], pages) ??
-          pages[pages.length - 1]?.nextCursor
-        )
-      : false;
+  const flattenedData = pages.flatMap((page) =>
+    page && Array.isArray((page as any).data) ? (page as any).data : [],
+  );
+  const lastPage = pages.length > 0 ? pages[pages.length - 1] : undefined;
+  const hasNext = lastPage
+    ? !!(
+        getNextPageParam?.(lastPage, pages) ??
+        (lastPage as any)?.nextCursor ??
+        (lastPage as any)?.hasMore
+      )
+    : false;
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
+      const hasBaseInput =
+        callbacksRef.current.baseInput !== undefined &&
+        callbacksRef.current.baseInput !== null;
+      let pageInput =
+        cursor !== undefined
+          ? hasBaseInput
+            ? { ...callbacksRef.current.baseInput, cursor }
+            : { cursor }
+          : callbacksRef.current.baseInput;
+
+      if (!hasBaseInput) {
+        for (const arg of callbacksRef.current.args as TArgs) {
+          if (typeof arg === "object" && arg !== null && !Array.isArray(arg)) {
+            pageInput = {
+              ...pageInput,
+              ...arg,
+            } as TInput;
+          }
+        }
+      }
+
       const fetcher = async () =>
         await callbacksRef.current.proc(
-          {
-            ...callbacksRef.current.baseInput,
-            cursor,
-          } as TInput,
+          pageInput as TInput,
           ...(callbacksRef.current.args as TArgs),
         );
 
@@ -207,7 +255,7 @@ export function useInfiniteQuery<
 
     const lastPage = pages[pages.length - 1];
     const nextCursor =
-      getNextPageParam?.(lastPage, pages) ?? lastPage?.nextCursor;
+      getNextPageParam?.(lastPage, pages) ?? (lastPage as any)?.nextCursor;
 
     if (!nextCursor || fetchedCursorsRef.current.has(nextCursor)) {
       queryClient.setQueryState(queryKey, { isFetching: false });

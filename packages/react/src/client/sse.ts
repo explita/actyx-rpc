@@ -54,7 +54,9 @@ export async function SSEClient<T = any>(
 
           if (options.params) {
             for (const [key, value] of Object.entries(options.params)) {
-              url.searchParams.set(key, String(value));
+              if (value !== undefined) {
+                url.searchParams.set(key, String(value));
+              }
             }
           }
           if (lastEventId) {

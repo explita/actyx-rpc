@@ -313,7 +313,7 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * @example
    * key: ({ ctx, input }) => `user:${ctx.tenantId}:${input.id}`
    */
-  key?: (opts: { ctx: Ctx; input: I }) => MaybePromise<string>;
+  key: (opts: { ctx: Ctx; input: I }) => MaybePromise<string>;
 
   /**
    * Callback triggered when an entry is evicted from cache.

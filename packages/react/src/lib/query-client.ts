@@ -1,7 +1,7 @@
 import { globalRequestManager } from "./request-manager.js";
 import type { WindowTime } from "../types/main.js";
 import { normalizeKey, parseWindow } from "../lib/utils.js";
-import { Timeout } from "../types/misc.js";
+import { Timeout, QueryResult as ProcQueryResult } from "../types/misc.js";
 import {
   DefaultMutationOptions,
   DefaultOptions,
@@ -189,14 +189,43 @@ export class QueryClient {
     };
   }
 
-  isFetching(filterKey?: string): boolean {
+  isFetching(filterKey?: string | unknown[]): boolean {
+    const prefix = Array.isArray(filterKey)
+      ? filterKey.map(String).join("|")
+      : filterKey;
     for (const [key, state] of this.cache) {
       if (state.isFetching) {
-        if (!filterKey) return true;
-        if (key === filterKey || key.startsWith(filterKey + "|")) return true;
+        if (!prefix) return true;
+        if (key === prefix || key.startsWith(prefix + "|")) return true;
       }
     }
     return false;
+  }
+
+  getQueryData<TData = any>(queryKey: string | unknown[]): TData | undefined {
+    const key = Array.isArray(queryKey)
+      ? queryKey.map(String).join("|")
+      : String(queryKey);
+    return this.cache.get(key)?.data as TData | undefined;
+  }
+
+  resetQuery(queryKey: string | unknown[]) {
+    const prefix = Array.isArray(queryKey)
+      ? queryKey.map(String).join("|")
+      : String(queryKey);
+    for (const key of this.cache.keys()) {
+      if (key === prefix || key.startsWith(prefix + "|")) {
+        this.setQueryState(key, {
+          data: undefined,
+          error: undefined,
+          isFetching: false,
+          isError: false,
+          isSuccess: false,
+          updatedAt: undefined,
+          isFetched: false,
+        });
+      }
+    }
   }
 
   onInvalidate(queryKey: string, listener: () => void) {
@@ -217,9 +246,7 @@ export class QueryClient {
   }
 
   invalidate<T extends unknown>(queryKeyArr: T | T[]) {
-    const prefix = Array.isArray(queryKeyArr)
-      ? queryKeyArr.map(String).join("|")
-      : String(queryKeyArr);
+    const prefix = normalizeKey(queryKeyArr as any) ?? String(queryKeyArr);
 
     for (const key of this.cache.keys()) {
       if (key === prefix || key.startsWith(prefix + "|")) {
@@ -262,14 +289,20 @@ export class QueryClient {
 
   async prefetchQuery<TOutput, TError = any>(
     queryKeyArr: unknown[],
-    fetcher: () => Promise<[TOutput, null] | [null, TError]>,
-    opts?: { staleTime?: number },
+    fetcher:
+      | (() => Promise<ProcQueryResult<TOutput>>)
+      | (() => Promise<[TOutput, null] | [null, TError]>)
+      | (() => Promise<
+          ([TOutput, null] | [null, TError]) & { readonly _type?: "query" }
+        >),
+    opts?: { staleTime?: WindowTime },
   ): Promise<void> {
     const queryKey = queryKeyArr.map(String).join("|");
     const existing = this.getQueryState(queryKey);
 
     // Check if data is already fresh
-    const staleTime = opts?.staleTime ?? 0;
+    const staleTime =
+      opts?.staleTime !== undefined ? parseWindow(opts.staleTime) : 0;
     if (existing?.isSuccess && existing.updatedAt) {
       if (Date.now() - existing.updatedAt < staleTime) {
         return;
@@ -278,7 +311,7 @@ export class QueryClient {
 
     this.setQueryState(queryKey, { isFetching: true });
 
-    const result = await globalRequestManager.fetch(queryKey, fetcher);
+    const result = await globalRequestManager.fetch(queryKey, fetcher as any);
     const [data, err] = result as [TOutput, null] | [null, TError];
 
     if (!err) {

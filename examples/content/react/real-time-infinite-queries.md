@@ -213,3 +213,36 @@ onData({ data, action, allData, append, prepend, update, event }) {
 ```
 
 If `onData` is **not provided**, the hooks default to calling `append(data)` automatically on each incoming event/message.
+
+---
+
+## Client Proxy Integration
+
+When using the **Client Proxy SDK** (`createClient`), infinite query procedures provide `.useSSEInfiniteQuery` and `.useWSInfiniteQuery` directly. Because real-time streaming connects to an active stream rather than the query endpoint, the streaming target is specified via `stream` (or `ws`):
+
+```tsx
+import { rpc } from "@/lib/rpc/client";
+
+function LiveTodoList() {
+  const { data: todos, fetchNext, hasNext } = rpc.todos.list.useSSEInfiniteQuery({
+    // Pass another proxy procedure directly (type-safe)
+    stream: rpc.notif.sse,
+
+    // Or pass an explicit URL string:
+    // stream: "/api/rpc/notif.sse",
+
+    queryOpts: {
+      getNextPageParam: (lastPage) => lastPage.nextCursor,
+    },
+  });
+
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  );
+}
+```
+

@@ -309,7 +309,8 @@ arktypeResolver(type("string.email"));
   );
   console.log("GetData Result:", res, "Error:", err);
 
-  const { generateOpenApi } = await import("../src/core/docs/generator.js");
+  const { generateOpenApi } =
+    await import("../../packages/server/src/core/docs/generator.js");
   const docs = generateOpenApi(
     {
       "get-data": getData,

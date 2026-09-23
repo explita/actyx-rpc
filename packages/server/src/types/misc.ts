@@ -125,10 +125,20 @@ export type InputParams<
         ? { [K in keyof I]: MappedInputValue<I[K]> }
         : Partial<{ [K in keyof I]: MappedInputValue<I[K]> }>;
 
-export type QueryResult<T = unknown> = [T, null] | [null, ErrorResponse];
-export type MutationResult<T = unknown> =
-  | [Prettify<T>, null]
-  | [null, ErrorResponse];
+export type QueryResult<T = unknown, TInput = undefined> = (
+  | [T, null]
+  | [null, ErrorResponse]
+) & {
+  readonly _type?: "query";
+  readonly _input?: TInput;
+};
+export type MutationResult<T = unknown, TInput = undefined> = (
+  | [T, null]
+  | [null, ErrorResponse]
+) & {
+  readonly _type?: "mutation";
+  readonly _input?: TInput;
+};
 
 export type ContextResult<T> =
   | { ok: true; ctx: T }
@@ -157,11 +167,12 @@ export type FailureReason =
   | "RATE_LIMITED"
   | (string & {});
 
-export type SSEEvent<T = any> = {
+export type SSEEvent<T = any, TInput = undefined> = {
   event?: string;
   data: T;
   id?: string;
   retry?: number;
+  readonly _input?: TInput;
 };
 
 export type SubscriptionEmit<T> = (data: T) => void;

@@ -9,6 +9,7 @@ import {
   Sparkles,
   Upload,
   Radio,
+  Network,
 } from "lucide-react";
 
 const demos = [
@@ -21,6 +22,18 @@ const demos = [
       "from-blue-500/10 to-cyan-500/10 dark:from-blue-500/5 dark:to-cyan-500/5 border-blue-100 dark:border-blue-500/10",
     iconBg: "bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400",
     gradient: "from-blue-600 to-cyan-600",
+  },
+  {
+    title: "tRPC-Style Router",
+    description:
+      "Catch-all routing (/api/rpc/[...rpc]) and typed client proxy SDK",
+    href: "/rpc",
+    icon: Network,
+    accent:
+      "from-violet-500/10 to-indigo-500/10 dark:from-violet-500/5 dark:to-indigo-500/5 border-violet-100 dark:border-violet-500/10",
+    iconBg:
+      "bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400",
+    gradient: "from-violet-600 to-indigo-600",
   },
   {
     title: "Pagination",

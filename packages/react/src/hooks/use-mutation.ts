@@ -10,6 +10,7 @@ import type {
 import { useQueryClient } from "../provider.js";
 import { Timeout } from "../types/misc.js";
 import { parseWindow } from "../lib/utils.js";
+import { hasFile, objectToFormData } from "../lib/client-helpers.js";
 
 /**
  * `useMutation` for a procedure (function) action.
@@ -17,19 +18,15 @@ import { parseWindow } from "../lib/utils.js";
  * `mutate` receives the exact procedure input and returns its typed data.
  */
 export function useMutation<
-  TOutput = unknown,
-  TArgs extends any[] = any[],
+  TAction extends (...args: any[]) => Promise<any>,
+  TOutput = Extract<Awaited<ReturnType<TAction>>, [any, null]>[0],
+  TArgs extends any[] = Parameters<TAction>,
   TContext = unknown,
   TMutationKey extends unknown[] = unknown[],
 >(
-  action: (...args: TArgs) => Promise<MutationResult<TOutput>>,
-  opts?: UseMutationOpts<TOutput, TArgs, TContext, TMutationKey>,
-): UseMutationResult<
-  TOutput,
-  TArgs,
-  TContext,
-  (...args: TArgs) => Promise<MutationResult<TOutput>>
->;
+  action: TAction,
+  opts?: UseMutationOpts<TOutput, Parameters<TAction>, TContext, TMutationKey>,
+): UseMutationResult<TOutput, Parameters<TAction>, TContext, TAction>;
 
 /**
  * `useMutation` for a URL (string) action.
@@ -88,7 +85,12 @@ export function useMutation<
       await mutationDefaults?.onMutate?.(...args);
       return await opts?.onMutate?.(...args);
     },
-    onSettled: (result: any, error: any, mutationContext: any, ...args: any[]) => {
+    onSettled: (
+      result: any,
+      error: any,
+      mutationContext: any,
+      ...args: any[]
+    ) => {
       opts?.onSettled?.(result, error, mutationContext, ...args);
       mutationDefaults?.onSettled?.(result, error, ...args, mutationContext);
     },
@@ -96,6 +98,13 @@ export function useMutation<
     onProgress: opts?.onProgress,
     onValidationErrors: opts?.onValidationErrors,
   });
+
+  if (typeof opts?.__setProgress === "function") {
+    opts.__setProgress((p: number) => {
+      setProgress(p);
+      callbacksRef.current.onProgress?.(p);
+    });
+  }
 
   useEffect(() => {
     callbacksRef.current = {
@@ -112,7 +121,12 @@ export function useMutation<
         await mutationDefaults?.onMutate?.(...args);
         return await opts?.onMutate?.(...args);
       },
-      onSettled: (result: any, error: any, mutationContext: any, ...args: any[]) => {
+      onSettled: (
+        result: any,
+        error: any,
+        mutationContext: any,
+        ...args: any[]
+      ) => {
         opts?.onSettled?.(result, error, mutationContext, ...args);
         mutationDefaults?.onSettled?.(result, error, mutationContext, ...args);
       },
@@ -321,48 +335,26 @@ export function useMutation<
           const headers: Record<string, string> = {};
 
           if (
-            !(input instanceof Blob) &&
-            !(input instanceof FormData) &&
-            typeof input === "object" &&
-            input !== null
+            (typeof Blob !== "undefined" && input instanceof Blob) ||
+            (typeof File !== "undefined" && input instanceof File)
           ) {
-            // Recursive check for File/Blob instances
-            const hasFile = (obj: any): boolean => {
-              if (obj instanceof Blob) return true;
-              if (typeof obj !== "object" || obj === null) return false;
-              return Object.values(obj).some(hasFile);
-            };
-
-            if (hasFile(input)) {
-              const fd = new FormData();
-              const appendRecursive = (data: any, prefix = "") => {
-                Object.entries(data).forEach(([key, value]) => {
-                  const fullKey = prefix ? `${prefix}[${key}]` : key;
-                  if (value instanceof Blob) {
-                    fd.append(fullKey, value);
-                  } else if (typeof value === "object" && value !== null) {
-                    appendRecursive(value, fullKey);
-                  } else if (value !== undefined) {
-                    fd.append(fullKey, value as any);
-                  }
-                });
-              };
-
-              appendRecursive(input);
-              body = fd;
-            } else {
-              body = JSON.stringify(input);
-              headers["Content-Type"] = "application/json";
-            }
-          } else {
-            if (typeof File !== "undefined" && input instanceof File) {
-              headers["x-file-name"] = input.name;
-              headers["Content-Type"] =
-                input.type || "application/octet-stream";
-            } else if (input instanceof Blob) {
-              headers["Content-Type"] =
-                input.type || "application/octet-stream";
-            }
+            const fd = new FormData();
+            const filename = (input as any).name || "file";
+            fd.append("file", input, filename);
+            fd.append("__direct_file__", "true");
+            body = fd;
+          } else if (
+            typeof FormData !== "undefined" &&
+            input instanceof FormData
+          ) {
+            body = input;
+          } else if (hasFile(input)) {
+            const fd = new FormData();
+            objectToFormData(input, fd);
+            body = fd;
+          } else if (input !== undefined) {
+            body = JSON.stringify(input);
+            headers["Content-Type"] = "application/json";
           }
 
           const finalUrl = new URL(
@@ -527,7 +519,13 @@ export function useMutation<
         }
       }
     },
-    [action, opts?.throwOnError, mutationDefaults?.throwOnError, mutationKey, queryClient],
+    [
+      action,
+      opts?.throwOnError,
+      mutationDefaults?.throwOnError,
+      mutationKey,
+      queryClient,
+    ],
   );
 
   const mutateAsync = useCallback(
@@ -596,7 +594,7 @@ export function useMutation<
       if (err) {
         throw err;
       }
-      return result;
+      return result as TOutput;
     },
     [executeImmediately, opts?.debounceMs],
   );

@@ -38,11 +38,17 @@ import type {
   SSEEvent,
 } from "./misc.js";
 
-export interface ProcedureDefinition<TType extends string, TInput, TOutput> {
+export interface ProcedureDefinition<
+  TType extends string = string,
+  TInput = any,
+  TOutput = any,
+  TArgs extends unknown[] = [],
+> {
   _def: {
     type: TType;
     input: TInput;
     output: TOutput;
+    args: TArgs;
   };
 }
 
@@ -192,7 +198,7 @@ export interface ProcedureInstance<
     | "output"
   >;
   cache: (
-    options?: WithCacheOptions<
+    options: WithCacheOptions<
       Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
       [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
     >,
@@ -459,24 +465,19 @@ export interface ProcedureInstance<
       },
       ...args: P
     ) => T,
-  ) => ([I] extends [void]
+  ) => [I] extends [void]
     ? // No input - just pass through args
-      (...args: P) => Promise<MutationResult<Awaited<T>>>
+      (...args: P) => Promise<MutationResult<Awaited<T>, undefined>>
     : // Has input - first arg is input, then optional args
       [TMocked] extends [true]
       ? (
           input?: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => Promise<MutationResult<Awaited<T>>>
+        ) => Promise<MutationResult<Awaited<T>, InputParams<I, ICtx, GIM>>>
       : (
           input: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => Promise<MutationResult<Awaited<T>>>) &
-    ProcedureDefinition<
-      "mutation",
-      [I] extends [void] ? undefined : InputParams<I, ICtx, GIM>,
-      Awaited<T>
-    >;
+        ) => Promise<MutationResult<Awaited<T>, InputParams<I, ICtx, GIM>>>;
 
   query: <T, P extends unknown[]>(
     handler: (
@@ -492,24 +493,19 @@ export interface ProcedureInstance<
       },
       ...args: P
     ) => T,
-  ) => ([I] extends [void]
+  ) => [I] extends [void]
     ? // No input - just pass through args
-      (...args: P) => Promise<QueryResult<Awaited<T>>>
+      (...args: P) => Promise<QueryResult<Awaited<T>, undefined>>
     : // Has input - first arg is input, then optional args
       [TMocked] extends [true]
       ? (
           input?: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => Promise<QueryResult<Awaited<T>>>
+        ) => Promise<QueryResult<Awaited<T>, InputParams<I, ICtx, GIM>>>
       : (
           input: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => Promise<QueryResult<Awaited<T>>>) &
-    ProcedureDefinition<
-      "query",
-      [I] extends [void] ? undefined : InputParams<I, ICtx, GIM>,
-      Awaited<T>
-    >;
+        ) => Promise<QueryResult<Awaited<T>, InputParams<I, ICtx, GIM>>>;
 
   stream: <T, P extends unknown[]>(
     handler: (
@@ -525,16 +521,11 @@ export interface ProcedureInstance<
       },
       ...args: P
     ) => AsyncIterable<T> | Iterable<T>,
-  ) => ([I] extends [void]
+  ) => [I] extends [void]
     ? (...args: P) => AsyncIterable<T>
     : [TMocked] extends [true]
       ? (input?: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>
-      : (input: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>) &
-    ProcedureDefinition<
-      "stream",
-      [I] extends [void] ? undefined : InputParams<I, ICtx, GIM>,
-      T
-    >;
+      : (input: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>;
 
   sse: <O = any, P extends unknown[] = []>(
     handler: (
@@ -550,24 +541,25 @@ export interface ProcedureInstance<
       },
       ...args: P
     ) => AsyncIterable<SSEEvent<O>> | Iterable<SSEEvent<O>>,
-  ) => ([I] extends [void]
+  ) => [I] extends [void]
     ? // No input - just pass through args
-      (...args: P) => AsyncIterable<SSEEvent<O>> & { close: () => void }
+      (
+        ...args: P
+      ) => AsyncIterable<SSEEvent<O, undefined>> & { close: () => void }
     : // Has input - first arg is input, then optional args
       [TMocked] extends [true]
       ? (
           input?: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => AsyncIterable<SSEEvent<O>> & { close: () => void }
+        ) => AsyncIterable<SSEEvent<O, InputParams<I, ICtx, GIM>>> & {
+          close: () => void;
+        }
       : (
           input: InputParams<I, ICtx, GIM>,
           ...args: P
-        ) => AsyncIterable<SSEEvent<O>> & { close: () => void }) &
-    ProcedureDefinition<
-      "sse",
-      [I] extends [void] ? undefined : InputParams<I, ICtx, GIM>,
-      O
-    >;
+        ) => AsyncIterable<SSEEvent<O, InputParams<I, ICtx, GIM>>> & {
+          close: () => void;
+        };
 
   webRoute: <T>(
     handler: (
@@ -584,12 +576,7 @@ export interface ProcedureInstance<
       req: Request,
       options: any,
     ) => MaybePromise<T>,
-  ) => ((req: Request, options: any) => Promise<Response>) &
-    ProcedureDefinition<
-      "webRoute",
-      [I] extends [void] ? undefined : InputParams<I, ICtx, GIM>,
-      Awaited<T>
-    >;
+  ) => (req: Request, options: any) => Promise<Response>;
 
   ws: <P extends unknown[] = []>(
     handler: (
@@ -820,6 +807,12 @@ export type InferInput<T> =
  * //   ^? { data: [...], hasMore: boolean }
  * ```
  */
-export type InferOutput<T> = T extends { _def: { output: infer O } }
-  ? O
-  : never;
+export type InferOutput<T> = T extends (...args: any[]) => Promise<any>
+  ? Extract<Awaited<ReturnType<T>>, [any, null]>[0]
+  : T extends (...args: any[]) => AsyncIterable<SSEEvent<infer O, any>>
+    ? O
+    : T extends (...args: any[]) => AsyncIterable<infer O>
+      ? O
+      : T extends { _def: { output: infer O } }
+        ? O
+        : never;

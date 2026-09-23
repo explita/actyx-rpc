@@ -51,6 +51,7 @@ import { useInfiniteQuery } from "../../packages/react/src/hooks/use-infinite-qu
 import { useQueries } from "../../packages/react/src/hooks/use-queries.js";
 import type { MutationResult } from "../../packages/react/src/types/main.js";
 import { ActyxProvider } from "../../packages/react/src/provider.js";
+import { createClient } from "../../packages/react/src/client/create-client.js";
 import { useState, createElement as h } from "react";
 import type { ErrorResponse } from "../../packages/react/src/types/main.js";
 
@@ -1377,4 +1378,653 @@ describe("QueryClient Default / Global Options in Hooks", () => {
     );
   });
 });
+
+describe("Client Proxy Hooks with nested input in opts & extra args", () => {
+  const routerMock = {
+    users: {
+      get: Object.assign(
+        async (input: { id: string }, prefix = "User:") => {
+          return [{ id: input.id, name: `${prefix} ${input.id}` }, null];
+        },
+        {
+          _def: {
+            type: "query",
+            input: {} as { id: string },
+            output: {} as { id: string; name: string },
+            args: [] as [prefix?: string],
+          },
+        },
+      ),
+      list: Object.assign(
+        async (category = "all") => {
+          return [{ category, items: ["Alice", "Bob"] }, null];
+        },
+        {
+          _def: {
+            type: "query",
+            input: undefined,
+            output: {} as { category: string; items: string[] },
+            args: [] as [category?: string],
+          },
+        },
+      ),
+      infinite: Object.assign(
+        async (input: { cursor?: number; limit?: number }) => {
+          const cursor = input?.cursor ?? 0;
+          return [
+            {
+              data: [`user-${cursor}`, `user-${cursor + 1}`],
+              nextCursor: cursor + 2,
+              hasMore: cursor < 4,
+            },
+            null,
+          ];
+        },
+        {
+          _def: {
+            type: "query",
+            input: {} as { cursor?: number; limit?: number },
+            output: {} as {
+              data: string[];
+              nextCursor: number;
+              hasMore: boolean;
+            },
+            args: [] as [],
+          },
+        },
+      ),
+      create: Object.assign(
+        async (input: { name: string }, role = "member") => {
+          return [{ id: "u-1", name: input.name, role }, null];
+        },
+        {
+          _def: {
+            type: "mutation",
+            input: {} as { name: string },
+            output: {} as { id: string; name: string; role: string },
+            args: [] as [role?: string],
+          },
+        },
+      ),
+    },
+  };
+
+  const client = createClient<typeof routerMock>({
+    baseUrl: "http://localhost/api/rpc",
+    fetch: async (url, init) => {
+      const parsed = new URL(url.toString());
+      const proc = parsed.pathname.replace(/^\/api\/rpc\//, "");
+      const [seg, method] = proc.split(".");
+      const fn = (routerMock as any)[seg]?.[method];
+      if (!fn) return new Response("Not found", { status: 404 });
+      let input: any;
+      let args: any[] = [];
+      if (init?.body) {
+        const parsedBody = JSON.parse(init.body as string);
+        input = parsedBody.input;
+        args = parsedBody.args || [];
+      } else {
+        const inputParam = parsed.searchParams.get("input");
+        if (inputParam) input = JSON.parse(inputParam);
+        const argsParam = parsed.searchParams.get("args");
+        if (argsParam) args = JSON.parse(argsParam);
+      }
+      const [data, err] =
+        input !== undefined ? await fn(input, ...args) : await fn(...args);
+      return new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+  });
+
+  it("should support useQuery with { input, ...opts } and extra args", async () => {
+    let hookResult: any = null;
+    function TestComponent() {
+      hookResult = client.users.get.useQuery(
+        { input: { id: "42" }, unwrap: false },
+        "Member:",
+      );
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(hookResult.data).toEqual({ id: "42", name: "Member: 42" });
+  });
+
+  it("should support useQuery without input and with extra args", async () => {
+    let hookResult: any = null;
+    function TestComponent() {
+      hookResult = client.users.list.useQuery({}, "admins");
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(hookResult.data).toEqual({ category: "admins", items: ["Alice", "Bob"] });
+  });
+
+  it("should support useMutation with extra args forwarded to mutate", async () => {
+    let mutationResult: any = null;
+    function TestComponent() {
+      mutationResult = client.users.create.useMutation();
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)));
+
+    let mutateRes: any = null;
+    await act(async () => {
+      mutateRes = await mutationResult.mutate({ name: "Charlie" }, "admin");
+    });
+
+    expect(mutateRes).toEqual([{ id: "u-1", name: "Charlie", role: "admin" }, null]);
+    expect(mutationResult.data).toEqual({ id: "u-1", name: "Charlie", role: "admin" });
+  });
+
+  it("should scope custom queryKey array under procedure path in useQuery and invalidate", async () => {
+    const qc = new QueryClient();
+    let hookResult: any = null;
+    let renderCount = 0;
+
+    function TestComponent() {
+      renderCount++;
+      // Custom queryKey containing only userId: ['user-123']
+      hookResult = client.users.list.useQuery({
+        queryKey: ["user-123"],
+      }, "admins");
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(hookResult.data).toEqual({ category: "admins", items: ["Alice", "Bob"] });
+
+    // Cache should contain the scoped key: ['users', 'list', 'user-123']
+    const cachedState = qc.getQueryState("users|list|user-123");
+    expect(cachedState).toBeDefined();
+    expect(cachedState?.data).toEqual({ category: "admins", items: ["Alice", "Bob"] });
+
+    const countBeforeInvalidate = renderCount;
+
+    // Invalidate with scoped array [user-123]
+    await act(async () => {
+      client.users.list.invalidate(["user-123"]);
+    });
+
+    // Should have triggered a refetch on that query
+    expect(renderCount).toBeGreaterThan(countBeforeInvalidate);
+  });
+
+  it("should only allow useInfiniteQuery on paginated procedures", async () => {
+    // 1. Unpaginated procedure: users.get has useInfiniteQuery typed as undefined
+    // @ts-expect-error users.get is unpaginated so useInfiniteQuery is undefined
+    const unpaginatedFn = client.users.get.useInfiniteQuery;
+    expect(unpaginatedFn).toBeDefined(); // proxy intercepts at runtime, but TS flags as undefined
+
+    // 2. Paginated procedure: users.infinite has useInfiniteQuery available and fully typed
+    const qc = new QueryClient();
+    let infiniteResult: any = null;
+
+    function TestComponent() {
+      infiniteResult = client.users.infinite.useInfiniteQuery({
+        input: { limit: 2 },
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(infiniteResult.data).toEqual(["user-0", "user-1"]);
+    expect(infiniteResult.hasNext).toBe(true);
+
+    // Fetch next page
+    await act(async () => {
+      await infiniteResult.fetchNext();
+    });
+
+    expect(infiniteResult.data).toEqual(["user-0", "user-1", "user-2", "user-3"]);
+  });
+});
+
+describe("Client normalization for Axios and custom HTTP methods", () => {
+  it("should seamlessly support axios-like client returning { data, status } without response.ok and without response.json", async () => {
+    const mockAxios = vi.fn().mockImplementation(async (url: string, config: any) => {
+      expect(config.method).toBe("GET");
+      return {
+        data: { message: "Axios success", count: 42 },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config,
+      };
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockAxios,
+    });
+
+    const [data, err] = await client.stats.get.query({ timeframe: "today" });
+    expect(err).toBeNull();
+    expect(data).toEqual({ message: "Axios success", count: 42 });
+    expect(mockAxios).toHaveBeenCalledWith(
+      expect.stringContaining("http://localhost/api/rpc/stats.get?input="),
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("should extract error payload and status when axios-like client throws AxiosError with error.response", async () => {
+    const mockAxios = vi.fn().mockImplementation(async (url: string, config: any) => {
+      const axiosError: any = new Error("Request failed with status code 400");
+      axiosError.isAxiosError = true;
+      axiosError.response = {
+        data: {
+          success: false,
+          message: "Validation failed",
+          reason: "VALIDATION_ERROR",
+          statusCode: 400,
+          handlerName: "users.create",
+        },
+        status: 400,
+        statusText: "Bad Request",
+      };
+      throw axiosError;
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockAxios,
+    });
+
+    const [data, err] = await client.users.create.mutate({ name: "" });
+    expect(data).toBeNull();
+    expect(err).toEqual({
+      success: false,
+      message: "Validation failed",
+      reason: "VALIDATION_ERROR",
+      statusCode: 400,
+      handlerName: "users.create",
+    });
+  });
+
+  it("should allow overriding HTTP method to POST, PATCH, PUT, DELETE in useQuery and useMutation", async () => {
+    const recordedRequests: Array<{ method: string; url: string; body?: any; data?: any }> = [];
+
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      recordedRequests.push({
+        method: init.method,
+        url,
+        body: init.body,
+        data: init.data,
+      });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    // useQuery with method: "POST"
+    let queryResult: any = null;
+    function QueryComponent() {
+      queryResult = client.search.useQuery({
+        input: { q: "actyx" },
+        method: "POST",
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(QueryComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 15));
+    });
+
+    expect(recordedRequests[0].method).toBe("POST");
+    expect(recordedRequests[0].body).toBe(JSON.stringify({ input: { q: "actyx" } }));
+
+    // useMutation with method: "DELETE"
+    let mutationResult: any = null;
+    function MutationComponent() {
+      mutationResult = client.users.delete.useMutation({
+        method: "DELETE",
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(MutationComponent)));
+
+    await act(async () => {
+      await mutationResult.mutate({ id: "123" });
+    });
+
+    expect(recordedRequests[1].method).toBe("DELETE");
+    expect(recordedRequests[1].body).toBe(JSON.stringify({ input: { id: "123" } }));
+
+    // Direct .mutate with method: "PATCH"
+    await client.users.update.mutate({ id: "123", name: "Alice" }, { method: "PATCH" });
+    expect(recordedRequests[2].method).toBe("PATCH");
+    expect(recordedRequests[2].body).toBe(JSON.stringify({ input: { id: "123", name: "Alice" } }));
+  });
+
+  it("should throw an error if baseUrl is missing in createClient options", () => {
+    expect(() => createClient<any>({} as any)).toThrow(
+      "createClient requires 'baseUrl' in options (e.g. createClient({ baseUrl: '/api/rpc' }))",
+    );
+    expect(() => (createClient as any)()).toThrow(
+      "createClient requires 'baseUrl' in options (e.g. createClient({ baseUrl: '/api/rpc' }))",
+    );
+  });
+
+  it("should support { input, ...opts } and primitive input inside opts in useQuery", async () => {
+    let capturedQuery: { url: string; method: string } | null = null;
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      capturedQuery = { url, method: init.method };
+      return new Response(JSON.stringify({ id: "user-42", name: "Alice" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = createClient<any>({
+      baseUrl: "/api/rpc", // Test relative baseUrl without crashing
+      fetch: mockFetch,
+    });
+
+    // 1. Object input inside opts: useQuery({ input: { id: "user-42" } })
+    let result1: any = null;
+    function Comp1() {
+      result1 = client.users.get.useQuery({ input: { id: "user-42" } });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp1)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(capturedQuery?.url).toContain("input=%7B%22id%22%3A%22user-42%22%7D");
+    expect(result1.data).toEqual({ id: "user-42", name: "Alice" });
+
+    // 2. Primitive input inside opts: useQuery({ input: "user-42" })
+    let result2: any = null;
+    function Comp2() {
+      result2 = client.users.get.useQuery({ input: "user-42" });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp2)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(capturedQuery?.url).toContain("input=%22user-42%22");
+    expect(result2.data).toEqual({ id: "user-42", name: "Alice" });
+
+    // 3. Input with options inside opts: useQuery({ input: { id: "user-42" }, enabled: false })
+    let result3: any = null;
+    function Comp3() {
+      result3 = client.users.get.useQuery({ input: { id: "user-42" }, enabled: false });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp3)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // Should not fetch because enabled is false
+    expect(result3.isFetching).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("should support catch and finally on callable proxy promise", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    let finallyCalled = false;
+    const res = await client.ping()
+      .catch((err: any) => err)
+      .finally(() => {
+        finallyCalled = true;
+      });
+
+    expect(finallyCalled).toBe(true);
+    expect(res).toEqual([{ ok: true }, null]);
+  });
+
+  it("should support usePaginatedQuery with bi-directional pagination on client proxy", async () => {
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      const urlObj = new URL(url, "http://localhost");
+      const inputStr = urlObj.searchParams.get("input");
+      let cursor = 0;
+      if (inputStr) {
+        try {
+          const parsed = JSON.parse(inputStr);
+          cursor = Number(parsed?.pageParam ?? parsed?.cursor ?? 0);
+        } catch {}
+      }
+      return new Response(
+        JSON.stringify({
+          data: [`item-${cursor}`, `item-${cursor + 1}`],
+          hasMore: cursor < 4,
+          nextCursor: cursor + 2,
+          previousCursor: cursor > 0 ? cursor - 2 : undefined,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    let hookResult: any = null;
+    function Comp() {
+      hookResult = client.todos.list.usePaginatedQuery({
+        getNextPageParam: (lastPage: any) => lastPage?.nextCursor,
+        getPreviousPageParam: (firstPage: any) => firstPage?.previousCursor,
+      });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(hookResult.data).toEqual(["item-0", "item-1"]);
+    expect(hookResult.hasNext).toBe(true);
+    expect(typeof hookResult.fetchPrevious).toBe("function");
+  });
+
+  it("should provide array mutation helpers (append, prepend, insert, remove) on useQuery when data is an array", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(
+        JSON.stringify(["item-1", "item-2"]),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    let hookResult: any = null;
+    function Comp() {
+      hookResult = client.todos.list.useQuery({ queryKey: ["todos"] });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(hookResult.data).toEqual(["item-1", "item-2"]);
+    expect(typeof hookResult.prepend).toBe("function");
+    expect(typeof hookResult.append).toBe("function");
+    expect(typeof hookResult.insert).toBe("function");
+    expect(typeof hookResult.remove).toBe("function");
+
+    // Prepend
+    await act(async () => {
+      hookResult.prepend("item-0");
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2"]);
+
+    // Append
+    await act(async () => {
+      hookResult.append("item-3");
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2", "item-3"]);
+
+    // Insert at index 2
+    await act(async () => {
+      hookResult.insert(2, "item-1.5");
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-1.5", "item-2", "item-3"]);
+
+    // Remove by predicate
+    await act(async () => {
+      hookResult.remove((item: string) => item === "item-1.5");
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2", "item-3"]);
+
+    // Rollback test
+    let rollbackFn: () => void = () => {};
+    await act(async () => {
+      rollbackFn = hookResult.prepend("item-temp");
+    });
+    expect(hookResult.data).toEqual(["item-temp", "item-0", "item-1", "item-2", "item-3"]);
+
+    await act(async () => {
+      rollbackFn();
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2", "item-3"]);
+
+    // Targeted update by predicate
+    let updateRollback: () => void = () => {};
+    await act(async () => {
+      updateRollback = hookResult.update(
+        (item: string) => item === "item-1",
+        (item: string) => `${item}-updated`,
+      );
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1-updated", "item-2", "item-3"]);
+
+    // Targeted update rollback
+    await act(async () => {
+      updateRollback();
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2", "item-3"]);
+
+    // Targeted update by index
+    await act(async () => {
+      hookResult.update(2, "item-2-replaced");
+    });
+    expect(hookResult.data).toEqual(["item-0", "item-1", "item-2-replaced", "item-3"]);
+
+    // Whole-array update (1-arg) still works as before
+    await act(async () => {
+      hookResult.update(["a", "b"]);
+    });
+    expect(hookResult.data).toEqual(["a", "b"]);
+  });
+
+  it("should support proxy procedure helpers: getQueryKey, getQueryData, setQueryData, reset, isFetching, isMutating", async () => {
+    const mockFetch = vi.fn(async () => {
+      return new Response(JSON.stringify({ data: ["todo 1", "todo 2"], success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    // 1. getQueryKey & getMutationKey
+    expect(client.todos.list.getQueryKey()).toEqual(["todos", "list"]);
+    expect(client.todos.byId.getQueryKey({ id: "123" })).toEqual(["todos", "byId", { id: "123" }]);
+    expect(client.todos.add.getMutationKey()).toEqual(["todos", "add"]);
+    expect(client.todos.add.getQueryKey()).toEqual(["todos", "add"]);
+
+    // 2. getQueryData / setQueryData / reset
+    expect(client.todos.list.getQueryData()).toBeUndefined();
+    client.todos.list.setQueryData(["custom-1", "custom-2"]);
+    expect(client.todos.list.getQueryData()).toEqual(["custom-1", "custom-2"]);
+
+    client.todos.list.setQueryData((old: string[] | undefined) => [...(old ?? []), "custom-3"]);
+    expect(client.todos.list.getQueryData()).toEqual(["custom-1", "custom-2", "custom-3"]);
+
+    client.todos.list.reset();
+    expect(client.todos.list.getQueryData()).toBeUndefined();
+
+    // 3. isFetching / isMutating
+    expect(client.todos.list.isFetching()).toBe(false);
+    expect(client.todos.add.isMutating()).toBe(false);
+  });
+
+  it("should support direct calling and .useSSE() on streaming proxy procedures", async () => {
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+    });
+
+    // 1. Direct call returns an object with Symbol.asyncIterator, close, and then
+    const stream = client.notifications({ channel: "alerts" });
+    expect(typeof stream[Symbol.asyncIterator]).toBe("function");
+    expect(typeof stream.close).toBe("function");
+    expect(typeof stream.then).toBe("function");
+
+    // 2. .useSSE exists as a hook function
+    expect(typeof client.notifications.useSSE).toBe("function");
+  });
+
+  it("should support useSSEInfiniteQuery with stream procedure or url", async () => {
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+    });
+
+    expect(typeof client.todos.list.useSSEInfiniteQuery).toBe("function");
+    expect(typeof client.todos.list.useWSInfiniteQuery).toBe("function");
+  });
+});
+
+
+
 

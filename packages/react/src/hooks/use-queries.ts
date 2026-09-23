@@ -8,6 +8,7 @@ import {
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import {
+  ExtractProcOutput,
   QueriesResults,
   QueryData,
   QueryResult,
@@ -27,7 +28,10 @@ import { QueryState } from "../types/query-client.js";
  */
 // 1 query
 export function useQueries<
-  T1Output,
+  T1Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T1Output = ExtractProcOutput<T1Proc>,
   T1QueryKey extends unknown[] = unknown[],
   T1Unwrap extends boolean = false,
   T1SelectData = Unwrap<T1Output, T1Unwrap>,
@@ -35,6 +39,7 @@ export function useQueries<
     undefined,
 >(
   q1: UseQueriesItem<
+    T1Proc,
     T1Output,
     T1QueryKey,
     T1Unwrap,
@@ -45,13 +50,19 @@ export function useQueries<
 
 // 2 queries
 export function useQueries<
-  T1Output,
+  T1Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T1Output = ExtractProcOutput<T1Proc>,
   T1QueryKey extends unknown[] = unknown[],
   T1Unwrap extends boolean = false,
   T1SelectData = Unwrap<T1Output, T1Unwrap>,
   T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
     undefined,
-  T2Output = any,
+  T2Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T2Output = ExtractProcOutput<T2Proc>,
   T2QueryKey extends unknown[] = unknown[],
   T2Unwrap extends boolean = false,
   T2SelectData = Unwrap<T2Output, T2Unwrap>,
@@ -59,6 +70,7 @@ export function useQueries<
     undefined,
 >(
   q1: UseQueriesItem<
+    T1Proc,
     T1Output,
     T1QueryKey,
     T1Unwrap,
@@ -66,6 +78,7 @@ export function useQueries<
     T1InitialData
   >,
   q2: UseQueriesItem<
+    T2Proc,
     T2Output,
     T2QueryKey,
     T2Unwrap,
@@ -79,19 +92,28 @@ export function useQueries<
 
 // 3 queries
 export function useQueries<
-  T1Output,
+  T1Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T1Output = ExtractProcOutput<T1Proc>,
   T1QueryKey extends unknown[] = unknown[],
   T1Unwrap extends boolean = false,
   T1SelectData = Unwrap<T1Output, T1Unwrap>,
   T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
     undefined,
-  T2Output = any,
+  T2Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T2Output = ExtractProcOutput<T2Proc>,
   T2QueryKey extends unknown[] = unknown[],
   T2Unwrap extends boolean = false,
   T2SelectData = Unwrap<T2Output, T2Unwrap>,
   T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
     undefined,
-  T3Output = any,
+  T3Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T3Output = ExtractProcOutput<T3Proc>,
   T3QueryKey extends unknown[] = unknown[],
   T3Unwrap extends boolean = false,
   T3SelectData = Unwrap<T3Output, T3Unwrap>,
@@ -99,6 +121,7 @@ export function useQueries<
     undefined,
 >(
   q1: UseQueriesItem<
+    T1Proc,
     T1Output,
     T1QueryKey,
     T1Unwrap,
@@ -106,6 +129,7 @@ export function useQueries<
     T1InitialData
   >,
   q2: UseQueriesItem<
+    T2Proc,
     T2Output,
     T2QueryKey,
     T2Unwrap,
@@ -113,6 +137,7 @@ export function useQueries<
     T2InitialData
   >,
   q3: UseQueriesItem<
+    T3Proc,
     T3Output,
     T3QueryKey,
     T3Unwrap,
@@ -127,25 +152,37 @@ export function useQueries<
 
 // 4 queries
 export function useQueries<
-  T1Output,
+  T1Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T1Output = ExtractProcOutput<T1Proc>,
   T1QueryKey extends unknown[] = unknown[],
   T1Unwrap extends boolean = false,
   T1SelectData = Unwrap<T1Output, T1Unwrap>,
   T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
     undefined,
-  T2Output = any,
+  T2Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T2Output = ExtractProcOutput<T2Proc>,
   T2QueryKey extends unknown[] = unknown[],
   T2Unwrap extends boolean = false,
   T2SelectData = Unwrap<T2Output, T2Unwrap>,
   T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
     undefined,
-  T3Output = any,
+  T3Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T3Output = ExtractProcOutput<T3Proc>,
   T3QueryKey extends unknown[] = unknown[],
   T3Unwrap extends boolean = false,
   T3SelectData = Unwrap<T3Output, T3Unwrap>,
   T3InitialData extends QueryData<Unwrap<T3Output, T3Unwrap>> | undefined =
     undefined,
-  T4Output = any,
+  T4Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T4Output = ExtractProcOutput<T4Proc>,
   T4QueryKey extends unknown[] = unknown[],
   T4Unwrap extends boolean = false,
   T4SelectData = Unwrap<T4Output, T4Unwrap>,
@@ -153,6 +190,7 @@ export function useQueries<
     undefined,
 >(
   q1: UseQueriesItem<
+    T1Proc,
     T1Output,
     T1QueryKey,
     T1Unwrap,
@@ -160,6 +198,7 @@ export function useQueries<
     T1InitialData
   >,
   q2: UseQueriesItem<
+    T2Proc,
     T2Output,
     T2QueryKey,
     T2Unwrap,
@@ -167,6 +206,7 @@ export function useQueries<
     T2InitialData
   >,
   q3: UseQueriesItem<
+    T3Proc,
     T3Output,
     T3QueryKey,
     T3Unwrap,
@@ -174,6 +214,7 @@ export function useQueries<
     T3InitialData
   >,
   q4: UseQueriesItem<
+    T4Proc,
     T4Output,
     T4QueryKey,
     T4Unwrap,
@@ -189,31 +230,46 @@ export function useQueries<
 
 // 5 queries
 export function useQueries<
-  T1Output,
+  T1Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T1Output = ExtractProcOutput<T1Proc>,
   T1QueryKey extends unknown[] = unknown[],
   T1Unwrap extends boolean = false,
   T1SelectData = Unwrap<T1Output, T1Unwrap>,
   T1InitialData extends QueryData<Unwrap<T1Output, T1Unwrap>> | undefined =
     undefined,
-  T2Output = any,
+  T2Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T2Output = ExtractProcOutput<T2Proc>,
   T2QueryKey extends unknown[] = unknown[],
   T2Unwrap extends boolean = false,
   T2SelectData = Unwrap<T2Output, T2Unwrap>,
   T2InitialData extends QueryData<Unwrap<T2Output, T2Unwrap>> | undefined =
     undefined,
-  T3Output = any,
+  T3Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T3Output = ExtractProcOutput<T3Proc>,
   T3QueryKey extends unknown[] = unknown[],
   T3Unwrap extends boolean = false,
   T3SelectData = Unwrap<T3Output, T3Unwrap>,
   T3InitialData extends QueryData<Unwrap<T3Output, T3Unwrap>> | undefined =
     undefined,
-  T4Output = any,
+  T4Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T4Output = ExtractProcOutput<T4Proc>,
   T4QueryKey extends unknown[] = unknown[],
   T4Unwrap extends boolean = false,
   T4SelectData = Unwrap<T4Output, T4Unwrap>,
   T4InitialData extends QueryData<Unwrap<T4Output, T4Unwrap>> | undefined =
     undefined,
-  T5Output = any,
+  T5Proc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  T5Output = ExtractProcOutput<T5Proc>,
   T5QueryKey extends unknown[] = unknown[],
   T5Unwrap extends boolean = false,
   T5SelectData = Unwrap<T5Output, T5Unwrap>,
@@ -221,6 +277,7 @@ export function useQueries<
     undefined,
 >(
   q1: UseQueriesItem<
+    T1Proc,
     T1Output,
     T1QueryKey,
     T1Unwrap,
@@ -228,6 +285,7 @@ export function useQueries<
     T1InitialData
   >,
   q2: UseQueriesItem<
+    T2Proc,
     T2Output,
     T2QueryKey,
     T2Unwrap,
@@ -235,6 +293,7 @@ export function useQueries<
     T2InitialData
   >,
   q3: UseQueriesItem<
+    T3Proc,
     T3Output,
     T3QueryKey,
     T3Unwrap,
@@ -242,6 +301,7 @@ export function useQueries<
     T3InitialData
   >,
   q4: UseQueriesItem<
+    T4Proc,
     T4Output,
     T4QueryKey,
     T4Unwrap,
@@ -249,6 +309,7 @@ export function useQueries<
     T4InitialData
   >,
   q5: UseQueriesItem<
+    T5Proc,
     T5Output,
     T5QueryKey,
     T5Unwrap,
@@ -265,10 +326,10 @@ export function useQueries<
 
 // Fallback variadic
 export function useQueries<
-  T extends readonly UseQueriesItem<any, any, any, any, any>[],
+  T extends readonly UseQueriesItem<any, any, any, any, any, any>[],
 >(...queries: [...T]): QueriesResults<T>;
 export function useQueries(
-  ...queries: UseQueriesItem<any, any, any, any, any>[]
+  ...queries: UseQueriesItem<any, any, any, any, any, any>[]
 ) {
   const queryClient = useQueryClient();
 

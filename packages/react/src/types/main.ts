@@ -1,3 +1,5 @@
+import type { QueryResult as ProcQueryResult } from "./misc.js";
+
 export type FailureReason =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
@@ -30,9 +32,13 @@ export type BaseError = {
   [key: string]: unknown;
 };
 
-export type MutationResult<T = unknown> =
-  | [Prettify<T>, null]
-  | [null, ErrorResponse];
+export type MutationResult<T = unknown, TInput = undefined> = (
+  | [T, null]
+  | [null, ErrorResponse]
+) & {
+  readonly _type?: "mutation";
+  readonly _input?: TInput;
+};
 export type ErrorResponse = Prettify<
   {
     message: string;
@@ -81,11 +87,7 @@ export type UseMutationOpts<
    * Callback function to be executed when the procedure fails.
    * @param error The error message.
    */
-  onError?: (
-    error: ErrorResponse,
-    context: TContext | undefined,
-    ...args: TArgs
-  ) => void;
+  onError?: (error: ErrorResponse, context: TContext | undefined) => void;
   /**
    * Callback function to be executed when the procedure fails due to validation errors.
    * @param errors The validation errors.
@@ -105,7 +107,6 @@ export type UseMutationOpts<
     data: TOutput | undefined,
     error: ErrorResponse | undefined,
     context: TContext | undefined,
-    ...args: TArgs
   ) => void;
   /**
    * Callback function to be executed before the procedure is mutated.
@@ -261,17 +262,6 @@ export type UseInfiniteQueryOpts<
    * Merged into every page fetch alongside the cursor.
    */
   input?: WithoutCursor<TInput>;
-
-  /**
-   * Extra arguments passed after input to the procedure on every fetch.
-   * Use this when your procedure accepts additional parameters beyond the input object.
-   * @example
-   * ```ts
-   * // procedure: (input: { limit: number; cursor: string }, includeMeta: boolean) => ...
-   * useInfiniteQuery(proc, { input: { limit: 5 }, args: [true] })
-   * ```
-   */
-  args?: TArgs;
 
   /**
    * Whether the query should be enabled and automatically fetch
@@ -670,8 +660,62 @@ export type UseQueryOpts<
   /**
    * Transform the data before it is returned to the component.
    */
-  select?: (data: Unwrap<TOutput, TUnwrap>) => TSelectData;
+  select?: (data: NoInfer<Unwrap<TOutput, TUnwrap>>) => TSelectData;
 };
+
+export type ExtractTupleData<R> = Extract<R, [any, null]>[0];
+
+/**
+ * Extract the output type of a procedure or result tuple.
+ * @template TProc The procedure to extract the output type from, or the tuple result.
+ * @returns The output data type.
+ * @example
+ * type Output = ExtractProcOutput<typeof rpc.todos.list>;
+ */
+export type ExtractProcOutput<TProc> = TProc extends (
+  ...args: any[]
+) => Promise<infer R>
+  ? ExtractTupleData<R>
+  : ExtractTupleData<TProc>;
+
+/**
+ * Extract the full page type from a procedure or async function.
+ * Handles both RPC `QueryResult` tuples (`[TPage, null] | [null, ErrorResponse]`)
+ * and direct async return types.
+ */
+export type ExtractInfinitePage<TProc> = TProc extends (
+  ...args: any[]
+) => Promise<infer R>
+  ? [Extract<R, [any, null]>] extends [never]
+    ? R
+    : Extract<R, [any, null]>[0]
+  : unknown;
+
+/**
+ * Extract the individual item type from a full page shape.
+ * Handles `{ data: TItem[] }`, `TItem[]`, or any paginated container.
+ */
+export type ExtractInfiniteItem<TFullPage> = TFullPage extends {
+  data: (infer TItem)[];
+}
+  ? TItem
+  : TFullPage extends (infer TItem)[]
+    ? TItem
+    : any;
+
+export type ExtractProcInput<R> = R extends { readonly _input?: infer I }
+  ? I
+  : undefined;
+
+export type IsPaginated<O> = boolean extends (O extends never ? true : false)
+  ? true
+  : [O] extends [{ data: unknown[]; hasMore: boolean }]
+    ? true
+    : false;
+
+export type ExtractPaginatedItem<O> = O extends { data: (infer TItem)[] }
+  ? TItem
+  : ExtractInfiniteItem<O>;
 
 /**
  * Acceptable `initialData` shapes for a query: the resolved data itself or a
@@ -679,7 +723,9 @@ export type UseQueryOpts<
  *
  * @template T - The resolved data type (the `success` key is stripped).
  */
-export type QueryData<T> = Omit<T, "success"> | (() => Omit<T, "success">);
+export type QueryData<T> =
+  | (T extends readonly any[] ? T : Omit<T, "success">)
+  | (() => T extends readonly any[] ? T : Omit<T, "success">);
 
 /**
  * Automatically unwrap the 'data' field from standard RPC success responses.
@@ -693,8 +739,7 @@ export type Unwrap<T, DoUnwrap extends boolean = false> = DoUnwrap extends true
 /**
  * The argument accepted by {@link QueryResult.update}: either the new data
  * value directly, or an updater function that receives the current value and
- * returns the new one. Mirrors React's `SetStateAction` and TanStack Query's
- * `setQueryData` updaters.
+ * returns the new one. Mirrors React's `SetStateAction` updater.
  *
  * @template T - The resolved (selected) data type.
  * @template TAlwaysDefined - Whether the query always has data (i.e. `initialData`
@@ -787,7 +832,7 @@ export type QueryResult<
    *
    * Accepts either the new data directly or an updater function that receives
    * the current cached data and returns the new data — mirroring React's
-   * `setState` and TanStack Query's `setQueryData`. The resolved value is
+   * `setState`. The resolved value is
    * written straight into the query cache, so this component — and any other
    * consumer of the same `queryKey` — re-renders immediately. Useful for
    * optimistic updates after a mutation, or for adjusting cached values
@@ -820,7 +865,68 @@ export type QueryResult<
   ) => TInitialData extends undefined
     ? Unwrap<TOutput, TUnwrap> | undefined
     : Unwrap<TOutput, TUnwrap>;
-};
+} & ([NonNullable<TSelectData>] extends [readonly (infer Item)[]]
+  ? {
+      /**
+       * Prepends an item or array of items to the start of the cached array.
+       *
+       * Returns a rollback function to revert this update.
+       */
+      prepend: (item: Item | Item[]) => () => void;
+
+      /**
+       * Appends an item or array of items to the end of the cached array.
+       *
+       * Returns a rollback function to revert this update.
+       */
+      append: (item: Item | Item[]) => () => void;
+
+      /**
+       * Inserts an item or array of items at a specific index in the cached array.
+       *
+       * Returns a rollback function to revert this update.
+       */
+      insert: (index: number, item: Item | Item[]) => () => void;
+
+      /**
+       * Removes an item from the cached array by index or predicate function.
+       *
+       * Returns a rollback function to revert this update.
+       */
+      remove: (arg: number | ((item: Item) => boolean)) => () => void;
+
+      /**
+       * Surgically updates a single item in the cached array by index or predicate function.
+       *
+       * @param arg - The index or predicate function `(item) => boolean` matching the item to update.
+       * @param updater - The new item, or a function `(item) => item` producing it.
+       * @returns A rollback function to revert this update.
+       *
+       * @example
+       * ```ts
+       * // Update by predicate
+       * const rollback = todos.update((t) => t.id === "1", (t) => ({ ...t, completed: true }));
+       *
+       * // Update by index
+       * todos.update(0, (t) => ({ ...t, completed: true }));
+       * ```
+       */
+      update: {
+        (
+          arg: number | ((item: Item) => boolean),
+          updater: Item | ((item: Item) => Item),
+        ): () => void;
+        (
+          value: QuerySetStateAction<
+            Unwrap<TOutput, TUnwrap>,
+            TInitialData extends undefined ? false : true
+          >,
+        ): TInitialData extends undefined
+          ? Unwrap<TOutput, TUnwrap> | undefined
+          : Unwrap<TOutput, TUnwrap>;
+      };
+    }
+  : {});
 
 /**
  * Options for the `useWS` hook.
@@ -989,14 +1095,17 @@ export type UseWSResult<TOutput> = {
  *                          `Unwrap<TOutput, TUnwrap>` when no `select`).
  */
 export type UseQueriesItem<
-  TOutput,
+  TProc extends (...args: any[]) => Promise<any> = (
+    ...args: any[]
+  ) => Promise<any>,
+  TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TSelectData = Unwrap<TOutput, TUnwrap>,
   TInitialData extends QueryData<Unwrap<TOutput, TUnwrap>> | undefined =
     undefined,
 > = {
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>;
+  proc: TProc;
   initialData?: TInitialData | (() => TInitialData);
 } & UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData>;
 
@@ -1019,32 +1128,8 @@ type _IsUnwrapTrue<T> = T extends { unwrap: infer U }
  * Everything is inlined and repeated per-branch so TypeScript evaluates
  * the conditionals in one pass (avoiding deferred inference with Unwrap).
  */
-export type UseQueriesResult<TItem> = TItem extends {
-  proc: { _def: { output: infer TOutput } };
-}
-  ? TItem extends { select: (...args: any[]) => infer R }
-    ? QueryResult<
-        TOutput,
-        TItem extends { initialData: infer I } ? I : undefined,
-        _IsUnwrapTrue<TItem>,
-        R
-      >
-    : _IsUnwrapTrue<TItem> extends true
-      ? QueryResult<
-          TOutput,
-          TItem extends { initialData: infer I } ? I : undefined,
-          true,
-          TOutput extends { data: infer D } ? D : TOutput
-        >
-      : QueryResult<
-          TOutput,
-          TItem extends { initialData: infer I } ? I : undefined,
-          false,
-          TOutput
-        >
-  : TItem extends {
-        proc: (...args: any[]) => Promise<[infer TOutput, any]>;
-      }
+export type UseQueriesResult<TItem> = TItem extends { proc: infer P }
+  ? ExtractProcOutput<P> extends infer TOutput
     ? TItem extends { select: (...args: any[]) => infer R }
       ? QueryResult<
           TOutput,
@@ -1065,7 +1150,8 @@ export type UseQueriesResult<TItem> = TItem extends {
             false,
             TOutput
           >
-    : QueryResult<unknown, undefined, false, unknown>;
+    : never
+  : QueryResult<unknown, undefined, false, unknown>;
 
 /**
  * Map each element of a tuple of raw useQueries items to its `QueryResult`.

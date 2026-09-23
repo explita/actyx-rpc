@@ -1,11 +1,11 @@
 {
   "name": "@explita/actyx-rpc",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "author": "Explita",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
-  "description": "Actyx RPC — type-safe RPC for composable server actions in TypeScript",
+  "description": "Actyx RPC — a type-safe procedure and API framework for TypeScript",
   "engines": {
     "node": ">=18"
   },

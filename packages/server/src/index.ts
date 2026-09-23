@@ -1,8 +1,18 @@
 export { createProcedure } from "./core/server.js";
-export { createRouter } from "./core/router.js";
+export {
+  createRouter,
+  type AnyProcedure,
+  type RouterRecord,
+} from "./core/router.js";
 export { generateOpenApi } from "./core/docs/generator.js";
 export { createSSEResponse } from "./core/helpers/sse.js";
 export { getContext } from "./core/helpers/get-context.js";
+export {
+  httpStorage,
+  getHttpContext,
+  getRequest,
+  type HttpContext,
+} from "./core/helpers/rpc-storage.js";
 export { observabilityPlugin } from "./plugins/observability.js";
 export { MemoryCache } from "./core/cache/memory-cache.js";
 export { RedisCache } from "./core/cache/redis-cache.js";

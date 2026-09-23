@@ -349,7 +349,7 @@ export function createProcedure<
           exec = withRetry(exec as any, config.retry.options) as any;
         }
 
-        if (config.cache?.enabled) {
+        if (config.cache?.enabled && config.cache.options) {
           exec = withCache(
             exec as any,
             globalCache,

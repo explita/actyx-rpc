@@ -1,25 +1,24 @@
 import { createProcedure, MemoryCache } from "@/dist";
 import { redirect } from "next/navigation";
-import type { NextAdapter } from "@/dist/adapters/next";
+import { nextAdapter, type NextAdapter } from "@/dist/adapters/next";
 
 export const procedure = createProcedure({
-  createContext: () => {
-    // return {
-    //   ok: false,
-    //   reason: "UNAUTHORIZED",
-    // };
+  createContext: async (_, req, c) => {
+    const next = await nextAdapter();
+
     return {
       ok: true,
       ctx: {
         ctxKey: "ctxValue",
+        next,
       },
     };
   },
-  onContextError(ctx) {
-    // redirect("/login");
+  onContextError({ reason }) {
+    // redirect("/login"); // this wont work
     return {
       message: "You are not authorized",
-      reason: ctx.reason,
+      reason,
       _redirect() {
         redirect("/login");
       },
@@ -30,7 +29,7 @@ export const procedure = createProcedure({
     return {
       key1: "value1",
       key2: "value2",
-      ...ctx,
+      ctxKey: ctx.ctxKey,
     };
   },
   cache: new MemoryCache({ maxSize: 100, defaultTTL: 60000 }),

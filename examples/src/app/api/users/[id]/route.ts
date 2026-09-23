@@ -2,7 +2,7 @@ import { procedure, procedure2 } from "@/lib/rpc/init";
 import { zodResolver } from "@/dist/resolvers/zod";
 import { z } from "zod";
 import { NextResponse } from "next/server";
-// import { createRouteHandler } from "@/dist/adapters/next";
+// import { createHandler } from "@/dist/adapters/next";
 import { redirect } from "next/navigation";
 
 // A mock user database
@@ -101,4 +101,3 @@ export const POST = procedure
 
     return NextResponse.json({ success: true, user });
   });
-

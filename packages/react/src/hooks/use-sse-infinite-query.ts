@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery } from "./use-infinite-query.js";
-import type { InfiniteQueryPage, SSEAdapterOptions } from "../types/main.js";
-import type { QueryResult } from "../types/misc.js";
+import type {
+  ExtractInfiniteItem,
+  ExtractInfinitePage,
+  SSEAdapterOptions,
+} from "../types/main.js";
 import { useSSE } from "./use-sse.js";
 
 export function useSSEInfiniteQuery<
-  TFullPage extends InfiniteQueryPage<any> = InfiniteQueryPage<any>,
-  TInput = any,
-  TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
+  TProc extends (...args: any[]) => Promise<any>,
+  TFullPage = ExtractInfinitePage<TProc>,
+  TPage = ExtractInfiniteItem<TFullPage>,
+  TInput = Parameters<TProc>[0],
   TQueryKey extends unknown[] = unknown[],
   TData = TPage,
 >(
-  queryProcedure: (input: TInput) => Promise<QueryResult<TFullPage>>,
+  queryProcedure: TProc,
   {
     queryOpts,
     onData,
@@ -19,6 +23,7 @@ export function useSSEInfiniteQuery<
     ...sseOpts
   }: SSEAdapterOptions<TInput, TData, TPage, TQueryKey, TFullPage>,
 ) {
+
   const optsRef = useRef({ onData, arrange });
   useEffect(() => {
     optsRef.current = { arrange, onData };

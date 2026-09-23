@@ -48,22 +48,51 @@ function StockTicker({ symbol }) {
 
 ### Options Configuration
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `url` | `string` | — | The HTTP SSE endpoint. |
-| `params` | `Record<string, string>` | — | Query parameters to append to the URL. |
-| `headers` | `Record<string, string>` | — | Custom headers to pass with request. |
-| `enabled` | `boolean` | `true` | Toggle to conditionally connect/disconnect. |
-| `maxHistory` | `number` | — | Number of event payloads to accumulate in the `data` array before eviction. |
-| `onData` | `(data, event) => void` | — | Callback run on each event. |
-| `onError` | `(error) => void` | — | Callback run on connection error. |
+| Option       | Type                     | Default | Description                                                                 |
+| :----------- | :----------------------- | :------ | :-------------------------------------------------------------------------- |
+| `url`        | `string`                 | —       | The HTTP SSE endpoint.                                                      |
+| `params`     | `Record<string, string>` | —       | Query parameters to append to the URL.                                      |
+| `headers`    | `Record<string, string>` | —       | Custom headers to pass with request.                                        |
+| `enabled`    | `boolean`                | `true`  | Toggle to conditionally connect/disconnect.                                 |
+| `maxHistory` | `number`                 | —       | Number of event payloads to accumulate in the `data` array before eviction. |
+| `onData`     | `(data, event) => void`  | —       | Callback run on each event.                                                 |
+| `onError`    | `(error) => void`        | —       | Callback run on connection error.                                           |
 
 ### Returned Properties
 
-* **`data`**: Array of accumulated event payloads (oldest first).
-* **`lastData`**: The most recently received event payload.
-* **`event`**: The event name string of the most recently received event.
-* **`isConnected`**: Boolean tracking active connection state.
-* **`error`**: Error response object if connection fails.
-* **`close()`**: Function to manually close the connection.
-* **`clear()`**: Function to clear the accumulated history list.
+- **`data`**: Array of accumulated event payloads (oldest first).
+- **`lastData`**: The most recently received event payload.
+- **`event`**: The event name string of the most recently received event.
+- **`isConnected`**: Boolean tracking active connection state.
+- **`error`**: Error response object if connection fails.
+- **`close()`**: Function to manually close the connection.
+- **`clear()`**: Function to clear the accumulated history list.
+
+---
+
+## Client Proxy Integration
+
+When using the **Client Proxy SDK** (`createClient`), any procedure defined with `.sse()` or `.stream()` exposes `.useSSE()` directly without needing manual URL configuration:
+
+```tsx
+import { rpc } from "@/lib/rpc";
+
+function NotificationFeed() {
+  const { lastData, isConnected } = rpc.notif.useSSE();
+
+  return (
+    <div>
+      <p>Connection: {isConnected ? "Live 🟢" : "Connecting... 🟡"}</p>
+      {lastData && <p>Update: {lastData.data}</p>}
+    </div>
+  );
+}
+```
+
+Or consume it directly as an `AsyncIterable`:
+
+```ts
+for await (const chunk of rpc.notif()) {
+  console.log("Direct chunk:", chunk);
+}
+```

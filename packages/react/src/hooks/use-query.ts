@@ -1,4 +1,4 @@
-import type { ErrorResponse } from "../types/main.js";
+import type { ErrorResponse, ExtractProcOutput } from "../types/main.js";
 import {
   useCallback,
   useEffect,
@@ -15,7 +15,8 @@ import { Timeout } from "../types/misc.js";
 import { QueryState } from "../types/query-client.js";
 
 export function useQuery<
-  TOutput,
+  TProc extends (...args: any[]) => Promise<any>,
+  TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TSelectData = Unwrap<TOutput, TUnwrap>,
@@ -23,33 +24,35 @@ export function useQuery<
     Unwrap<TOutput, TUnwrap>
   >,
 >(
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  proc: TProc,
   opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
     initialData: TInitialData;
   },
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 
 export function useQuery<
-  TOutput,
+  TProc extends (...args: any[]) => Promise<any>,
+  TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TInitialData extends undefined = undefined,
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  proc: TProc,
   opts?: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
     initialData?: undefined;
   },
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 
 export function useQuery<
-  TOutput,
+  TProc extends (...args: any[]) => Promise<any>,
+  TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TInitialData = undefined,
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
-  proc: () => Promise<[TOutput, null] | [null, ErrorResponse]>,
+  proc: TProc,
   opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
     initialData?: TInitialData;
   } = {
@@ -281,21 +284,17 @@ export function useQuery<
   }, [queryClient, queryKey]);
 
   // Optimistically update the cached data for this query.
-  // Accepts either the new value directly or an updater function that receives
-  // the current cached data (post-unwrap, pre-select); the resolved value is
-  // written straight back into the cache.
+  // Accepts either:
+  // 1) 2 arguments: (indexOrPredicate, itemUpdater) for targeted array/collection updates via queryClient.update
+  // 2) 1 argument: (valueOrUpdater) for direct whole-state replacement
   const update = useCallback(
-    (
-      valueOrUpdater:
-        | Unwrap<TOutput, TUnwrap>
-        | ((
-            prev: TInitialData extends undefined
-              ? Unwrap<TOutput, TUnwrap> | undefined
-              : Unwrap<TOutput, TUnwrap>,
-          ) => TInitialData extends undefined
-            ? Unwrap<TOutput, TUnwrap> | undefined
-            : Unwrap<TOutput, TUnwrap>),
-    ) => {
+    (...args: any[]) => {
+      if (args.length >= 2) {
+        const [arg, itemUpdater] = args;
+        return queryClient.update(queryKey, arg, itemUpdater);
+      }
+
+      const [valueOrUpdater] = args;
       const currentState = queryClient.getQueryState(queryKey);
       const prev = currentState?.data;
       const next =
@@ -413,6 +412,26 @@ export function useQuery<
       selectedData === undefined ||
       (Array.isArray(selectedData) && selectedData.length === 0));
   const isLoading = !state.isFetched || (state.isFetching && isEmpty);
+  const prepend = useCallback(
+    (item: any) => queryClient.prepend(queryKey, item),
+    [queryClient, queryKey],
+  );
+
+  const append = useCallback(
+    (item: any) => queryClient.append(queryKey, item),
+    [queryClient, queryKey],
+  );
+
+  const insert = useCallback(
+    (index: number, item: any) => queryClient.insert(queryKey, index, item),
+    [queryClient, queryKey],
+  );
+
+  const remove = useCallback(
+    (arg: number | ((item: any) => boolean)) =>
+      queryClient.remove(queryKey, arg),
+    [queryClient, queryKey],
+  );
 
   return {
     error: state.error,
@@ -426,6 +445,10 @@ export function useQuery<
     refetch,
     reset,
     update,
+    prepend,
+    append,
+    insert,
+    remove,
     data: selectedData,
   } as unknown as QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 }

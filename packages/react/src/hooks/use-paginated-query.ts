@@ -6,12 +6,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { ErrorResponse } from "../types/main.js";
 import type {
+  ErrorResponse,
+  ExtractInfiniteItem,
+  ExtractInfinitePage,
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
-  WithoutCursor,
 } from "../types/main.js";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
@@ -24,17 +25,18 @@ type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
 };
 
 export function usePaginatedQuery<
-  TFullPage extends InfiniteQueryPage<any>,
-  TInput = any,
-  TPage = TFullPage extends InfiniteQueryPage<infer P> ? P : never,
+  TProc extends (...args: any[]) => Promise<any>,
+  TFullPage = ExtractInfinitePage<TProc>,
+  TPage = ExtractInfiniteItem<TFullPage>,
+  TInput = Parameters<TProc>[0],
   TQueryKey extends unknown[] = unknown[],
-  TArgs extends unknown[] = [],
+  TArgs extends unknown[] = Parameters<TProc> extends [any, ...infer Rest]
+    ? Rest
+    : [],
 >(
-  proc: (
-    input: WithoutCursor<TInput>,
-    ...args: TArgs
-  ) => Promise<QueryResult<TFullPage>>,
-  opts: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
+  proc: TProc,
+  opts?: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
+  ...extraArgs: unknown[]
 ): InfiniteQueryResult<TPage, TFullPage> {
   const [selectedItem, setSelectedItem] = useState<TPage | undefined>(
     undefined,
@@ -42,7 +44,7 @@ export function usePaginatedQuery<
   const queryClient = useQueryClient();
   const localId = useId();
 
-  const queryKey = opts.queryKey
+  const queryKey = opts?.queryKey
     ? opts.queryKey.map(String).join("|")
     : `__local_pag__${localId}`;
 
@@ -60,7 +62,9 @@ export function usePaginatedQuery<
     onSuccess,
     onError,
     onSettled,
-  } = opts;
+  } = opts || {};
+
+  const resolvedArgs = extraArgs as unknown as TArgs;
 
   const staleTime = opts?.staleTime ?? queryDefaults?.staleTime ?? 0;
   const gcTime = opts?.gcTime ?? queryDefaults?.gcTime;
@@ -68,8 +72,6 @@ export function usePaginatedQuery<
     opts?.refetchOnMount ?? queryDefaults?.refetchOnMount ?? true;
   const refetchOnReconnect =
     opts?.refetchOnReconnect ?? queryDefaults?.refetchOnReconnect ?? true;
-
-  const args = opts.args ?? ([] as unknown as TArgs);
 
   const callbacksRef = useRef({
     onSuccess: (data: any) => {
@@ -86,7 +88,7 @@ export function usePaginatedQuery<
     },
     proc,
     baseInput,
-    args,
+    args: resolvedArgs,
     initialData,
   });
   useEffect(() => {
@@ -105,7 +107,7 @@ export function usePaginatedQuery<
       },
       proc,
       baseInput,
-      args,
+      args: resolvedArgs,
       initialData,
     };
   });
@@ -184,8 +186,8 @@ export function usePaginatedQuery<
 
   const currentPage = pages[adjustedIndex];
   const currentPageData: TPage[] = currentPage
-    ? Array.isArray(currentPage.data)
-      ? currentPage.data
+    ? Array.isArray((currentPage as any).data)
+      ? (currentPage as any).data
       : []
     : [];
 
@@ -193,9 +195,10 @@ export function usePaginatedQuery<
     adjustedIndex < pages.length - 1 ||
     !!(
       currentPage &&
-      (getNextPageParam?.(currentPage, pages) ?? currentPage.nextCursor)
+      (getNextPageParam?.(currentPage, pages) ??
+        (currentPage as any)?.nextCursor)
     );
-  const hasPrevious = adjustedIndex > 0 || !!pages[0]?.previousCursor;
+  const hasPrevious = adjustedIndex > 0 || !!(pages[0] as any)?.previousCursor;
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
@@ -241,7 +244,7 @@ export function usePaginatedQuery<
 
     const lastPage = pages[pages.length - 1];
     const nextCursor =
-      getNextPageParam?.(lastPage, pages) ?? lastPage?.nextCursor;
+      getNextPageParam?.(lastPage, pages) ?? (lastPage as any)?.nextCursor;
 
     if (!nextCursor || fetchedCursorsRef.current.has(nextCursor)) {
       queryClient.setQueryState(queryKey, { isFetching: false });
@@ -326,7 +329,7 @@ export function usePaginatedQuery<
       return undefined;
     }
 
-    const previousCursor = firstPage.previousCursor;
+    const previousCursor = (firstPage as any)?.previousCursor;
 
     if (!previousCursor || fetchedCursorsRef.current.has(previousCursor)) {
       queryClient.setQueryState(queryKey, { isFetching: false });
@@ -609,7 +612,9 @@ export function usePaginatedQuery<
     };
   }, []);
 
-  const flattenedData = pages.flatMap((page) => page.data);
+  const flattenedData = pages.flatMap((page) =>
+    page && Array.isArray((page as any).data) ? (page as any).data : [],
+  );
 
   // Whether ANY fetch is in flight (initial, refetch, or pagination)
   const isFetching = state.isFetching;

@@ -52,51 +52,57 @@ function CreatePostForm() {
 
 ### Configuration Options
 
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `mutationKey` | `unknown[] \| string` | Auto-generated | Unique key identifying this mutation. Enables per-key concurrency locking (concurrent calls for the same key return 429 "Already in progress"). |
-| `debounce` | `number` | `0` | Delay in ms to coalesce repeated `mutate()` calls. |
-| `abortController` | `AbortController` | — | External `AbortController` to cancel URL-based mutations from outside the hook. |
-| `onSuccess` | `(data, context, ...args) => void` | — | Callback run when the mutation succeeds. |
-| `onError` | `(error, context, ...args) => void` | — | Callback run when the mutation fails. |
-| `onSettled` | `(data, error, context, ...args) => void` | — | Callback run when the mutation finishes (success or error). |
-| `onValidationErrors` | `(errors) => void` | — | Callback run when resolver schema validation fails. |
-| `onProgress` | `(progress: number) => void` | — | Callback run with upload progress percentage (0-100) for URL endpoint mutations. |
-| `optimisticUpdate` | `(input) => void` | — | Perform immediate UI updates before server confirmation. |
-| `rollback` | `(input) => void` | — | Revert optimistic UI updates if the mutation fails. |
+| Option               | Type                                      | Default        | Description                                                                                                                                     |
+| :------------------- | :---------------------------------------- | :------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mutationKey`        | `unknown[] \| string`                     | Auto-generated | Unique key identifying this mutation. Enables per-key concurrency locking (concurrent calls for the same key return 429 "Already in progress"). |
+| `debounce`           | `number`                                  | `0`            | Delay in ms to coalesce repeated `mutate()` calls.                                                                                              |
+| `abortController`    | `AbortController`                         | —              | External `AbortController` to cancel URL-based mutations from outside the hook.                                                                 |
+| `onSuccess`          | `(data, context, ...args) => void`        | —              | Callback run when the mutation succeeds.                                                                                                        |
+| `onError`            | `(error, context, ...args) => void`       | —              | Callback run when the mutation fails.                                                                                                           |
+| `onSettled`          | `(data, error, context, ...args) => void` | —              | Callback run when the mutation finishes (success or error).                                                                                     |
+| `onValidationErrors` | `(errors) => void`                        | —              | Callback run when resolver schema validation fails.                                                                                             |
+| `onProgress`         | `(progress: number) => void`              | —              | Callback run with upload progress percentage (0-100) for URL endpoint mutations.                                                                |
+| `optimisticUpdate`   | `(input) => void`                         | —              | Perform immediate UI updates before server confirmation.                                                                                        |
+| `rollback`           | `(input) => void`                         | —              | Revert optimistic UI updates if the mutation fails.                                                                                             |
 
 ### Returned Values
 
 The hook returns the following control and state properties:
 
-* **`mutate`**: Trigger function to execute the mutation (`(input?, ...args?) => Promise<TData>`).
-* **`isPending`**: Boolean state tracking execution.
-* **`data`**: The result payload (on success).
-* **`error`**: Mapped execution error details.
-* **`validationErrors`**: Nested validation details from resolvers.
-* **`reset`**: Resets the mutation state back to idle.
-* **`abort`**: Sends a cancellation signal to abort the active network request.
+- **`mutate`**: Trigger function to execute the mutation (`(input?, ...args?) => Promise<TData>`).
+- **`isPending`**: Boolean state tracking execution.
+- **`progress`**: Real-time upload progress percentage (0-100).
+- **`data`**: The result payload (on success).
+- **`error`**: Mapped execution error details.
+- **`validationErrors`**: Nested validation details from resolvers.
+- **`reset`**: Resets the mutation state back to idle.
+- **`abort`**: Sends a cancellation signal to abort the active network request (URL/proxy mutations).
+
+> [!TIP]
+> When using the **Client Proxy SDK** (`createClient`), you can invoke `useMutation` directly on any procedure (e.g. `rpc.media.upload.useMutation({ onProgress })`) with automatic binary serialization, typed inputs, and upload progress tracking out-of-the-box.
 
 ---
 
 ## Real-Time Upload Progress Tracking
 
-Because standard Next.js Server Actions encapsulate the request payload and do not expose transport events, they cannot track file upload progress. 
+Because standard Next.js Server Actions encapsulate the request payload and do not expose transport events, they cannot track file upload progress.
 
 To track upload progress, pass a **URL endpoint** to `useMutation` instead of a procedure instance.
 
 ### 1. Set Up the Route Handler
+
 Create a route handler (e.g. `app/api/rpc/upload/route.ts`) wrapping your procedure:
 
 ```ts
-import { createRouteHandler } from "@explita/actyx-rpc/adapters/next";
+import { createHandler } from "@explita/actyx-rpc/adapters/next";
 import { testUpload } from "@/backend/procedures";
 
 // Mount standard POST route handler
-export const POST = createRouteHandler(testUpload);
+export const POST = createHandler(testUpload);
 ```
 
 ### 2. Configure `useMutation` with the URL
+
 Pass the endpoint path to `useMutation` and hook into `onProgress`:
 
 ```tsx
@@ -118,7 +124,13 @@ function UploadFileForm() {
     await upload.mutate(file);
   };
 
-  return <input type="file" onChange={handleFileChange} disabled={upload.isPending} />;
+  return (
+    <input
+      type="file"
+      onChange={handleFileChange}
+      disabled={upload.isPending}
+    />
+  );
 }
 ```
 
@@ -129,11 +141,13 @@ function UploadFileForm() {
 Actyx RPC supports two ways to upload files depending on what you pass to `mutate()`:
 
 ### 1. Binary Stream Mode (Highly Efficient)
-If you pass a `File` or `Blob` instance directly to `mutate`, Actyx RPC sends the payload as `application/octet-stream`. 
+
+If you pass a `File` or `Blob` instance directly to `mutate`, Actyx RPC sends the payload as `application/octet-stream`.
 
 This is the most efficient way to upload large files (e.g. 500MB+) because it bypasses multipart parsing overhead entirely.
 
 ### 2. Auto-FormData Mode
+
 If you pass an object containing `File`/`Blob` instances, Actyx RPC automatically packs the fields into a `multipart/form-data` payload structure:
 
 ```ts
@@ -145,9 +159,11 @@ await upload.mutate({
 ```
 
 ### Server-Side Ingestion
+
 On the server, you handle these uploads cleanly using standard web-router signatures. Here is how you can set up route handlers for both modes (shown using Next.js as an example framework):
 
 #### 1. Handling Binary Streams (Highly Efficient)
+
 For direct octet binary streams, you access the standard Web `Request` body stream (`req.body`) inside your `.webRoute`:
 
 ```ts
@@ -175,6 +191,7 @@ export const POST = procedure.webRoute(async ({ input, ctx }, req) => {
 ```
 
 #### 2. Handling Multipart Form-Data
+
 For standard Form-Data requests, files are automatically parsed by the core router and mapped straight to your schema validation inputs:
 
 ```ts
@@ -189,13 +206,13 @@ export const POST = procedure
       z.object({
         file: z.instanceof(File),
         description: z.string().optional(),
-      })
-    )
+      }),
+    ),
   )
   .webRoute(async ({ input }) => {
     const file = input.file; // Fully resolved standard File instance
     const arrayBuffer = await file.arrayBuffer();
-    
+
     await fs.promises.writeFile("./uploads/file.png", Buffer.from(arrayBuffer));
     return { success: true };
   });

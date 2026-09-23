@@ -5,7 +5,7 @@ title: Cache Mutations & Rollbacks
 
 # Cache Mutations & Optimistic Rollbacks
 
-Actyx RPC provides a powerful set of mutation helper functions inside `useInfiniteQuery` and `usePaginatedQuery` hooks. These helpers let you perform client-side CRUD modifications on your query pages cache without triggering a full network refetch, preserving the user's scroll position and loaded pages.
+Actyx RPC provides a powerful set of client-side mutation helper functions exposed directly on `useQuery` (when resolving an array), `useInfiniteQuery`, and `usePaginatedQuery` hooks, as well as on the root `queryClient`. These helpers let you perform instant client-side CRUD modifications on your cached data and query pages without triggering a full network refetch, preserving the user's scroll position and loaded pages.
 
 ## Mutation Helpers
 

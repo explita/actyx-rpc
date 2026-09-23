@@ -16,7 +16,10 @@ export async function progressFetch(
   const { onProgress, method = "GET", body, headers = {}, signal } = options;
 
   // Use XMLHttpRequest for Upload progress (Mutations)
-  if (method === "POST" || method === "PUT" || method === "PATCH") {
+  if (
+    (method === "POST" || method === "PUT" || method === "PATCH") &&
+    typeof XMLHttpRequest !== "undefined"
+  ) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open(method, url);
