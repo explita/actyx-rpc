@@ -3,6 +3,44 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-25
+
+### Added
+
+- **HTTP Request Batching & Link Deduplication**:
+  - Integrated `BatchManager` pooling concurrent queries into a single `POST /api/rpc?batch=1` request.
+  - In-flight link deduplication: identical concurrent calls share the same resolved in-memory Promise and wire payload entry.
+  - Supported `batch: true | { delay?: number, maxBatchSize?: number }` on `createClient`.
+  - Added per-query opt-out (`{ batch: false }`) and real-time telemetry access via `rpc.$batch()`.
+- **Universal SSR Hydration & State Persistence**:
+  - Added `<HydrationBoundary>` component, `useHydrate()`, `dehydrate()` serializer, and `QueryClient.prefetchQuery()` for zero-flicker hydration across Next.js, Remix, Astro, custom SSR, and offline storage.
+  - Client queries consume hydrated cache instantly on initial mount with zero loading flicker.
+- **Automated Cache Garbage Collection & LRU Eviction**:
+  - Added `gcTime` (default: 5m) with automatic timers for inactive queries.
+  - Added `maxCacheSize` (default: 250) with LRU eviction of oldest unobserved queries.
+  - Added `queryClient.removeQueries()` and proxy helper `rpc.<proc>.remove()` for targeted manual cache eviction.
+- **Actyx DevTools**:
+  - Added `<ActyxDevtools />` floating overlay for monitoring queries, mutation history logs, and real-time SSE/WS streams.
+  - Interactive breadcrumb procedure path viewer, serialized arguments inspector, and live activity badge.
+  - Keyboard shortcuts (`Alt+A` / `⌥A`, `Ctrl+Shift+A` / `⌘+Shift+A`).
+  - Added cache management toolbar: **Invalidate All** (background refetch), **Reset All** (empty & refetch), and **Clear Cache** (memory wipe).
+- **Client Interceptors & Auth Refresh Loop**:
+  - Added `onRequest`, `onResponse`, and `onError` lifecycle interceptors to `createClient`.
+  - Transparent request replay via `retry()` with re-evaluated headers and `maxRetries` loop protection.
+
+### Fixed
+
+- **Direct Proxy Method Inference**:
+  - Direct proxy function invocations (`rpc.health()`, `rpc.todos.list()`) now infer `GET` for queries instead of defaulting to `POST`.
+- **Query Reset Loading Lock**:
+  - `resetQuery()` now triggers refetch for active queries, preventing mounted components from getting permanently stuck in `isLoading: true`.
+- **Observer Preservation on Clear Cache**:
+  - `clearCache()` purges cached data while preserving active React component subscriptions, allowing `invalidateAll()` to revive mounted queries cleanly.
+- **DevTools Hydration Flash**:
+  - Fixed queryCount badge hydration mismatch by mounting the badge client-side with proper state guards.
+
+---
+
 ## [0.2.0] - 2026-09-23
 
 ### Added

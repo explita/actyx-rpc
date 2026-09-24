@@ -112,6 +112,7 @@ export type PrefetchQueryOptions<TOutput = any, TError = any> = {
     | (() => Promise<TOutput>)
     | (() => Promise<any>);
   staleTime?: WindowTime;
+  unwrap?: boolean;
 };
 
 

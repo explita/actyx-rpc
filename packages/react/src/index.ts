@@ -28,7 +28,6 @@ export type {
   ExtractPaginatedItem,
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
-
   UseMutationOpts,
   UseMutationResult,
   MutationStatus,
@@ -52,11 +51,12 @@ export type {
 export type {
   CreateClientOptions,
   BatchOptions,
+  BatchMetrics,
   ClientInterceptors,
   InterceptorRequestContext,
   InterceptorResponseContext,
   InterceptorErrorContext,
   ClientInstance,
+  ClientRouterMethods,
 } from "./types/client.js";
-export type { BatchMetrics } from "./lib/client-batcher.js";
 export * from "./types/query-client.js";

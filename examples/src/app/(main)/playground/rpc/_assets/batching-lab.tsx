@@ -35,12 +35,7 @@ export function BatchingLab({ onLogCall }: BatchingLabProps) {
 
   const handleTestBatch = async () => {
     // Snapshot batch manager metrics before dispatch
-    const metricsBefore =
-      typeof (rpc as any).$batch === "function"
-        ? (rpc as any).$batch()
-        : typeof (rpc as any).getBatchMetrics === "function"
-          ? (rpc as any).getBatchMetrics()
-          : undefined;
+    const metricsBefore = rpc.$batch();
     const prevBatches = metricsBefore?.totalBatches ?? 0;
 
     setBatchStats({
@@ -64,7 +59,6 @@ export function BatchingLab({ onLogCall }: BatchingLabProps) {
       rpc.todos.list(),
     ]);
     const durationMs = Math.round(performance.now() - start);
-
     // 1. Check real runtime reference equality in JavaScript heap memory
     // When deduplicated, calls share the EXACT SAME resolved tuple in memory!
     const isH2Shared = h2 === h1;
@@ -72,12 +66,7 @@ export function BatchingLab({ onLogCall }: BatchingLabProps) {
     const isT2Shared = t2 === t1;
 
     // 2. Query real batch telemetry tracked by the client batch manager
-    const metrics =
-      typeof (rpc as any).$batch === "function"
-        ? (rpc as any).$batch()
-        : typeof (rpc as any).getBatchMetrics === "function"
-          ? (rpc as any).getBatchMetrics()
-          : undefined;
+    const metrics = rpc.$batch();
 
     const ranBatch = (metrics?.totalBatches ?? 0) > prevBatches;
     const lastBatch = ranBatch ? metrics?.lastBatch : undefined;
@@ -86,7 +75,7 @@ export function BatchingLab({ onLogCall }: BatchingLabProps) {
     const realNetworkCalls = ranBatch ? 1 : 5;
     const realDeduped = ranBatch
       ? (lastBatch?.dedupedCount ??
-         ((isH2Shared ? 1 : 0) + (isH3Shared ? 1 : 0) + (isT2Shared ? 1 : 0)))
+        (isH2Shared ? 1 : 0) + (isH3Shared ? 1 : 0) + (isT2Shared ? 1 : 0))
       : 0;
 
     if (ranBatch) {
@@ -355,9 +344,7 @@ export function BatchingLab({ onLogCall }: BatchingLabProps) {
               query dispatched independently over the network as a dedicated GET
               request (0 calls pooled or deduplicated). Uncomment{" "}
               <code className="font-mono font-semibold">batch: true</code> in{" "}
-              <code className="font-mono">
-                examples/src/lib/rpc/client.ts
-              </code>{" "}
+              <code className="font-mono">examples/src/lib/rpc/client.ts</code>{" "}
               to pool concurrent calls into a single payload.
             </p>
           </div>

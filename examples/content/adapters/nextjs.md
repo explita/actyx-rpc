@@ -112,7 +112,7 @@ export type AppRouter = typeof appRouter;
 Create a catch-all route at `app/api/rpc/[...rpc]/route.ts`:
 
 ```ts
-// app/api/rpc/[...rpc]/route.ts
+// app/api/rpc/[[...rpc]]/route.ts
 import { createHandler } from "@explita/actyx-rpc/adapters/next";
 import { appRouter } from "@/backend/router";
 
@@ -128,6 +128,9 @@ export const {
 } = createHandler(appRouter);
 ```
 
+> [!TIP]
+> Using an **optional catch-all** (`[[...rpc]]`) instead of a strict catch-all (`[...rpc]`) allows the same route file to handle both the base `/api/rpc` root (for query-routing or batch endpoints) and subpaths like `/api/rpc/todos/list`.
+
 ### Procedure Routing Strategies
 
 `createHandler` supports both path-based and query-based procedure resolution:
@@ -137,6 +140,14 @@ export const {
    - Nested dynamic segments like `/api/rpc/todos/list` also map cleanly to `todos.list`.
 2. **Query Routing**:
    - Request to `/api/rpc?procedure=todos.list` resolves to `appRouter.todos.list`.
+
+### HTTP Request Batching
+
+`createHandler` natively processes batched HTTP requests dispatched by `@explita/actyx-rpc-react`:
+- Detects batch payloads via query parameter `?batch=1`, route segment `/api/rpc/batch`, or the `x-actyx-batch: 1` header.
+- Concurrently resolves all procedure calls in the batch array.
+- Ensures each procedure receives an isolated asynchronous storage context for headers and cookies.
+- Responds with `200 OK` containing a JSON array of keyed results `[{ id, result: [data, error] }]`.
 
 ### Multipart & File Upload Support
 

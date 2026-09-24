@@ -69,7 +69,10 @@ export interface ClientInterceptors {
    */
   onRequest?: (
     ctx: InterceptorRequestContext,
-  ) => MaybePromise<void | { headers?: Record<string, string>; [key: string]: any }>;
+  ) => MaybePromise<void | {
+    headers?: Record<string, string>;
+    [key: string]: any;
+  }>;
 
   /**
    * Hook called when a response is received (both 2xx and non-2xx HTTP statuses).
@@ -106,6 +109,26 @@ export interface BatchOptions {
    * @default 50
    */
   maxBatchSize?: number;
+}
+
+export interface BatchMetrics {
+  totalBatches: number;
+  totalDispatched: number;
+  totalWireItems: number;
+  totalDeduplicated: number;
+  lastBatch?: {
+    timestamp: number;
+    dispatchedCount: number;
+    wireCount: number;
+    dedupedCount: number;
+    wirePayload: Array<{
+      id: number;
+      procedure: string;
+      input?: any;
+      args?: any[];
+    }>;
+    durationMs: number;
+  };
 }
 
 export interface CreateClientOptions {
@@ -634,7 +657,7 @@ export type InferProcArgs<FnArgs extends unknown[]> = FnArgs extends []
       ? { input: First; args: Rest }
       : { input: undefined; args: [] };
 
-export type ClientInstance<T> = {
+export type ClientRouterMethods<T> = {
   [K in keyof T as T[K] extends {
     _def: { type: "webRoute" };
   }
@@ -724,5 +747,22 @@ export type ClientInstance<T> = {
                       }
                       ? WSCall<I, P extends unknown[] ? P : []>
                       : never
-                    : ClientInstance<T[K]>;
+                    : ClientRouterMethods<T[K]>;
+};
+
+export type ClientInstance<T> = ClientRouterMethods<T> & {
+  /**
+   * Real-time batching and link deduplication metrics.
+   *
+   * @example
+   * ```ts
+   * const metrics = rpc.$batch();
+   * console.log(metrics.totalBatches, metrics.totalDeduplicated);
+   * ```
+   */
+  $batch: () => BatchMetrics;
+  // /**
+  //  * Alias for `$batch()`. Returns real-time batching and link deduplication metrics.
+  //  */
+  // getBatchMetrics: () => BatchMetrics;
 };

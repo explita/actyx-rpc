@@ -3,6 +3,25 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-09-25
+
+### Added
+
+- **Native Standard Schema Support**:
+  - Implemented zero-dependency `StandardSchemaV1` interface specification.
+  - Enables passing schemas from Zod, Valibot, ArkType, and Yup directly into `.input()` and `.output()` without wrapper resolvers.
+  - Added `toSchemaResolver` runtime adapter normalizing standard schemas to internal validation results while maintaining full backward compatibility for legacy resolvers (`zodResolver`, etc.).
+- **Automated OpenAPI 3.1 Documentation**:
+  - Added recursive router flattening and OpenAPI 3.1.0 specification generator (`generateOpenApiDocument`).
+  - Added `createOpenApiHandler` helper for Next.js App Router endpoints.
+  - Safe mapping of Zod v4 `z.date()`, unions, and text/event-stream SSE procedures.
+- **Native HTTP Request Batching**:
+  - Added `createBatchHandler` to process batched procedure calls concurrently in a single request.
+  - Integrated batch detection into Next.js `createHandler` supporting query parameter `?batch=1`, route segment `/api/rpc/batch`, or `x-actyx-batch: 1`.
+  - Added optional catch-all route support (`[[...rpc]]`) to seamlessly handle root and nested procedure routes.
+
+---
+
 ## [0.10.0] - 2026-09-23
 
 ### Added

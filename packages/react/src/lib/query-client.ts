@@ -575,7 +575,7 @@ export class QueryClient {
         >)
       | (() => Promise<TOutput>)
       | (() => Promise<any>),
-    opts?: { staleTime?: WindowTime },
+    opts?: { staleTime?: WindowTime; unwrap?: boolean },
   ): Promise<void>;
   async prefetchQuery<TOutput = any, TError = any>(
     arg1:
@@ -591,11 +591,11 @@ export class QueryClient {
         >)
       | (() => Promise<TOutput>)
       | (() => Promise<any>),
-    arg3?: { staleTime?: WindowTime },
+    arg3?: { staleTime?: WindowTime; unwrap?: boolean },
   ): Promise<void> {
     let rawKey: any;
     let fetcher: (() => Promise<any>) | undefined;
-    let opts: { staleTime?: WindowTime } | undefined;
+    let opts: { staleTime?: WindowTime; unwrap?: boolean } | undefined;
 
     if (
       typeof arg1 === "object" &&
@@ -606,7 +606,7 @@ export class QueryClient {
       const options = arg1 as PrefetchQueryOptions<TOutput, TError>;
       rawKey = options.queryKey;
       fetcher = options.queryFn;
-      opts = { staleTime: options.staleTime };
+      opts = { staleTime: options.staleTime, unwrap: options.unwrap };
     } else {
       rawKey = arg1;
       fetcher = arg2;
@@ -652,6 +652,16 @@ export class QueryClient {
         err = result[1];
       } else {
         data = result;
+      }
+
+      // If unwrap: true, unwrap the inner data property (e.g., data / data[] / [])
+      if (
+        opts?.unwrap === true &&
+        data &&
+        typeof data === "object" &&
+        "data" in data
+      ) {
+        data = (data as any).data;
       }
     } catch (e) {
       err = e;

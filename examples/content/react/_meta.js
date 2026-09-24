@@ -1,6 +1,9 @@
 export default {
   setup: "Setup & Provider",
   "client-proxy": "Client Proxy SDK",
+  "ssr-hydration": "SSR Hydration & Persistence",
+  batching: "Request Batching & Deduplication",
+  devtools: "Actyx DevTools",
   queries: "Queries & Parallel Fetching",
   "infinite-queries": "Infinite Queries",
   "paginated-queries": "Paginated Queries",
