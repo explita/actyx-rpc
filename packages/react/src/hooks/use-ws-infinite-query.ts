@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useMemo, useRef } from "react";
 import { useInfiniteQuery } from "./use-infinite-query.js";
 import { useWS } from "./use-ws.js";

@@ -29,9 +29,23 @@ export function parseWindow(window?: WindowTime): number {
   }
 }
 
-export function normalizeKey(key?: string | unknown[]): string | undefined {
-  if (!key) return undefined;
+export function normalizeKey(
+  key?:
+    | string
+    | unknown[]
+    | { getQueryKey: (...args: any[]) => unknown[] }
+    | unknown,
+): string | undefined {
+  if (key === undefined || key === null) return undefined;
   if (typeof key === "string") return key;
+  if (
+    typeof key === "object" &&
+    key !== null &&
+    "getQueryKey" in key &&
+    typeof (key as any).getQueryKey === "function"
+  ) {
+    return normalizeKey((key as any).getQueryKey());
+  }
   if (Array.isArray(key)) {
     return key
       .map((i) =>

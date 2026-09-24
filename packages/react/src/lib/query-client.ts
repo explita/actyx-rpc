@@ -10,6 +10,12 @@ import {
   QueryState,
   QueryCacheEntry,
   MutationLogEntry,
+  DehydratedQuery,
+  DehydratedMutation,
+  DehydratedState,
+  DehydrateOptions,
+  HydrateOptions,
+  PrefetchQueryOptions,
 } from "../types/query-client.js";
 
 export class QueryClient {
@@ -21,12 +27,14 @@ export class QueryClient {
   private defaultOptions: DefaultOptions;
   private queryDefaults = new Map<string, DefaultQueryOptions>();
   private mutationDefaults = new Map<string, DefaultMutationOptions>();
+  private maxCacheSize: number;
 
   constructor(config?: QueryClientConfig) {
     this.defaultOptions = {
       queries: config?.queries,
       mutations: config?.mutations,
     };
+    this.maxCacheSize = config?.maxCacheSize ?? 1000;
   }
 
   getDefaultOptions(): DefaultOptions {
@@ -134,9 +142,95 @@ export class QueryClient {
 
     const newState = { ...existing, ...state };
     this.cache.set(queryKey, newState);
+    this.pruneCache();
+
+    // If no active observers, schedule GC so cache doesn't grow indefinitely
+    if (!this.listeners.get(queryKey)?.size) {
+      this.scheduleGc(queryKey);
+    }
 
     if (!options?.silent) {
       this.notify(queryKey);
+    }
+  }
+
+  /**
+   * Schedules garbage collection for an inactive query key (0 active observers).
+   * Does nothing if the query has active subscribers or gcTime is Infinity.
+   */
+  scheduleGc(queryKey: string, gcTime?: WindowTime): void {
+    if (this.listeners.get(queryKey)?.size) {
+      return;
+    }
+
+    this.cancelGc(queryKey);
+
+    const defaultGc = this.getQueryDefaults(queryKey)?.gcTime;
+    const resolvedGc = gcTime !== undefined ? gcTime : defaultGc;
+    const gcMs = resolvedGc !== undefined ? parseWindow(resolvedGc) : 300000;
+
+    if (gcMs === Infinity) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!this.listeners.get(queryKey)?.size) {
+        this.cache.delete(queryKey);
+        this.gcTimers.delete(queryKey);
+        this.invalidateListeners.delete(queryKey);
+      }
+    }, gcMs);
+
+    if (
+      typeof timer === "object" &&
+      timer !== null &&
+      "unref" in timer &&
+      typeof (timer as any).unref === "function"
+    ) {
+      (timer as any).unref();
+    }
+
+    this.gcTimers.set(queryKey, timer);
+  }
+
+  /**
+   * Cancels any pending garbage collection timer for a query key.
+   */
+  cancelGc(queryKey: string): void {
+    const existingGc = this.gcTimers.get(queryKey);
+    if (existingGc) {
+      clearTimeout(existingGc);
+      this.gcTimers.delete(queryKey);
+    }
+  }
+
+  /**
+   * Evicts the oldest inactive queries (0 active observers) in LRU order
+   * when cache entries exceed maxCacheSize.
+   */
+  private pruneCache(): void {
+    if (this.cache.size <= this.maxCacheSize) {
+      return;
+    }
+
+    const inactiveEntries: { key: string; updatedAt: number }[] = [];
+    for (const [key, state] of this.cache.entries()) {
+      const hasListeners = (this.listeners.get(key)?.size ?? 0) > 0;
+      if (!hasListeners) {
+        inactiveEntries.push({ key, updatedAt: state.updatedAt ?? 0 });
+      }
+    }
+
+    // Sort ascending by updatedAt (oldest / least recently updated first)
+    inactiveEntries.sort((a, b) => a.updatedAt - b.updatedAt);
+
+    for (const entry of inactiveEntries) {
+      if (this.cache.size <= this.maxCacheSize) {
+        break;
+      }
+      this.cancelGc(entry.key);
+      this.cache.delete(entry.key);
+      this.invalidateListeners.delete(entry.key);
     }
   }
 
@@ -146,16 +240,8 @@ export class QueryClient {
     }
     this.listeners.get(queryKey)!.add(listener);
 
-    // Cancel pending GC timeout
-    const existingGc = this.gcTimers.get(queryKey);
-    if (existingGc) {
-      clearTimeout(existingGc);
-      this.gcTimers.delete(queryKey);
-    }
-
-    const defaultGc = this.getQueryDefaults(queryKey)?.gcTime;
-    const resolvedGc = gcTime !== undefined ? gcTime : defaultGc;
-    const gcMs = resolvedGc !== undefined ? parseWindow(resolvedGc) : 300000;
+    // Cancel pending GC timeout while actively subscribed
+    this.cancelGc(queryKey);
 
     return () => {
       const set = this.listeners.get(queryKey);
@@ -163,14 +249,7 @@ export class QueryClient {
         set.delete(listener);
         if (set.size === 0) {
           this.listeners.delete(queryKey);
-
-          // Schedule GC
-          const timer = setTimeout(() => {
-            this.cache.delete(queryKey);
-            this.gcTimers.delete(queryKey);
-            this.invalidateListeners.delete(queryKey);
-          }, gcMs);
-          this.gcTimers.set(queryKey, timer);
+          this.scheduleGc(queryKey, gcTime);
         }
       }
     };
@@ -204,17 +283,25 @@ export class QueryClient {
     return false;
   }
 
-  getQueryData<TData = any>(queryKey: string | unknown[]): TData | undefined {
-    const key = Array.isArray(queryKey)
-      ? queryKey.map(String).join("|")
-      : String(queryKey);
+  getQueryData<TData = any>(
+    queryKey:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
+  ): TData | undefined {
+    const key = normalizeKey(queryKey);
+    if (!key) return undefined;
     return this.cache.get(key)?.data as TData | undefined;
   }
 
-  resetQuery(queryKey: string | unknown[]) {
-    const prefix = Array.isArray(queryKey)
-      ? queryKey.map(String).join("|")
-      : String(queryKey);
+  resetQuery(
+    queryKey:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
+  ) {
+    const prefix = normalizeKey(queryKey);
+    if (!prefix) return;
     for (const key of this.cache.keys()) {
       if (key === prefix || key.startsWith(prefix + "|")) {
         this.setQueryState(key, {
@@ -291,6 +378,47 @@ export class QueryClient {
   }
 
   /**
+   * Manually removes queries from the cache matching a key, key prefix, or filter predicate.
+   */
+  removeQueries(
+    queryKeyOrFilter?:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] }
+      | ((entry: QueryCacheEntry) => boolean),
+  ): void {
+    if (typeof queryKeyOrFilter === "function") {
+      const entries = this.getCacheEntries();
+      for (const entry of entries) {
+        if (queryKeyOrFilter(entry)) {
+          this.cancelGc(entry.queryKey);
+          this.cache.delete(entry.queryKey);
+          this.listeners.delete(entry.queryKey);
+          this.invalidateListeners.delete(entry.queryKey);
+        }
+      }
+      this.globalListeners.forEach((listener) => listener());
+      return;
+    }
+
+    const prefix = normalizeKey(queryKeyOrFilter);
+    if (!prefix) {
+      this.clearCache();
+      return;
+    }
+
+    for (const key of Array.from(this.cache.keys())) {
+      if (key === prefix || key.startsWith(prefix + "|")) {
+        this.cancelGc(key);
+        this.cache.delete(key);
+        this.listeners.delete(key);
+        this.invalidateListeners.delete(key);
+      }
+    }
+    this.globalListeners.forEach((listener) => listener());
+  }
+
+  /**
    * Returns a snapshot of all cached queries with their current state,
    * freshness status, and active subscriber counts (used by DevTools).
    */
@@ -321,11 +449,14 @@ export class QueryClient {
   }
 
   setQueryData<TData = any>(
-    queryKeyArr: unknown[],
+    queryKey:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
     updater: TData | ((oldData: TData | undefined) => TData),
   ): [TData | undefined, TData] {
-    const queryKey = queryKeyArr.map(String).join("|");
-    const existing = this.getQueryState(queryKey);
+    const key = normalizeKey(queryKey) ?? String(queryKey);
+    const existing = this.getQueryState(key);
     const oldData = existing?.data as TData | undefined;
 
     const newData =
@@ -333,31 +464,83 @@ export class QueryClient {
         ? (updater as (oldData: TData | undefined) => TData)(oldData)
         : updater;
 
-    this.setQueryState(queryKey, {
+    this.setQueryState(key, {
       data: newData,
       isSuccess: true,
       updatedAt: Date.now(),
+      isFetched: true,
     });
 
     return [oldData, newData];
   }
 
-  async prefetchQuery<TOutput, TError = any>(
-    queryKeyArr: unknown[],
+  async prefetchQuery<TOutput = any, TError = any>(
+    options: PrefetchQueryOptions<TOutput, TError>,
+  ): Promise<void>;
+  async prefetchQuery<TOutput = any, TError = any>(
+    queryKey:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
     fetcher:
       | (() => Promise<ProcQueryResult<TOutput>>)
       | (() => Promise<[TOutput, null] | [null, TError]>)
       | (() => Promise<
           ([TOutput, null] | [null, TError]) & { readonly _type?: "query" }
-        >),
+        >)
+      | (() => Promise<TOutput>)
+      | (() => Promise<any>),
     opts?: { staleTime?: WindowTime },
+  ): Promise<void>;
+  async prefetchQuery<TOutput = any, TError = any>(
+    arg1:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] }
+      | PrefetchQueryOptions<TOutput, TError>,
+    arg2?:
+      | (() => Promise<ProcQueryResult<TOutput>>)
+      | (() => Promise<[TOutput, null] | [null, TError]>)
+      | (() => Promise<
+          ([TOutput, null] | [null, TError]) & { readonly _type?: "query" }
+        >)
+      | (() => Promise<TOutput>)
+      | (() => Promise<any>),
+    arg3?: { staleTime?: WindowTime },
   ): Promise<void> {
-    const queryKey = queryKeyArr.map(String).join("|");
+    let rawKey: any;
+    let fetcher: (() => Promise<any>) | undefined;
+    let opts: { staleTime?: WindowTime } | undefined;
+
+    if (
+      typeof arg1 === "object" &&
+      arg1 !== null &&
+      "queryKey" in arg1 &&
+      "queryFn" in arg1
+    ) {
+      const options = arg1 as PrefetchQueryOptions<TOutput, TError>;
+      rawKey = options.queryKey;
+      fetcher = options.queryFn;
+      opts = { staleTime: options.staleTime };
+    } else {
+      rawKey = arg1;
+      fetcher = arg2;
+      opts = arg3;
+    }
+
+    if (!fetcher) return;
+
+    const queryKey = normalizeKey(rawKey);
+    if (!queryKey) return;
+
     const existing = this.getQueryState(queryKey);
 
     // Check if data is already fresh
+    const defaultStale = this.getQueryDefaults(queryKey)?.staleTime;
+    const resolvedStale =
+      opts?.staleTime !== undefined ? opts.staleTime : defaultStale;
     const staleTime =
-      opts?.staleTime !== undefined ? parseWindow(opts.staleTime) : 0;
+      resolvedStale !== undefined ? parseWindow(resolvedStale) : 0;
     if (existing?.isSuccess && existing.updatedAt) {
       if (Date.now() - existing.updatedAt < staleTime) {
         return;
@@ -366,8 +549,28 @@ export class QueryClient {
 
     this.setQueryState(queryKey, { isFetching: true });
 
-    const result = await globalRequestManager.fetch(queryKey, fetcher as any);
-    const [data, err] = result as [TOutput, null] | [null, TError];
+    let data: any;
+    let err: any = null;
+
+    try {
+      const result = await globalRequestManager.fetch(queryKey, async () => {
+        return await fetcher!();
+      });
+
+      // Automatically unwrap Actyx RPC tuple returns [data, err]
+      if (
+        Array.isArray(result) &&
+        result.length === 2 &&
+        (result[1] === null || (result[0] === null && result[1] !== null))
+      ) {
+        data = result[0];
+        err = result[1];
+      } else {
+        data = result;
+      }
+    } catch (e) {
+      err = e;
+    }
 
     if (!err) {
       this.setQueryState(queryKey, {
@@ -383,6 +586,140 @@ export class QueryClient {
       this.setQueryState(queryKey, {
         error: err,
         isError: true,
+        isSuccess: false,
+        isFetching: false,
+        isFetched: true,
+      });
+    }
+  }
+
+  async prefetchInfiniteQuery<TOutput = any, TError = any>(
+    options: PrefetchQueryOptions<TOutput, TError> & { initialPageParam?: any },
+  ): Promise<void>;
+  async prefetchInfiniteQuery<TOutput = any, TError = any>(
+    queryKey:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
+    fetcher:
+      | (() => Promise<ProcQueryResult<TOutput>>)
+      | (() => Promise<[TOutput, null] | [null, TError]>)
+      | (() => Promise<TOutput>)
+      | (() => Promise<any>),
+    opts?: { staleTime?: WindowTime; initialPageParam?: any },
+  ): Promise<void>;
+  async prefetchInfiniteQuery<TOutput = any, TError = any>(
+    arg1:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] }
+      | (PrefetchQueryOptions<TOutput, TError> & { initialPageParam?: any }),
+    arg2?:
+      | (() => Promise<ProcQueryResult<TOutput>>)
+      | (() => Promise<[TOutput, null] | [null, TError]>)
+      | (() => Promise<TOutput>)
+      | (() => Promise<any>),
+    arg3?: { staleTime?: WindowTime; initialPageParam?: any },
+  ): Promise<void> {
+    let rawKey: any;
+    let fetcher: (() => Promise<any>) | undefined;
+    let opts: { staleTime?: WindowTime; initialPageParam?: any } | undefined;
+
+    if (
+      typeof arg1 === "object" &&
+      arg1 !== null &&
+      "queryKey" in arg1 &&
+      "queryFn" in arg1
+    ) {
+      const options = arg1 as PrefetchQueryOptions<TOutput, TError> & {
+        initialPageParam?: any;
+      };
+      rawKey = options.queryKey;
+      fetcher = options.queryFn;
+      opts = {
+        staleTime: options.staleTime,
+        initialPageParam: options.initialPageParam,
+      };
+    } else {
+      rawKey = arg1;
+      fetcher = arg2;
+      opts = arg3;
+    }
+
+    if (!fetcher) return;
+
+    const queryKey = normalizeKey(rawKey);
+    if (!queryKey) return;
+
+    const existing = this.getQueryState(queryKey);
+    const defaultStale = this.getQueryDefaults(queryKey)?.staleTime;
+    const resolvedStale =
+      opts?.staleTime !== undefined ? opts.staleTime : defaultStale;
+    const staleTime =
+      resolvedStale !== undefined ? parseWindow(resolvedStale) : 0;
+    if (existing?.isSuccess && existing.updatedAt) {
+      if (Date.now() - existing.updatedAt < staleTime) {
+        return;
+      }
+    }
+
+    this.setQueryState(queryKey, { isFetching: true });
+
+    let pageData: any;
+    let err: any = null;
+
+    try {
+      const result = await globalRequestManager.fetch(queryKey, async () => {
+        return await fetcher!();
+      });
+
+      if (
+        Array.isArray(result) &&
+        result.length === 2 &&
+        (result[1] === null || (result[0] === null && result[1] !== null))
+      ) {
+        pageData = result[0];
+        err = result[1];
+      } else {
+        pageData = result;
+      }
+    } catch (e) {
+      err = e;
+    }
+
+    if (!err) {
+      const initialParam = opts?.initialPageParam;
+      const infinitePayload = {
+        pages: [pageData],
+        pageParams: initialParam !== undefined ? [initialParam] : [],
+      };
+      this.setQueryState(queryKey, {
+        data: infinitePayload,
+        error: undefined,
+        isError: false,
+        isSuccess: true,
+        isFetching: false,
+        updatedAt: Date.now(),
+        isFetched: true,
+      });
+
+      // Mirror to suffixed key so proxy rpc.<proc>.useInfiniteQuery finds it immediately
+      if (!queryKey.endsWith("|infinite")) {
+        this.setQueryState(`${queryKey}|infinite`, {
+          data: infinitePayload,
+          error: undefined,
+          isError: false,
+          isSuccess: true,
+          isFetching: false,
+          updatedAt: Date.now(),
+          isFetched: true,
+        });
+      }
+    } else {
+      this.setQueryState(queryKey, {
+        error: err,
+        isError: true,
+        isSuccess: false,
         isFetching: false,
         isFetched: true,
       });
@@ -435,7 +772,9 @@ export class QueryClient {
   recordMutationStart(mutationKey?: unknown[], variables?: any): string {
     const id =
       "mut_" + Math.random().toString(36).slice(2, 9) + "_" + Date.now();
-    const keyStr = mutationKey ? mutationKey.map(String).join("|") : "anonymous";
+    const keyStr = mutationKey
+      ? mutationKey.map(String).join("|")
+      : "anonymous";
     const entry: MutationLogEntry = {
       id,
       mutationKey: keyStr,
@@ -994,4 +1333,134 @@ export class QueryClient {
       this.setQueryState(queryKey, { data: savedData });
     };
   }
+
+  /**
+   * Serializes the current query cache into a plain serializable JSON object
+   * suitable for passing from Server Components to Client Components.
+   */
+  dehydrate(options?: DehydrateOptions): DehydratedState {
+    const shouldDehydrateQuery =
+      options?.shouldDehydrateQuery ??
+      ((entry: QueryCacheEntry) =>
+        entry.state.data !== undefined && entry.state.isSuccess);
+
+    const queries: DehydratedQuery[] = [];
+    const entries = this.getCacheEntries();
+
+    for (const entry of entries) {
+      if (shouldDehydrateQuery(entry)) {
+        queries.push({
+          queryKey: entry.queryKey,
+          data: entry.state.data,
+          updatedAt: entry.state.updatedAt,
+        });
+      }
+    }
+
+    const mutations: DehydratedMutation[] = [];
+    if (options?.shouldDehydrateMutation) {
+      for (const entry of this.mutationHistory) {
+        if (options.shouldDehydrateMutation(entry)) {
+          mutations.push({
+            id: entry.id,
+            mutationKey: entry.mutationKey,
+            status: entry.status,
+            startedAt: entry.startedAt,
+            durationMs: entry.durationMs,
+            variables: entry.variables,
+            data: entry.data,
+          });
+        }
+      }
+    }
+
+    return {
+      queries,
+      ...(mutations.length > 0 ? { mutations } : {}),
+    };
+  }
+
+  /**
+   * Hydrates a serialized state snapshot into the query cache.
+   * Will not overwrite client cache entries that have a newer updatedAt timestamp.
+   */
+  hydrate(dehydratedState: DehydratedState, options?: HydrateOptions): void {
+    if (!dehydratedState || !Array.isArray(dehydratedState.queries)) {
+      return;
+    }
+
+    if (options?.defaultOptions?.queries) {
+      this.setDefaultOptions({
+        ...this.defaultOptions,
+        queries: {
+          ...this.defaultOptions.queries,
+          ...options.defaultOptions.queries,
+        },
+      });
+    }
+
+    for (const dehydratedQuery of dehydratedState.queries) {
+      const existing = this.getQueryState(dehydratedQuery.queryKey);
+
+      // Conflict resolution: don't overwrite if existing client state has a newer updatedAt
+      if (
+        existing &&
+        existing.updatedAt &&
+        existing.updatedAt >= dehydratedQuery.updatedAt
+      ) {
+        continue;
+      }
+
+      this.setQueryState(dehydratedQuery.queryKey, {
+        data: dehydratedQuery.data,
+        error: undefined,
+        isError: false,
+        isSuccess: true,
+        isFetching: false,
+        isFetched: true,
+        updatedAt: dehydratedQuery.updatedAt ?? Date.now(),
+      });
+    }
+  }
+}
+
+/**
+ * Standalone helper to dehydrate a QueryClient instance into a plain JSON object.
+ *
+ * @example
+ * ```tsx
+ * // app/todos/page.tsx (Server Component)
+ * const queryClient = new QueryClient();
+ * await queryClient.prefetchQuery(["todos", "list"], () => appRouter.todos.list());
+ *
+ * return (
+ *   <HydrationBoundary state={dehydrate(queryClient)}>
+ *     <TodoListClient />
+ *   </HydrationBoundary>
+ * );
+ * ```
+ */
+export function dehydrate(
+  client: QueryClient,
+  options?: DehydrateOptions,
+): DehydratedState {
+  return client.dehydrate(options);
+}
+
+/**
+ * Standalone helper to hydrate a dehydrated state into a QueryClient.
+ */
+export function hydrate(
+  client: QueryClient,
+  dehydratedState: DehydratedState,
+  options?: HydrateOptions,
+): void {
+  client.hydrate(dehydratedState, options);
+}
+
+/**
+ * Creates a new QueryClient instance.
+ */
+export function createQueryClient(config?: QueryClientConfig): QueryClient {
+  return new QueryClient(config);
 }

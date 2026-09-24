@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useId, useRef } from "react";
 import { useQuery } from "./use-query.js";
 import {

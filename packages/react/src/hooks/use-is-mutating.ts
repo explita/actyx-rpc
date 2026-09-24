@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useSyncExternalStore } from "react";
 import { useQueryClient } from "../provider.js";
 

@@ -1,4 +1,5 @@
 import type { ErrorResponse, WindowTime } from "./main.js";
+import type { QueryResult as ProcQueryResult } from "./misc.js";
 
 export type DefaultQueryOptions = {
   enabled?: boolean;
@@ -31,6 +32,7 @@ export type DefaultMutationOptions = {
 export interface QueryClientConfig {
   queries?: DefaultQueryOptions;
   mutations?: DefaultMutationOptions;
+  maxCacheSize?: number;
 }
 
 export type DefaultOptions = QueryClientConfig;
@@ -64,4 +66,52 @@ export type QueryCacheEntry = {
   listenersCount: number;
   staleTimeMs: number;
 };
+
+export type DehydratedQuery = {
+  queryKey: string;
+  data: any;
+  updatedAt: number;
+};
+
+export type DehydratedMutation = {
+  id?: string;
+  mutationKey: string;
+  status: "pending" | "success" | "error";
+  startedAt: number;
+  durationMs?: number;
+  variables?: any;
+  data?: any;
+};
+
+export type DehydratedState = {
+  queries: DehydratedQuery[];
+  mutations?: DehydratedMutation[];
+};
+
+export type DehydrateOptions = {
+  shouldDehydrateQuery?: (query: QueryCacheEntry) => boolean;
+  shouldDehydrateMutation?: (mutation: MutationLogEntry) => boolean;
+};
+
+export type HydrateOptions = {
+  defaultOptions?: {
+    queries?: {
+      staleTime?: WindowTime;
+    };
+  };
+};
+
+export type PrefetchQueryOptions<TOutput = any, TError = any> = {
+  queryKey:
+    | string
+    | unknown[]
+    | { getQueryKey: (...args: any[]) => unknown[] };
+  queryFn:
+    | (() => Promise<ProcQueryResult<TOutput>>)
+    | (() => Promise<[TOutput, null] | [null, TError]>)
+    | (() => Promise<TOutput>)
+    | (() => Promise<any>);
+  staleTime?: WindowTime;
+};
+
 

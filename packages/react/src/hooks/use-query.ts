@@ -1,3 +1,5 @@
+"use client";
+
 import type { ErrorResponse, ExtractProcOutput } from "../types/main.js";
 import {
   useCallback,
@@ -402,8 +404,15 @@ export function useQuery<
   const data = state.data;
   const selectedData = useMemo(() => {
     if (data === undefined) return undefined;
-    if (callbacksRef.current.select) return callbacksRef.current.select(data);
-    return data;
+    const resolved =
+      callbacksRef.current.unwrap === true &&
+      data &&
+      typeof data === "object" &&
+      "data" in data
+        ? (data as any).data
+        : data;
+    if (callbacksRef.current.select) return callbacksRef.current.select(resolved);
+    return resolved;
   }, [data]);
 
   const isEmpty =

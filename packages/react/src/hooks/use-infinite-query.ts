@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useCallback,
   useEffect,
@@ -19,6 +21,7 @@ import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { defaultSyncSelection, parseWindow } from "../lib/utils.js";
 import { Timeout } from "../types/misc.js";
+import type { QueryState } from "../types/query-client.js";
 
 type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   pages: TFullPage[];
@@ -127,14 +130,56 @@ export function useInfiniteQuery<
   });
 
   // Initialize cache
-  const existingState = queryClient.getQueryState(queryKey);
+  let existingState = queryClient.getQueryState(queryKey);
+  if (!existingState) {
+    const altKey = queryKey.endsWith("|infinite")
+      ? queryKey.slice(0, -9)
+      : `${queryKey}|infinite`;
+    const altState = queryClient.getQueryState(altKey);
+    if (altState?.isSuccess && altState.data !== undefined) {
+      existingState = altState;
+    }
+  }
+
   const existingData = existingState?.data;
   const hasValidInfData =
     existingData !== null &&
     typeof existingData === "object" &&
     Array.isArray((existingData as any).pages);
 
-  if (!existingState || !hasValidInfData) {
+  if (existingState?.isSuccess && existingData && !hasValidInfData) {
+    const liftedData = {
+      pages: [existingData],
+      pageParams: (initialPageParam !== undefined
+        ? [initialPageParam]
+        : []) as (string | number)[],
+    };
+    queryClient.setQueryState(
+      queryKey,
+      {
+        data: liftedData,
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: true,
+        updatedAt: existingState.updatedAt || Date.now(),
+        isFetched: true,
+      },
+      { silent: true },
+    );
+  } else if (
+    !queryClient.getQueryState(queryKey) &&
+    existingState &&
+    hasValidInfData
+  ) {
+    queryClient.setQueryState(
+      queryKey,
+      {
+        ...existingState,
+      },
+      { silent: true },
+    );
+  } else if (!existingState || !hasValidInfData) {
     const resolvedInitialData =
       typeof initialData === "function" ? initialData() : initialData;
     queryClient.setQueryState(
@@ -157,13 +202,23 @@ export function useInfiniteQuery<
     );
   }
 
+  const defaultSnapshotRef = useRef<QueryState>({
+    data: undefined,
+    error: undefined,
+    isFetching: false,
+    isError: false,
+    isSuccess: false,
+    updatedAt: 0,
+    isFetched: false,
+  });
+
   const subscribe = useCallback(
     (onChange: () => void) => queryClient.subscribe(queryKey, onChange, gcTime),
     [queryClient, queryKey, gcTime],
   );
 
   const getSnapshot = useCallback(
-    () => queryClient.getQueryState(queryKey)!,
+    () => queryClient.getQueryState(queryKey) ?? defaultSnapshotRef.current,
     [queryClient, queryKey],
   );
 
@@ -191,7 +246,13 @@ export function useInfiniteQuery<
   const fetchingRef = useRef(false);
 
   const flattenedData = pages.flatMap((page) =>
-    page && Array.isArray((page as any).data) ? (page as any).data : [],
+    Array.isArray(page)
+      ? page
+      : page && Array.isArray((page as any).data)
+        ? (page as any).data
+        : page !== undefined && page !== null
+          ? [page]
+          : [],
   );
   const lastPage = pages.length > 0 ? pages[pages.length - 1] : undefined;
   const hasNext = lastPage

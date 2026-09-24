@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useCallback,
   useEffect,
@@ -17,7 +19,8 @@ import type {
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { parseWindow } from "../lib/utils.js";
-import { QueryResult, Timeout } from "../types/misc.js";
+import { Timeout } from "../types/misc.js";
+import type { QueryState } from "../types/query-client.js";
 
 type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   pages: TFullPage[];
@@ -113,7 +116,52 @@ export function usePaginatedQuery<
   });
 
   // Initialize cache
-  if (!queryClient.getQueryState(queryKey)) {
+  let existingState = queryClient.getQueryState(queryKey);
+  if (!existingState && queryKey.endsWith("|paginated")) {
+    const baseKey = queryKey.slice(0, -10);
+    const baseState = queryClient.getQueryState(baseKey);
+    if (baseState?.isSuccess && baseState.data !== undefined) {
+      existingState = baseState;
+    }
+  }
+
+  const existingData = existingState?.data;
+  const hasValidInfData =
+    existingData !== null &&
+    typeof existingData === "object" &&
+    Array.isArray((existingData as any).pages);
+
+  if (existingState?.isSuccess && existingData && !hasValidInfData) {
+    const liftedData = {
+      pages: [existingData],
+      pageParams: [initialPageParam].filter(Boolean) as (string | number)[],
+    };
+    queryClient.setQueryState(
+      queryKey,
+      {
+        data: liftedData,
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: true,
+        updatedAt: existingState.updatedAt || Date.now(),
+        isFetched: true,
+      },
+      { silent: true },
+    );
+  } else if (
+    !queryClient.getQueryState(queryKey) &&
+    existingState &&
+    hasValidInfData
+  ) {
+    queryClient.setQueryState(
+      queryKey,
+      {
+        ...existingState,
+      },
+      { silent: true },
+    );
+  } else if (!existingState || !hasValidInfData) {
     const resolvedInitialData =
       typeof initialData === "function" ? initialData() : initialData;
     queryClient.setQueryState(
@@ -127,19 +175,29 @@ export function usePaginatedQuery<
         isFetching: false,
         isError: false,
         isSuccess: !!resolvedInitialData,
-        // updatedAt: resolvedInitialData ? Date.now() : undefined,
+        updatedAt: resolvedInitialData ? Date.now() : undefined,
         isFetched: !!resolvedInitialData,
       },
       { silent: true },
     );
   }
 
+  const defaultSnapshotRef = useRef<QueryState>({
+    data: undefined,
+    error: undefined,
+    isFetching: false,
+    isError: false,
+    isSuccess: false,
+    updatedAt: 0,
+    isFetched: false,
+  });
+
   const subscribe = useCallback(
     (onChange: () => void) => queryClient.subscribe(queryKey, onChange, gcTime),
     [queryClient, queryKey, gcTime],
   );
   const getSnapshot = useCallback(
-    () => queryClient.getQueryState(queryKey)!,
+    () => queryClient.getQueryState(queryKey) ?? defaultSnapshotRef.current,
     [queryClient, queryKey],
   );
 

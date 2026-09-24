@@ -656,8 +656,38 @@ export function createProxy(
             input,
             extraArgs,
           );
-          const qc = getCachedQueryClient();
+          const qc =
+            opts?.client ?? opts?.queryClient ?? getCachedQueryClient();
           return qc.prefetchQuery(
+            queryKey,
+            () =>
+              executeFetch(
+                baseUrl,
+                clientOpts,
+                path.join("."),
+                input,
+                { defaultMethod: "GET", ...opts },
+                extraArgs,
+              ),
+            opts,
+          );
+        };
+      } else if (
+        prop === "prefetchInfinite" ||
+        prop === "prefetchInfiniteQuery"
+      ) {
+        return (...rawArgs: any[]) => {
+          const { input, opts, extraArgs } = parseProcedureArgs(rawArgs);
+          const queryKey = buildQueryKey(
+            path,
+            opts?.queryKey,
+            input,
+            extraArgs,
+            "infinite",
+          );
+          const qc =
+            opts?.client ?? opts?.queryClient ?? getCachedQueryClient();
+          return qc.prefetchInfiniteQuery(
             queryKey,
             () =>
               executeFetch(
@@ -682,6 +712,19 @@ export function createProxy(
           );
           const qc = getCachedQueryClient();
           qc.resetQuery(queryKey);
+        };
+      } else if (prop === "remove" || prop === "removeQueries") {
+        return (...rawArgs: any[]) => {
+          const { input, opts, extraArgs } = parseProcedureArgs(rawArgs);
+          const queryKey = buildQueryKey(
+            path,
+            opts?.queryKey,
+            input,
+            extraArgs,
+          );
+          const qc =
+            opts?.client ?? opts?.queryClient ?? getCachedQueryClient();
+          qc.removeQueries(queryKey);
         };
       }
 

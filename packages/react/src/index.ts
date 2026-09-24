@@ -12,6 +12,7 @@ export * from "./hooks/use-ws-infinite-query.js";
 export * from "./hooks/use-sse-infinite-query.js";
 export * from "./provider.js";
 export * from "./lib/query-client.js";
+export * from "./hydration/hydration-boundary.js";
 export * from "./devtools/index.js";
 
 export * from "./client/index.js";

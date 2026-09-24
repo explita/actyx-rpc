@@ -12,6 +12,7 @@ describe("React: QueryClient Caching & Invalidation", () => {
   afterEach(() => {
     queryClient.clear();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("should initialize with empty cache and return undefined for unknown keys", () => {
@@ -390,6 +391,120 @@ describe("React: QueryClient Caching & Invalidation", () => {
 
       // Should have been garbage collected
       expect(client.getQueryState("user_gc")).toBeUndefined();
+    });
+  });
+
+  describe("Cache Garbage Collection and LRU Pruning", () => {
+    it("should automatically schedule GC for unobserved queries (prefetched / hydrated)", () => {
+      const client = new QueryClient({
+        queries: { gcTime: 500 },
+      });
+
+      // Insert without any active listeners
+      client.setQueryState("unobserved", { data: "cached_value" });
+      expect(client.getQueryState("unobserved")?.data).toBe("cached_value");
+
+      // Advance time by 499ms (not yet collected)
+      vi.advanceTimersByTime(499);
+      expect(client.getQueryState("unobserved")).toBeDefined();
+
+      // Advance by 1ms more to reach 500ms
+      vi.advanceTimersByTime(1);
+      expect(client.getQueryState("unobserved")).toBeUndefined();
+    });
+
+    it("should cancel pending GC when a component subscribes to an unobserved query", () => {
+      const client = new QueryClient({
+        queries: { gcTime: 500 },
+      });
+
+      client.setQueryState("prefetch_key", { data: "fresh" });
+
+      // Advance by 300ms
+      vi.advanceTimersByTime(300);
+
+      // Component mounts and subscribes!
+      const unsub = client.subscribe("prefetch_key", () => {});
+
+      // Advance by another 300ms (total 600ms > initial 500ms)
+      vi.advanceTimersByTime(300);
+
+      // Query is still safe in cache because component is subscribed
+      expect(client.getQueryState("prefetch_key")?.data).toBe("fresh");
+
+      // Now component unmounts
+      unsub();
+
+      // 500ms after unmount, it should be collected
+      vi.advanceTimersByTime(499);
+      expect(client.getQueryState("prefetch_key")).toBeDefined();
+      vi.advanceTimersByTime(1);
+      expect(client.getQueryState("prefetch_key")).toBeUndefined();
+    });
+
+    it("should enforce maxCacheSize by evicting oldest inactive queries in LRU order", () => {
+      const client = new QueryClient({
+        maxCacheSize: 3,
+        queries: { gcTime: "10m" },
+      });
+
+      // Add 3 items with distinct timestamps
+      client.setQueryState("item_1", { data: 1, updatedAt: 100 });
+      client.setQueryState("item_2", { data: 2, updatedAt: 200 });
+      client.setQueryState("item_3", { data: 3, updatedAt: 300 });
+
+      expect(client.getCacheEntries().length).toBe(3);
+
+      // Adding 4th item should prune oldest inactive item ("item_1")
+      client.setQueryState("item_4", { data: 4, updatedAt: 400 });
+
+      expect(client.getCacheEntries().length).toBe(3);
+      expect(client.getQueryState("item_1")).toBeUndefined();
+      expect(client.getQueryState("item_2")).toBeDefined();
+      expect(client.getQueryState("item_3")).toBeDefined();
+      expect(client.getQueryState("item_4")).toBeDefined();
+    });
+
+    it("should protect actively observed queries from maxCacheSize eviction", () => {
+      const client = new QueryClient({
+        maxCacheSize: 2,
+        queries: { gcTime: "10m" },
+      });
+
+      // item_1 is older, BUT has an active subscriber
+      client.setQueryState("active_item", { data: "active", updatedAt: 100 });
+      const unsub = client.subscribe("active_item", () => {});
+
+      // item_2 has NO subscriber
+      client.setQueryState("inactive_item", { data: "inactive", updatedAt: 200 });
+
+      // Adding 3rd item should evict inactive_item, NOT active_item
+      client.setQueryState("new_item", { data: "new", updatedAt: 300 });
+
+      expect(client.getQueryState("active_item")?.data).toBe("active");
+      expect(client.getQueryState("inactive_item")).toBeUndefined();
+      expect(client.getQueryState("new_item")?.data).toBe("new");
+
+      unsub();
+    });
+
+    it("should remove queries by key, prefix, or filter predicate via removeQueries", () => {
+      const client = new QueryClient();
+
+      client.setQueryState("users|list", { data: [1, 2] });
+      client.setQueryState("users|detail|1", { data: { id: 1 } });
+      client.setQueryState("posts|list", { data: ["a", "b"] });
+
+      // Remove prefix "users"
+      client.removeQueries(["users"]);
+
+      expect(client.getQueryState("users|list")).toBeUndefined();
+      expect(client.getQueryState("users|detail|1")).toBeUndefined();
+      expect(client.getQueryState("posts|list")).toBeDefined();
+
+      // Remove by predicate
+      client.removeQueries((entry) => entry.queryKey.startsWith("posts"));
+      expect(client.getQueryState("posts|list")).toBeUndefined();
     });
   });
 });

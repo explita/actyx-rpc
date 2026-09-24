@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import type { ErrorResponse } from "../types/main.js";
 import type { UseSSEOpts, UseSSEResult } from "../types/main.js";

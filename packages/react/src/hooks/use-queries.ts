@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useCallback,
   useEffect,
@@ -675,14 +677,19 @@ export function useQueries(
       const isRefetching = state.isFetching && state.data !== undefined;
       const data = state.data;
       const q = configsRef.current[index];
+      const unwrapped =
+        q?.unwrap === true && data && typeof data === "object" && "data" in data
+          ? (data as any).data
+          : data;
       const selectedData =
-        data !== undefined && q?.select ? q.select(data) : data;
+        unwrapped !== undefined && q?.select ? q.select(unwrapped) : unwrapped;
 
       const isEmpty =
         state.isFetched &&
         (selectedData === null ||
           selectedData === undefined ||
           (Array.isArray(selectedData) && selectedData.length === 0));
+      const isLoading = !state.isFetched || (state.isFetching && isEmpty);
 
       return {
         error: state.error,
@@ -692,6 +699,7 @@ export function useQueries(
         isSuccess: state.isSuccess,
         isFetched: state.isFetched,
         isEmpty,
+        isLoading,
         refetch,
         reset,
         update,
