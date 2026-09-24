@@ -47,4 +47,12 @@ export type {
   WSEventContext,
   SSEAdapterOptions,
 } from "./types/main.js";
+export type {
+  CreateClientOptions,
+  ClientInterceptors,
+  InterceptorRequestContext,
+  InterceptorResponseContext,
+  InterceptorErrorContext,
+  ClientInstance,
+} from "./types/client.js";
 export * from "./types/query-client.js";

@@ -1,4 +1,9 @@
-import { CreateClientOptions } from "../types/client";
+import {
+  CreateClientOptions,
+  InterceptorRequestContext,
+  InterceptorResponseContext,
+  InterceptorErrorContext,
+} from "../types/client.js";
 
 export function hasFile(val: unknown): boolean {
   if (val === null || val === undefined) return false;
@@ -77,7 +82,45 @@ export async function executeFetch(
   input: any,
   opts?: any,
   extraArgs: any[] = [],
+  retryCount: number = 0,
 ): Promise<[any, any]> {
+  const maxRetries = clientOpts.maxRetries ?? 3;
+
+  const retry = async (customOptions?: {
+    headers?: Record<string, string>;
+    [key: string]: any;
+  }): Promise<[any, any]> => {
+    if (retryCount >= maxRetries) {
+      return [
+        null,
+        {
+          success: false,
+          message: `Max retries (${maxRetries}) exceeded`,
+          statusCode: 429,
+          reason: "MAX_RETRIES_EXCEEDED",
+          handlerName: procedure,
+        },
+      ];
+    }
+    const mergedOpts = {
+      ...opts,
+      ...customOptions,
+      headers: {
+        ...opts?.headers,
+        ...customOptions?.headers,
+      },
+    };
+    return executeFetch(
+      baseUrl,
+      clientOpts,
+      procedure,
+      input,
+      mergedOpts,
+      extraArgs,
+      retryCount + 1,
+    );
+  };
+
   const fetchFn = clientOpts.fetch || globalThis.fetch;
   const headers =
     typeof clientOpts.headers === "function"
@@ -119,6 +162,25 @@ export async function executeFetch(
     ...headers,
     ...optsHeaders,
   };
+
+  // Interceptor: onRequest
+  if (clientOpts.interceptors?.onRequest) {
+    const reqCtx: InterceptorRequestContext = {
+      url: url.toString(),
+      procedure,
+      input,
+      method,
+      headers: finalHeaders,
+      options: restOpts,
+    };
+    const modified = await clientOpts.interceptors.onRequest(reqCtx);
+    if (modified && typeof modified === "object") {
+      if (modified.headers) {
+        Object.assign(finalHeaders, modified.headers);
+      }
+      Object.assign(restOpts, modified);
+    }
+  }
 
   let body: any = undefined;
 
@@ -216,6 +278,27 @@ export async function executeFetch(
       response = await fetchFn(url.toString(), requestConfig);
     }
 
+    // Interceptor: onResponse
+    if (clientOpts.interceptors?.onResponse) {
+      const resCtx: InterceptorResponseContext = {
+        response,
+        procedure,
+        input,
+        retryCount,
+        retry,
+      };
+      const interceptorResult = await clientOpts.interceptors.onResponse(resCtx);
+      if (Array.isArray(interceptorResult)) {
+        return interceptorResult as [any, any];
+      }
+      if (
+        interceptorResult instanceof Response ||
+        (interceptorResult && typeof interceptorResult.status === "number")
+      ) {
+        response = interceptorResult;
+      }
+    }
+
     const isStandardFetch = typeof response?.json === "function";
     const isOk =
       typeof response?.ok === "boolean"
@@ -243,6 +326,36 @@ export async function executeFetch(
     const data = isStandardFetch ? await response.json() : response?.data;
     return [data, null];
   } catch (error: any) {
+    // If Axios or custom client threw with an HTTP response (e.g. 401)
+    if (error?.response && clientOpts.interceptors?.onResponse) {
+      const resCtx: InterceptorResponseContext = {
+        response: error.response,
+        procedure,
+        input,
+        retryCount,
+        retry,
+      };
+      const interceptorResult = await clientOpts.interceptors.onResponse(resCtx);
+      if (Array.isArray(interceptorResult)) {
+        return interceptorResult as [any, any];
+      }
+    }
+
+    // Interceptor: onError
+    if (clientOpts.interceptors?.onError) {
+      const errCtx: InterceptorErrorContext = {
+        error,
+        procedure,
+        input,
+        retryCount,
+        retry,
+      };
+      const interceptorResult = await clientOpts.interceptors.onError(errCtx);
+      if (Array.isArray(interceptorResult)) {
+        return interceptorResult as [any, any];
+      }
+    }
+
     if (error?.response) {
       const errData = error.response.data;
       if (errData && typeof errData === "object") {

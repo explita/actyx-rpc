@@ -81,10 +81,56 @@ export const rpc = createClient<AppRouter>({
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `baseUrl` | `string` | **Required** | The API endpoint where `createHandler` is mounted (e.g. `"/api/rpc"`). |
-| `headers` | `Record<string, string> \| (() => Promise<Record<string, string>>)` | `undefined` | Custom static headers or an async getter function evaluated on each request. |
+| `headers` | `Record<string, string> \| (() => Promise<Record<string, string>>)` | `undefined` | Custom static headers or an async getter function evaluated on each request and retry. |
 | `routing` | `"path" \| "query"` | `"path"` | Routing strategy: `"path"` (`/api/rpc/todos.list`) or `"query"` (`/api/rpc?procedure=todos.list`). |
 | `queryMethod` | `"GET" \| "POST"` | `"GET"` | Default HTTP method used when executing queries. |
-| `fetch` | `typeof fetch` | `globalThis.fetch` | Custom fetch implementation (e.g. for testing, mocks, or Axios-style interceptors). |
+| `fetch` | `typeof fetch` | `globalThis.fetch` | Custom fetch implementation (e.g. for testing, mocks, or Axios-style adapters). |
+| `interceptors` | `ClientInterceptors` | `undefined` | Lifecycle hooks (`onRequest`, `onResponse`, `onError`) for token refresh and retry loops. |
+| `maxRetries` | `number` | `3` | Maximum automatic retries via interceptor `retry()` to guard against infinite loops. |
+
+---
+
+### Client Interceptors & Auth Refresh Loop (401 Retry)
+
+You can configure client interceptors to inspect outgoing requests, handle errors, or transparently replay requests on `401 Unauthorized` after refreshing credentials:
+
+```ts
+export const rpc = createClient<AppRouter>({
+  baseUrl: "/api/rpc",
+  headers: async () => {
+    const token = await getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  },
+  interceptors: {
+    // 1. Pre-flight request mutation
+    onRequest({ headers, procedure }) {
+      headers["X-Client-Version"] = "1.0.0";
+    },
+
+    // 2. Transparent 401 auth refresh retry
+    async onResponse({ response, retry }) {
+      if (response.status === 401) {
+        await refreshSession();
+        // Retries the original request — dynamic `headers` function is re-evaluated!
+        return retry();
+      }
+    },
+
+    // 3. Error recovery
+    onError({ error, retry }) {
+      if (error.message?.includes("Network offline")) {
+        return retry();
+      }
+    },
+  },
+  maxRetries: 3, // Safe loop protection
+});
+```
+
+When `retry()` is called:
+- If `headers` is an async function, it is automatically re-invoked to read the latest refreshed token.
+- You can also pass ad-hoc header overrides directly: `return retry({ headers: { Authorization: \`Bearer ${newToken}\` } })`.
+- If the server continuously rejects the request, Actyx RPC halts after `maxRetries` (default `3`) with a `MAX_RETRIES_EXCEEDED` error.
 
 ---
 

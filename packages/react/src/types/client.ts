@@ -27,6 +27,74 @@ import {
 } from "./main";
 import { SSEEvent } from "./misc";
 
+export interface InterceptorRequestContext {
+  url: string;
+  procedure: string;
+  input: any;
+  method: string;
+  headers: Record<string, string>;
+  options: Record<string, any>;
+}
+
+export interface InterceptorResponseContext {
+  response: Response | any;
+  procedure: string;
+  input: any;
+  retryCount: number;
+  /**
+   * Transparently retries the original request.
+   * Optionally pass modified headers or request options to override for the retry.
+   */
+  retry: (customOptions?: {
+    headers?: Record<string, string>;
+    [key: string]: any;
+  }) => Promise<[any, any]>;
+}
+
+export interface InterceptorErrorContext {
+  error: any;
+  procedure: string;
+  input: any;
+  retryCount: number;
+  retry: (customOptions?: {
+    headers?: Record<string, string>;
+    [key: string]: any;
+  }) => Promise<[any, any]>;
+}
+
+export interface ClientInterceptors {
+  /**
+   * Hook called before a request is dispatched.
+   * Return modified headers or options to override for this request.
+   */
+  onRequest?: (
+    ctx: InterceptorRequestContext,
+  ) => MaybePromise<void | { headers?: Record<string, string>; [key: string]: any }>;
+
+  /**
+   * Hook called when a response is received (both 2xx and non-2xx HTTP statuses).
+   * Perfect for 401 session refreshes:
+   * ```ts
+   * async onResponse({ response, retry }) {
+   *   if (response.status === 401) {
+   *     await refreshSession();
+   *     return retry();
+   *   }
+   * }
+   * ```
+   */
+  onResponse?: (
+    ctx: InterceptorResponseContext,
+  ) => MaybePromise<void | [any, any] | any>;
+
+  /**
+   * Hook called when a fetch or network call throws an error.
+   */
+  onError?: (
+    ctx: InterceptorErrorContext,
+  ) => MaybePromise<void | [any, any] | any>;
+}
+
 export interface CreateClientOptions {
   baseUrl: string;
   headers?:
@@ -47,6 +115,15 @@ export interface CreateClientOptions {
    * @default "GET"
    */
   queryMethod?: "GET" | "POST";
+  /**
+   * Client request and response interceptors (e.g. for auth refresh loops).
+   */
+  interceptors?: ClientInterceptors;
+  /**
+   * Maximum number of automatic retries via interceptor retry() call.
+   * @default 3
+   */
+  maxRetries?: number;
 }
 
 export type HttpMethod =
