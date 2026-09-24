@@ -295,26 +295,52 @@ export class QueryClient {
   }
 
   resetQuery(
-    queryKey:
+    queryKey?:
       | string
       | unknown[]
       | { getQueryKey: (...args: any[]) => unknown[] },
   ) {
-    const prefix = normalizeKey(queryKey);
-    if (!prefix) return;
-    for (const key of this.cache.keys()) {
-      if (key === prefix || key.startsWith(prefix + "|")) {
-        this.setQueryState(key, {
-          data: undefined,
-          error: undefined,
-          isFetching: false,
-          isError: false,
-          isSuccess: false,
-          updatedAt: undefined,
-          isFetched: false,
-        });
+    const prefix = queryKey ? normalizeKey(queryKey) : undefined;
+    const allKnownKeys = new Set([
+      ...this.cache.keys(),
+      ...this.listeners.keys(),
+      ...this.invalidateListeners.keys(),
+    ]);
+    const targetKeys = prefix
+      ? Array.from(allKnownKeys).filter(
+          (k) => k === prefix || k.startsWith(prefix + "|"),
+        )
+      : Array.from(allKnownKeys);
+
+    for (const key of targetKeys) {
+      this.setQueryState(key, {
+        data: undefined,
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: false,
+        updatedAt: 0,
+        isFetched: false,
+      });
+
+      // Refetch active queries (matching TanStack Query resetQueries behavior)
+      const hasActiveListeners = (this.listeners.get(key)?.size ?? 0) > 0;
+      if (hasActiveListeners) {
+        const invSet = this.invalidateListeners.get(key);
+        if (invSet) {
+          invSet.forEach((listener) => listener());
+        }
       }
     }
+  }
+
+  resetQueries(
+    queryKey?:
+      | string
+      | unknown[]
+      | { getQueryKey: (...args: any[]) => unknown[] },
+  ) {
+    return this.resetQuery(queryKey);
   }
 
   onInvalidate(queryKey: string, listener: () => void) {
@@ -337,43 +363,98 @@ export class QueryClient {
   invalidate<T extends unknown>(queryKeyArr: T | T[]) {
     const prefix = normalizeKey(queryKeyArr as any) ?? String(queryKeyArr);
 
+    const matchingKeys = new Set<string>();
     for (const key of this.cache.keys()) {
       if (key === prefix || key.startsWith(prefix + "|")) {
-        const state = this.cache.get(key);
-        if (state) {
-          // Mark as stale silently
-          this.setQueryState(key, { updatedAt: 0 }, { silent: true });
-        }
+        matchingKeys.add(key);
+      }
+    }
+    for (const key of this.listeners.keys()) {
+      if (key === prefix || key.startsWith(prefix + "|")) {
+        matchingKeys.add(key);
+      }
+    }
+    for (const key of this.invalidateListeners.keys()) {
+      if (key === prefix || key.startsWith(prefix + "|")) {
+        matchingKeys.add(key);
+      }
+    }
 
-        // Notify invalidation listeners so they can trigger refetch
-        const set = this.invalidateListeners.get(key);
-        if (set) {
-          set.forEach((listener) => listener());
-        }
+    for (const key of matchingKeys) {
+      const state = this.cache.get(key);
+      if (state) {
+        // Mark as stale silently
+        this.setQueryState(key, { updatedAt: 0 }, { silent: true });
+      }
+
+      // Notify invalidation listeners so they can trigger refetch
+      const set = this.invalidateListeners.get(key);
+      if (set) {
+        set.forEach((listener) => listener());
       }
     }
   }
 
   /**
-   * Invalidates all active queries in the cache.
+   * Invalidates all active queries in the cache or currently observed by mounted components.
    */
   invalidateAll(): void {
-    for (const key of this.cache.keys()) {
+    const allKeys = new Set([
+      ...this.cache.keys(),
+      ...this.listeners.keys(),
+      ...this.invalidateListeners.keys(),
+    ]);
+    for (const key of allKeys) {
       this.invalidate(key);
     }
   }
 
   /**
-   * Clears all queries from the cache and cancels active garbage collection timers.
+   * Clears all queries from the cache while preserving active mounted observer connections.
    */
   clearCache(): void {
     for (const timer of this.gcTimers.values()) {
       clearTimeout(timer);
     }
     this.gcTimers.clear();
+
+    // Identify queries that currently have active mounted observers
+    const activeKeys = new Set<string>();
+    for (const [key, set] of this.listeners.entries()) {
+      if (set.size > 0) {
+        activeKeys.add(key);
+      }
+    }
+
     this.cache.clear();
-    this.listeners.clear();
-    this.invalidateListeners.clear();
+
+    // For queries with active mounted components, re-initialize an empty state
+    // so their hooks don't throw or get orphaned.
+    for (const key of activeKeys) {
+      this.cache.set(key, {
+        data: undefined,
+        error: undefined,
+        isFetching: false,
+        isError: false,
+        isSuccess: false,
+        updatedAt: 0,
+        isFetched: false,
+      });
+    }
+
+    // Clean up only dead listeners with 0 subscribers
+    for (const [key, set] of Array.from(this.listeners.entries())) {
+      if (set.size === 0) {
+        this.listeners.delete(key);
+        this.invalidateListeners.delete(key);
+      }
+    }
+
+    // Notify observers of the cleared state
+    for (const key of activeKeys) {
+      this.notify(key);
+    }
+
     this.globalListeners.forEach((listener) => listener());
   }
 
@@ -393,8 +474,10 @@ export class QueryClient {
         if (queryKeyOrFilter(entry)) {
           this.cancelGc(entry.queryKey);
           this.cache.delete(entry.queryKey);
-          this.listeners.delete(entry.queryKey);
-          this.invalidateListeners.delete(entry.queryKey);
+          if ((this.listeners.get(entry.queryKey)?.size ?? 0) === 0) {
+            this.listeners.delete(entry.queryKey);
+            this.invalidateListeners.delete(entry.queryKey);
+          }
         }
       }
       this.globalListeners.forEach((listener) => listener());
@@ -411,8 +494,10 @@ export class QueryClient {
       if (key === prefix || key.startsWith(prefix + "|")) {
         this.cancelGc(key);
         this.cache.delete(key);
-        this.listeners.delete(key);
-        this.invalidateListeners.delete(key);
+        if ((this.listeners.get(key)?.size ?? 0) === 0) {
+          this.listeners.delete(key);
+          this.invalidateListeners.delete(key);
+        }
       }
     }
     this.globalListeners.forEach((listener) => listener());
@@ -1411,15 +1496,44 @@ export class QueryClient {
         continue;
       }
 
-      this.setQueryState(dehydratedQuery.queryKey, {
-        data: dehydratedQuery.data,
-        error: undefined,
-        isError: false,
-        isSuccess: true,
-        isFetching: false,
-        isFetched: true,
-        updatedAt: dehydratedQuery.updatedAt ?? Date.now(),
+      this.setQueryState(
+        dehydratedQuery.queryKey,
+        {
+          data: dehydratedQuery.data,
+          error: undefined,
+          isError: false,
+          isSuccess: true,
+          isFetching: false,
+          isFetched: true,
+          updatedAt: dehydratedQuery.updatedAt ?? Date.now(),
+        },
+        { silent: true },
+      );
+
+      // Defers notification to outside the render phase so we never trigger setState in render
+      if (this.listeners.get(dehydratedQuery.queryKey)?.size) {
+        const key = dehydratedQuery.queryKey;
+        if (typeof queueMicrotask === "function") {
+          queueMicrotask(() => {
+            this.notify(key);
+          });
+        } else {
+          setTimeout(() => {
+            this.notify(key);
+          }, 0);
+        }
+      }
+    }
+
+    // Notify global cache observers (DevTools, etc.) after hydrating all queries
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(() => {
+        this.globalListeners.forEach((listener) => listener());
       });
+    } else {
+      setTimeout(() => {
+        this.globalListeners.forEach((listener) => listener());
+      }, 0);
     }
   }
 }

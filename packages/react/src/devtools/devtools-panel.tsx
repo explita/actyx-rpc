@@ -73,6 +73,11 @@ export const ActyxDevtools: React.FC<ActyxDevtoolsProps> = ({
     return () => clearInterval(interval);
   }, [explicitClient, activeClient]);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const [isOpen, setIsOpen] = useState(initialIsOpen);
   const [activeTab, setActiveTab] = useState<DevtoolsTab>("queries");
   const [searchQuery, setSearchQuery] = useState("");
@@ -209,9 +214,9 @@ export const ActyxDevtools: React.FC<ActyxDevtoolsProps> = ({
       {!isOpen && (
         <FloatingToggle
           onClick={() => setIsOpen(true)}
-          queryCount={queries.length}
-          isFetchingCount={isFetchingCount}
-          isMutatingCount={isMutatingCount}
+          queryCount={mounted ? queries.length : 0}
+          isFetchingCount={mounted ? isFetchingCount : 0}
+          isMutatingCount={mounted ? isMutatingCount : 0}
         />
       )}
 
@@ -309,13 +314,19 @@ export const ActyxDevtools: React.FC<ActyxDevtoolsProps> = ({
                 <>
                   <ActionButton
                     onClick={() => activeClient.invalidateAll()}
-                    title="Invalidate all queries (refetch active)"
+                    title="Invalidate all queries (refetch active in background)"
                   >
                     Invalidate All
                   </ActionButton>
                   <ActionButton
+                    onClick={() => activeClient.resetQueries()}
+                    title="Reset all queries to empty state and refetch active"
+                  >
+                    Reset All
+                  </ActionButton>
+                  <ActionButton
                     onClick={() => activeClient.clearCache()}
-                    title="Clear query cache"
+                    title="Clear cached data"
                   >
                     Clear Cache
                   </ActionButton>

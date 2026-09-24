@@ -171,21 +171,35 @@ export function useQuery<
   // QueryClient.getQueryState returns the cached object reference. QueryClient.setQueryState
   // always creates a new object via spread. So reference equality tells us whether the
   // state actually changed — no need for field-by-field comparison.
+  const defaultEmptyState = useRef<QueryState<
+    Unwrap<TOutput, TUnwrap>,
+    ErrorResponse
+  >>({
+    data: undefined,
+    error: undefined,
+    isFetching: false,
+    isError: false,
+    isSuccess: false,
+    updatedAt: 0,
+    isFetched: false,
+  }).current;
+
   const snapshotRef = useRef<QueryState<
     Unwrap<TOutput, TUnwrap>,
     ErrorResponse
   > | null>(null);
 
   const getSnapshot = useCallback(() => {
-    const next = queryClient.getQueryState(queryKey) as QueryState<
-      Unwrap<TOutput, TUnwrap>,
-      ErrorResponse
-    >;
+    const next =
+      (queryClient.getQueryState(queryKey) as QueryState<
+        Unwrap<TOutput, TUnwrap>,
+        ErrorResponse
+      >) || defaultEmptyState;
     // Same cached object → return same reference → no re-render
     if (next === snapshotRef.current) return snapshotRef.current;
     snapshotRef.current = next;
     return next;
-  }, [queryClient, queryKey]);
+  }, [queryClient, queryKey, defaultEmptyState]);
 
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 

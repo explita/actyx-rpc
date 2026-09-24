@@ -10,6 +10,11 @@ export {
   type OpenApiOptions,
   type ProcedureOverride,
 } from "./core/docs/generator.js";
+export {
+  createBatchHandler,
+  type BatchRequestItem,
+  type BatchResponseItem,
+} from "./core/batch/handler.js";
 export { createSSEResponse } from "./core/helpers/sse.js";
 export { getContext } from "./core/helpers/get-context.js";
 export {

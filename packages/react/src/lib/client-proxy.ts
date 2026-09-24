@@ -13,10 +13,12 @@ import { getCachedQueryClient } from "../provider.js";
 import { CreateClientOptions } from "../types/client.js";
 import {
   executeFetch,
+  hasFile,
   parseDirectCallArgs,
   parseHookArgs,
   scopeQueryKey,
 } from "./client-helpers.js";
+import { getBatchManager } from "./client-batcher.js";
 
 function resolveSSEUrl(
   baseUrl: string,
@@ -152,12 +154,24 @@ export function createProxy(
 ): any {
   const handler = function (...rawArgs: any[]) {
     const { input, opts, extraArgs } = parseDirectCallArgs(rawArgs);
+    const procName = path[path.length - 1] || "";
+    const isMutationVerb =
+      /^(create|add|insert|update|edit|patch|put|delete|del|remove|destroy|toggle|set|send|submit|post|cancel|reset|trigger|execute|upload)/i.test(
+        procName,
+      );
+    const inferredDefaultMethod =
+      isMutationVerb ||
+      hasFile(input) ||
+      (typeof FormData !== "undefined" && input instanceof FormData)
+        ? "POST"
+        : clientOpts.queryMethod || "GET";
+
     const directPromise = executeFetch(
       baseUrl,
       clientOpts,
       path.join("."),
       input,
-      opts,
+      { defaultMethod: inferredDefaultMethod, ...opts },
       extraArgs,
     );
 
@@ -221,6 +235,10 @@ export function createProxy(
     get(target, prop, receiver) {
       if (typeof prop !== "string") {
         return Reflect.get(target, prop, receiver);
+      }
+
+      if (path.length === 0 && (prop === "$batch" || prop === "getBatchMetrics")) {
+        return () => getBatchManager(baseUrl, clientOpts).getMetrics();
       }
 
       if (prop === "useQuery") {

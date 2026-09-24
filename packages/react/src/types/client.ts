@@ -95,6 +95,19 @@ export interface ClientInterceptors {
   ) => MaybePromise<void | [any, any] | any>;
 }
 
+export interface BatchOptions {
+  /**
+   * Time window in milliseconds to pool queries into a single batch request.
+   * @default 10
+   */
+  delay?: number;
+  /**
+   * Maximum number of queries in a single batch request before triggering an immediate flush.
+   * @default 50
+   */
+  maxBatchSize?: number;
+}
+
 export interface CreateClientOptions {
   baseUrl: string;
   headers?:
@@ -124,6 +137,15 @@ export interface CreateClientOptions {
    * @default 3
    */
   maxRetries?: number;
+  /**
+   * Enable HTTP request batching for queries dispatched in the same tick.
+   * Can be boolean (`true`) or configured with `{ delay?: number, maxBatchSize?: number }`.
+   * When enabled, concurrent queries dispatched within the delay window (default: 10ms)
+   * are pooled into a single `POST /api/rpc?batch=1` request with network deduplication.
+   *
+   * @default false
+   */
+  batch?: boolean | BatchOptions;
 }
 
 export type HttpMethod =
@@ -143,6 +165,11 @@ export interface ClientHttpOpts {
    * Custom request headers.
    */
   headers?: Record<string, string>;
+  /**
+   * Override request batching behavior for this specific call.
+   * Set to `false` to force an immediate standalone HTTP connection.
+   */
+  batch?: boolean;
   /**
    * Custom signal for request cancellation.
    */

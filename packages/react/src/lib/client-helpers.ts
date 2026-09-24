@@ -4,6 +4,7 @@ import {
   InterceptorResponseContext,
   InterceptorErrorContext,
 } from "../types/client.js";
+import { getBatchManager } from "./client-batcher.js";
 
 export function hasFile(val: unknown): boolean {
   if (val === null || val === undefined) return false;
@@ -150,6 +151,19 @@ export async function executeFetch(
     ...restOpts
   } = opts || {};
 
+  const upperExplicit = explicitMethod?.toUpperCase();
+  const upperDefault = defaultMethod?.toUpperCase();
+
+  const isExplicitMutation =
+    upperExplicit === "POST" ||
+    upperExplicit === "PUT" ||
+    upperExplicit === "PATCH" ||
+    upperExplicit === "DELETE" ||
+    upperDefault === "POST" ||
+    upperDefault === "PUT" ||
+    upperDefault === "PATCH" ||
+    upperDefault === "DELETE";
+
   const method = (
     explicitMethod ||
     (defaultMethod === "GET"
@@ -157,6 +171,19 @@ export async function executeFetch(
       : defaultMethod) ||
     "POST"
   ).toUpperCase();
+
+  // Check if eligible for HTTP request batching
+  const canBatch =
+    Boolean(clientOpts.batch) &&
+    opts?.batch !== false &&
+    !hasFile(input) &&
+    !onProgress &&
+    (!isExplicitMutation || opts?.batch === true);
+
+  if (canBatch) {
+    const batchManager = getBatchManager(baseUrl, clientOpts);
+    return batchManager.enqueue(procedure, input, opts, extraArgs);
+  }
 
   const finalHeaders: Record<string, string> = {
     ...headers,
@@ -399,7 +426,13 @@ export function isClientHttpOpts(val: unknown): boolean {
   if (!isPlainObject(val)) return false;
   const keys = Object.keys(val);
   if (keys.length === 0) return false;
-  const knownHttpKeys = new Set(["method", "headers", "signal", "onProgress"]);
+  const knownHttpKeys = new Set([
+    "method",
+    "headers",
+    "signal",
+    "onProgress",
+    "batch",
+  ]);
   return keys.every((k) => knownHttpKeys.has(k));
 }
 

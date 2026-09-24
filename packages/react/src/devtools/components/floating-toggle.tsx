@@ -51,7 +51,6 @@ export const FloatingToggle: React.FC<FloatingToggleProps> = ({
       <ActyxIcon size={18} color="#38bdf8" />
       <span style={{ fontWeight: 600, letterSpacing: "-0.01em" }}>Actyx</span>
       <span
-        suppressHydrationWarning
         style={{
           background: "#1e293b",
           color: "#94a3b8",

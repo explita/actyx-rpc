@@ -51,10 +51,12 @@ export type {
 } from "./types/main.js";
 export type {
   CreateClientOptions,
+  BatchOptions,
   ClientInterceptors,
   InterceptorRequestContext,
   InterceptorResponseContext,
   InterceptorErrorContext,
   ClientInstance,
 } from "./types/client.js";
+export type { BatchMetrics } from "./lib/client-batcher.js";
 export * from "./types/query-client.js";
