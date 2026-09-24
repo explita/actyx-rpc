@@ -56,10 +56,72 @@ export function toSchemaResolver<T = any>(
           data: (result as StandardSchemaV1.SuccessResult<T>).value,
         };
       },
-      toJsonSchema:
-        typeof schemaOrResolver.toJsonSchema === "function"
-          ? () => schemaOrResolver.toJsonSchema()
-          : undefined,
+      toJsonSchema: () => {
+        try {
+          const unrepresentableHandler = (info: any) => {
+            if (
+              (typeof info?.message === "string" &&
+                info.message.includes("Date")) ||
+              info?.type === "date"
+            ) {
+              return { type: "string", format: "date-time" };
+            }
+            return {};
+          };
+
+          if (typeof schemaOrResolver.toJsonSchema === "function") {
+            try {
+              return schemaOrResolver.toJsonSchema();
+            } catch {}
+          }
+          if (typeof (schemaOrResolver as any).toJSONSchema === "function") {
+            try {
+              return (schemaOrResolver as any).toJSONSchema({
+                unrepresentable: unrepresentableHandler,
+              });
+            } catch {
+              try {
+                return (schemaOrResolver as any).toJSONSchema();
+              } catch {}
+            }
+          }
+          const standardAny = standard as any;
+          const libraryOptions = {
+            unrepresentable: unrepresentableHandler,
+          };
+          if (typeof standardAny?.jsonSchema?.output === "function") {
+            try {
+              return standardAny.jsonSchema.output({
+                target: "openapi-3.0",
+                libraryOptions,
+              });
+            } catch {
+              try {
+                return standardAny.jsonSchema.output({
+                  target: "draft-2020-12",
+                  libraryOptions,
+                });
+              } catch {}
+            }
+          }
+          if (typeof standardAny?.jsonSchema?.input === "function") {
+            try {
+              return standardAny.jsonSchema.input({
+                target: "openapi-3.0",
+                libraryOptions,
+              });
+            } catch {
+              try {
+                return standardAny.jsonSchema.input({
+                  target: "draft-2020-12",
+                  libraryOptions,
+                });
+              } catch {}
+            }
+          }
+        } catch {}
+        return undefined;
+      },
     };
   }
 

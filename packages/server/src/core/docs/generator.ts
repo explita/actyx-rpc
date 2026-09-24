@@ -4,6 +4,18 @@ import fs from "fs";
 export type OpenApiOptions = {
   title: string;
   version: string;
+  /**
+   * OpenAPI specification version.
+   * @default "3.1.0"
+   */
+  openapiVersion?: "3.0.0" | "3.1.0";
+  /**
+   * Path separator for nested routers in the OpenAPI URL paths.
+   * - "slash": `/todos/list`
+   * - "dot": `/todos.list`
+   * @default "slash"
+   */
+  pathStyle?: "slash" | "dot";
   baseUrl?: string;
   tags?: string[];
   output?: string;
@@ -18,30 +30,115 @@ export type ProcedureOverride = {
   description?: string;
 };
 
-export function generateOpenApi(
-  procedures: Record<string, unknown | ProcedureOverride>,
-  options: OpenApiOptions,
-) {
-  const paths: Record<string, unknown> = {};
+/**
+ * Flattens arbitrary nested routers and procedure maps into a flat list
+ * of { path, procedure, overrides }.
+ */
+function flattenProcedures(
+  routerOrMap: Record<string, any>,
+  prefix = "",
+  pathStyle: "slash" | "dot" = "slash",
+): Record<string, { procedure: unknown; overrides: ProcedureOverride }> {
+  const result: Record<
+    string,
+    { procedure: unknown; overrides: ProcedureOverride }
+  > = {};
 
-  for (const [name, entry] of Object.entries(procedures)) {
-    // Determine if we have a raw procedure or an override object
+  const sep = pathStyle === "dot" ? "." : "/";
+
+  for (const [key, value] of Object.entries(routerOrMap)) {
+    if (!value) continue;
+
+    const currentPath = prefix ? `${prefix}${sep}${key}` : key;
+
+    // Check if this is an override wrapper: { procedure: ..., method?: ... }
     const isOverride =
-      entry && typeof entry === "object" && "procedure" in entry;
-    const proc = isOverride ? entry.procedure : entry;
-    const overrides = isOverride
-      ? (entry as ProcedureOverride)
-      : ({} as ProcedureOverride);
+      typeof value === "object" &&
+      value !== null &&
+      "procedure" in value &&
+      (Boolean((value.procedure as any)?._def) ||
+        typeof value.procedure === "function");
 
-    const config = (proc as any)._def as ProcedureConfig<any, any, any>;
-    if (!config) {
-      console.warn(`No _def found for procedure: ${name}`);
+    if (isOverride) {
+      result[currentPath] = {
+        procedure: value.procedure,
+        overrides: value as ProcedureOverride,
+      };
       continue;
     }
 
-    const path = `/${name}`;
-    const method =
-      overrides.method || (config.type === "mutation" ? "post" : "get");
+    // Check if this is a procedure directly
+    const isProcedure =
+      Boolean((value as any)?._def) || typeof value === "function";
+
+    if (isProcedure) {
+      result[currentPath] = {
+        procedure: value,
+        overrides: {} as ProcedureOverride,
+      };
+      continue;
+    }
+
+    // Otherwise, treat as a nested router object and recurse
+    if (typeof value === "object" && value !== null) {
+      const nested = flattenProcedures(value, currentPath, pathStyle);
+      Object.assign(result, nested);
+    }
+  }
+
+  return result;
+}
+
+function safeToJsonSchema(resolver: any): Record<string, unknown> {
+  if (!resolver) return { type: "object" };
+  try {
+    if (typeof resolver.toJsonSchema === "function") {
+      const res = resolver.toJsonSchema();
+      if (res && typeof res === "object") return res;
+    }
+  } catch {
+    // Graceful fallback if schema conversion fails
+  }
+  return { type: "object" };
+}
+
+export function generateOpenApi(
+  proceduresOrRouter: Record<string, unknown | ProcedureOverride>,
+  options: OpenApiOptions,
+) {
+  const paths: Record<string, unknown> = {};
+  const flattened = flattenProcedures(
+    proceduresOrRouter,
+    "",
+    options.pathStyle ?? "slash",
+  );
+
+  for (const [name, { procedure: proc, overrides }] of Object.entries(
+    flattened,
+  )) {
+    const config: ProcedureConfig<any, any, any> =
+      ((proc as any)?._def as ProcedureConfig<any, any, any>) || {
+        type:
+          name.endsWith("/create") ||
+          name.endsWith("/update") ||
+          name.endsWith("/delete") ||
+          name.endsWith("/set") ||
+          name.endsWith("/mutate")
+            ? "mutation"
+            : "query",
+        summary: overrides.summary || name,
+        description: overrides.description,
+      };
+
+    const path = `/${name.replace(/^\/+/, "")}`;
+    const defaultMethod =
+      config.type === "mutation"
+        ? "post"
+        : config.type === "stream" || config.type === "sse"
+          ? "get"
+          : "get";
+
+    const method = (overrides.method || defaultMethod).toLowerCase();
 
     const securityRequirement = options.security
       ? [
@@ -53,27 +150,45 @@ export function generateOpenApi(
         ]
       : undefined;
 
+    const isStream = config.type === "stream" || config.type === "sse";
+
+    const responseContent = isStream
+      ? {
+          "text/event-stream": {
+            schema: {
+              type: "string",
+              description: "Server-Sent Events stream",
+            },
+          },
+        }
+      : {
+          "application/json": {
+            schema: stripSchemaTag(safeToJsonSchema(config.outputResolver)),
+          },
+        };
+
+    const hasRequestBody =
+      method === "post" || method === "put" || method === "patch";
+
     paths[path] = {
+      ...(paths[path] as Record<string, unknown> | undefined),
       [method]: {
-        operationId: name,
+        operationId: name.replace(/[\/\.]/g, "_"),
         summary: overrides.summary || config.summary || name,
         description: overrides.description || config.description,
         tags: overrides.tags || options.tags || ["RPC"],
-        parameters: method === "get" ? getGetParameters(config) : [],
-        requestBody: method === "post" ? getRequestBody(config) : undefined,
+        parameters:
+          method === "get" || method === "delete"
+            ? getGetParameters(config)
+            : [],
+        requestBody: hasRequestBody ? getRequestBody(config) : undefined,
         security: securityRequirement,
         responses: {
           200: {
-            description: "Successful response",
-            content: {
-              "application/json": {
-                schema: stripSchemaTag(
-                  config.outputResolver?.toJsonSchema?.() || {
-                    type: "object",
-                  },
-                ),
-              },
-            },
+            description: isStream
+              ? "Real-time streaming response"
+              : "Successful response",
+            content: responseContent,
           },
           400: { description: "Validation Error" },
           401: { description: "Unauthorized" },
@@ -85,7 +200,7 @@ export function generateOpenApi(
   }
 
   const finalOutput = {
-    openapi: "3.0.0",
+    openapi: options.openapiVersion || "3.1.0",
     info: {
       title: options.title,
       version: options.version,
@@ -121,15 +236,70 @@ export function generateOpenApi(
     try {
       fs.writeFileSync(options.output, JSON.stringify(finalOutput, null, 2));
     } catch (error) {
-      console.error(error);
+      console.error("Failed to write OpenAPI output file:", error);
     }
   }
 
   return finalOutput;
 }
 
+/**
+ * Creates an HTTP GET Route Handler that returns the generated OpenAPI JSON specification.
+ *
+ * @example
+ * ```ts
+ * // app/api/openapi.json/route.ts
+ * import { createOpenApiHandler } from "@explita/actyx-rpc";
+ * import { appRouter } from "@/backend/router";
+ *
+ * export const GET = createOpenApiHandler(appRouter, {
+ *   title: "My System API",
+ *   version: "1.0.0",
+ * });
+ * ```
+ */
+export function createOpenApiHandler(
+  proceduresOrRouter: Record<string, unknown | ProcedureOverride>,
+  options: OpenApiOptions,
+): (req?: Request) => Response {
+  let cachedSpec: any = null;
+
+  return (_req?: Request) => {
+    try {
+      if (!cachedSpec) {
+        cachedSpec = generateOpenApi(proceduresOrRouter, options);
+      }
+      return new Response(JSON.stringify(cachedSpec, null, 2), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    } catch (err: any) {
+      console.error("[actyx-rpc] Failed to generate OpenAPI specification:", err);
+      return new Response(
+        JSON.stringify(
+          {
+            error: "Failed to generate OpenAPI specification",
+            message: err?.message || String(err),
+          },
+          null,
+          2,
+        ),
+        {
+          status: 500,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+          },
+        },
+      );
+    }
+  };
+}
+
 function getGetParameters(config: ProcedureConfig<any, any, any>) {
-  const rawSchema = config.resolver?.toJsonSchema?.() || { type: "object" };
+  const rawSchema = safeToJsonSchema(config.resolver);
   const schema = stripSchemaTag(rawSchema);
 
   if (schema.type !== "object" || !schema.properties) return [];
@@ -146,7 +316,7 @@ function getGetParameters(config: ProcedureConfig<any, any, any>) {
 }
 
 function getRequestBody(config: ProcedureConfig<any, any, any>) {
-  const rawSchema = config.resolver?.toJsonSchema?.() || { type: "object" };
+  const rawSchema = safeToJsonSchema(config.resolver);
   const schema = stripSchemaTag(rawSchema);
 
   const example = generateExample(schema);

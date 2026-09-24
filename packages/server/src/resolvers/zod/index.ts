@@ -48,6 +48,16 @@ export function zodResolver<
       return result;
     },
     toJsonSchema() {
+      const unrepresentableHandler = (info: any) => {
+        if (
+          (typeof info?.message === "string" && info.message.includes("Date")) ||
+          info?.type === "date"
+        ) {
+          return { type: "string", format: "date-time" };
+        }
+        return {};
+      };
+
       const def = (schema as any)._def;
       const shape = (schema as any).shape || def?.shape;
 
@@ -64,7 +74,20 @@ export function zodResolver<
 
           // If the object already has a toJSONSchema method, use it!
           if (typeof v.toJSONSchema === "function") {
-            properties[key] = v.toJSONSchema();
+            try {
+              properties[key] = v.toJSONSchema({
+                unrepresentable: unrepresentableHandler,
+              });
+            } catch {
+              try {
+                properties[key] = v.toJSONSchema();
+              } catch {
+                properties[key] = {
+                  type: typeName === "date" ? "string" : "object",
+                  format: typeName === "date" ? "date-time" : undefined,
+                };
+              }
+            }
           } else {
             properties[key] = {
               type:
@@ -74,13 +97,16 @@ export function zodResolver<
                     ? "boolean"
                     : typeName === "array"
                       ? "array"
-                      : typeName === "object"
-                        ? "object"
-                        : "string",
+                      : typeName === "date"
+                        ? "string"
+                        : typeName === "object"
+                          ? "object"
+                          : "string",
+              format: typeName === "date" ? "date-time" : undefined,
             };
           }
 
-          if (!v.isOptional()) {
+          if (typeof v.isOptional === "function" ? !v.isOptional() : true) {
             required.push(key);
           }
         }
@@ -91,6 +117,19 @@ export function zodResolver<
           required: required.length > 0 ? required : undefined,
         };
       }
+
+      if (typeof (schema as any).toJSONSchema === "function") {
+        try {
+          return (schema as any).toJSONSchema({
+            unrepresentable: unrepresentableHandler,
+          });
+        } catch {
+          try {
+            return (schema as any).toJSONSchema();
+          } catch {}
+        }
+      }
+
       return { type: "object" };
     },
   };

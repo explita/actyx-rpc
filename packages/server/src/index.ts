@@ -4,7 +4,12 @@ export {
   type AnyProcedure,
   type RouterRecord,
 } from "./core/router.js";
-export { generateOpenApi } from "./core/docs/generator.js";
+export {
+  generateOpenApi,
+  createOpenApiHandler,
+  type OpenApiOptions,
+  type ProcedureOverride,
+} from "./core/docs/generator.js";
 export { createSSEResponse } from "./core/helpers/sse.js";
 export { getContext } from "./core/helpers/get-context.js";
 export {
