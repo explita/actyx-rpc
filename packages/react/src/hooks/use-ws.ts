@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UseWSOpts, UseWSResult, ErrorResponse } from "../types/main.js";
 import { parseWindow } from "../lib/utils.js";
 import { Timeout } from "../types/misc.js";
+import { actyxStreamTracker } from "../devtools/stream-tracker.js";
 
 const applyDedup = <T>(
   prev: T[],
@@ -58,6 +59,7 @@ export function useWS<
   optsRef.current = opts;
   const dataRef = useRef(data);
   dataRef.current = data;
+  const currentStreamIdRef = useRef<string | null>(null);
 
   // Resolve async initialData — must be in an effect, not in useState initializer.
   // Reads from optsRef to avoid re-running on every render when initialData is an inline function.
@@ -102,6 +104,9 @@ export function useWS<
   const unsubscribe = useCallback(() => {
     isClosedRef.current = true;
     pendingMessagesRef.current = [];
+    if (currentStreamIdRef.current) {
+      actyxStreamTracker.updateStatus(currentStreamIdRef.current, "disconnected");
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -134,11 +139,15 @@ export function useWS<
       if (url.protocol === "http:") url.protocol = "ws:";
       if (url.protocol === "https:") url.protocol = "wss:";
 
+      const streamId = actyxStreamTracker.registerStream("ws", opts.url);
+      currentStreamIdRef.current = streamId;
+
       ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {
         attemptCount = 0;
+        actyxStreamTracker.updateStatus(streamId, "connected");
         // Flush pending messages
         const pending = pendingMessagesRef.current;
         pendingMessagesRef.current = [];
@@ -152,6 +161,7 @@ export function useWS<
       ws.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
+          actyxStreamTracker.recordEvent(streamId, parsed.type, parsed.data);
 
           if (parsed.type === "ping") {
             // Respond immediately

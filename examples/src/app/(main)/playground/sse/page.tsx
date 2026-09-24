@@ -24,19 +24,22 @@ export default function SSEDemo() {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const startStream = async () => {
-      abortControllerRef.current = new AbortController();
-      setIsManualConnected(true);
-      setManualUpdates([]);
+    let isCancelled = false;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsManualConnected(true);
+    setManualUpdates([]);
 
+    const startStream = async () => {
       try {
         const stream = await SSEClient({
           url: "/api/sse",
           params: { symbol: manualSymbol },
-          signal: abortControllerRef.current.signal,
+          signal: controller.signal,
         });
 
         for await (const { event, data } of stream) {
+          if (isCancelled) break;
           if (event === "price-update") {
             const parsed = typeof data === "string" ? JSON.parse(data) : data;
 
@@ -54,16 +57,17 @@ export default function SSEDemo() {
           console.error("SSE stream error", err);
         }
       } finally {
-        setIsManualConnected(false);
+        if (!isCancelled) {
+          setIsManualConnected(false);
+        }
       }
     };
 
     startStream();
 
     return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      isCancelled = true;
+      controller.abort();
     };
   }, [manualSymbol]);
 
@@ -179,7 +183,7 @@ export default function SSEDemo() {
                 Stream History
               </h3>
 
-              <div className="space-y-2 max-h-[220px] overflow-y-auto pr-2">
+              <div className="space-y-2 max-h-55 overflow-y-auto pr-2">
                 {manualUpdates.map((update, idx) => (
                   <div
                     key={`${update.at}-${idx}`}
@@ -278,7 +282,7 @@ export default function SSEDemo() {
                 Stream History (maxHistory: 15)
               </h3>
 
-              <div className="space-y-2 max-h-[220px] overflow-y-auto pr-2">
+              <div className="space-y-2 max-h-55 overflow-y-auto pr-2">
                 {hookUpdates.map((update, idx) => (
                   <div
                     key={`${update.at}-${idx}`}

@@ -13,6 +13,7 @@ import { getCachedQueryClient } from "../provider.js";
 import { CreateClientOptions } from "../types/client.js";
 import {
   executeFetch,
+  parseDirectCallArgs,
   parseHookArgs,
   scopeQueryKey,
 } from "./client-helpers.js";
@@ -149,13 +150,15 @@ export function createProxy(
   clientOpts: CreateClientOptions,
   path: string[] = [],
 ): any {
-  const handler = function (input: any, opts?: any) {
+  const handler = function (...rawArgs: any[]) {
+    const { input, opts, extraArgs } = parseDirectCallArgs(rawArgs);
     const directPromise = executeFetch(
       baseUrl,
       clientOpts,
       path.join("."),
       input,
       opts,
+      extraArgs,
     );
 
     let activeSSE: any = null;
@@ -178,6 +181,9 @@ export function createProxy(
         if (input !== undefined) {
           sseParams.input =
             typeof input === "object" ? JSON.stringify(input) : input;
+        }
+        if (extraArgs.length > 0) {
+          sseParams.args = JSON.stringify(extraArgs);
         }
 
         const clientHeaders =
@@ -434,7 +440,7 @@ export function createProxy(
         };
       }
       if (prop === "stream" || prop === "sse") {
-        return (input?: any, opts?: any) => handler(input, opts);
+        return (...args: any[]) => handler(...args);
       }
       if (prop === "useMutation") {
         return (opts?: any) => {

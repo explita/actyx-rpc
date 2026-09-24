@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import type { ErrorResponse } from "../types/main.js";
 import type { UseSSEOpts, UseSSEResult } from "../types/main.js";
 import { SSEClient } from "../client/index.js";
+import { actyxStreamTracker } from "../devtools/stream-tracker.js";
 
 export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
   const {
@@ -67,6 +68,8 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
       signal.addEventListener("abort", onAbort);
     }
 
+    let streamId: string | null = null;
+
     const start = async () => {
       setIsConnected(true);
       setError(undefined);
@@ -77,25 +80,44 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
         const parsedParams = paramsStr ? JSON.parse(paramsStr) : undefined;
         const parsedHeaders = headersStr ? JSON.parse(headersStr) : undefined;
 
+        let displayUrl = url;
+        if (parsedParams && Object.keys(parsedParams).length > 0) {
+          const qs = new URLSearchParams(
+            Object.entries(parsedParams).map(([k, v]) => [k, String(v)]),
+          ).toString();
+          displayUrl = `${url}${url.includes("?") ? "&" : "?"}${qs}`;
+        }
+        streamId = actyxStreamTracker.registerStream("sse", displayUrl);
+
         client = await SSEClient<T>({
           url,
           params: parsedParams,
           headers: parsedHeaders,
           signal: localAbortController.signal,
+          track: false,
         });
 
         if (isAborted) {
           client.close();
+          if (streamId) {
+            actyxStreamTracker.updateStatus(streamId, "disconnected");
+            actyxStreamTracker.unregisterStream(streamId);
+          }
           return;
         }
 
         activeClientRef.current = client;
+        if (streamId) actyxStreamTracker.updateStatus(streamId, "connected");
 
         for await (const sseEvent of client) {
           if (isAborted) break;
 
           setLastData(sseEvent.data);
           setEvent(sseEvent.event);
+
+          if (streamId) {
+            actyxStreamTracker.recordEvent(streamId, sseEvent.event, sseEvent.data);
+          }
 
           setData((prev) => {
             const next = [...prev, sseEvent.data];
@@ -117,11 +139,13 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
             reason: "UNEXPECTED_ERROR",
           };
           setError(errResponse);
+          if (streamId) actyxStreamTracker.updateStatus(streamId, "error", err.message);
           callbacksRef.current.onError?.(errResponse);
         }
       } finally {
         if (!isAborted) {
           setIsConnected(false);
+          if (streamId) actyxStreamTracker.updateStatus(streamId, "disconnected");
         }
       }
     };
@@ -130,6 +154,10 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
 
     return () => {
       isAborted = true;
+      if (streamId) {
+        actyxStreamTracker.updateStatus(streamId, "disconnected");
+        actyxStreamTracker.unregisterStream(streamId);
+      }
       localAbortController.abort();
       if (signal) {
         signal.removeEventListener("abort", onAbort);

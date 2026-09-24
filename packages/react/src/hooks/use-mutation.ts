@@ -282,8 +282,8 @@ export function useMutation<
         }
       }
 
-      queryClient.startMutation(mutationKey);
       const input = args[0];
+      const mutationLogId = queryClient.recordMutationStart(mutationKey, input);
       // Cancel previous request
       abortControllerRef.current?.abort();
 
@@ -447,6 +447,13 @@ export function useMutation<
             ...args,
           );
 
+          queryClient.recordMutationEnd(
+            mutationLogId,
+            "error",
+            undefined,
+            error,
+          );
+
           const shouldThrow =
             opts?.throwOnError ?? mutationDefaults?.throwOnError;
           if (shouldThrow) throw err;
@@ -456,6 +463,12 @@ export function useMutation<
         setStatus("success");
         setData(result);
         setValidationErrors(null);
+        queryClient.recordMutationEnd(
+          mutationLogId,
+          "success",
+          result,
+          undefined,
+        );
         callbacksRef.current.onSuccess?.(result, mutationContext, ...args);
         callbacksRef.current.onSettled?.(
           result,
@@ -499,6 +512,12 @@ export function useMutation<
         };
 
         setError(error);
+        queryClient.recordMutationEnd(
+          mutationLogId,
+          "error",
+          undefined,
+          error,
+        );
         callbacksRef.current.onError?.(error, mutationContext, ...args);
         callbacksRef.current.onSettled?.(
           undefined,

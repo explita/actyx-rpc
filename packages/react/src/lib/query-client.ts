@@ -8,6 +8,8 @@ import {
   DefaultQueryOptions,
   QueryClientConfig,
   QueryState,
+  QueryCacheEntry,
+  MutationLogEntry,
 } from "../types/query-client.js";
 
 export class QueryClient {
@@ -265,6 +267,59 @@ export class QueryClient {
     }
   }
 
+  /**
+   * Invalidates all active queries in the cache.
+   */
+  invalidateAll(): void {
+    for (const key of this.cache.keys()) {
+      this.invalidate(key);
+    }
+  }
+
+  /**
+   * Clears all queries from the cache and cancels active garbage collection timers.
+   */
+  clearCache(): void {
+    for (const timer of this.gcTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.gcTimers.clear();
+    this.cache.clear();
+    this.listeners.clear();
+    this.invalidateListeners.clear();
+    this.globalListeners.forEach((listener) => listener());
+  }
+
+  /**
+   * Returns a snapshot of all cached queries with their current state,
+   * freshness status, and active subscriber counts (used by DevTools).
+   */
+  getCacheEntries(): QueryCacheEntry[] {
+    const now = Date.now();
+    const result: QueryCacheEntry[] = [];
+
+    for (const [queryKey, state] of this.cache.entries()) {
+      const defaultStale = this.getQueryDefaults(queryKey)?.staleTime;
+      const staleMs =
+        defaultStale !== undefined ? parseWindow(defaultStale) : 0;
+      const isStale =
+        state.updatedAt === 0 ||
+        now - state.updatedAt > staleMs ||
+        !state.isSuccess;
+      const listenersCount = this.listeners.get(queryKey)?.size ?? 0;
+
+      result.push({
+        queryKey,
+        state,
+        isStale,
+        listenersCount,
+        staleTimeMs: staleMs,
+      });
+    }
+
+    return result;
+  }
+
   setQueryData<TData = any>(
     queryKeyArr: unknown[],
     updater: TData | ((oldData: TData | undefined) => TData),
@@ -346,6 +401,8 @@ export class QueryClient {
   private activeMutations = 0;
   private activeMutationKeys = new Map<string, number>();
   private mutationListeners = new Set<() => void>();
+  private mutationHistory: MutationLogEntry[] = [];
+  private maxMutationHistory = 100;
 
   startMutation(mutationKey?: unknown[]) {
     this.activeMutations++;
@@ -372,6 +429,54 @@ export class QueryClient {
         this.activeMutationKeys.delete(keyStr);
       }
     }
+    this.notifyMutations();
+  }
+
+  recordMutationStart(mutationKey?: unknown[], variables?: any): string {
+    const id =
+      "mut_" + Math.random().toString(36).slice(2, 9) + "_" + Date.now();
+    const keyStr = mutationKey ? mutationKey.map(String).join("|") : "anonymous";
+    const entry: MutationLogEntry = {
+      id,
+      mutationKey: keyStr,
+      status: "pending",
+      startedAt: Date.now(),
+      variables,
+    };
+    this.mutationHistory.unshift(entry);
+    if (this.mutationHistory.length > this.maxMutationHistory) {
+      this.mutationHistory.pop();
+    }
+    this.startMutation(mutationKey);
+    return id;
+  }
+
+  recordMutationEnd(
+    id: string,
+    status: "success" | "error",
+    data?: any,
+    error?: any,
+  ): void {
+    const entry = this.mutationHistory.find((m) => m.id === id);
+    if (entry && entry.status === "pending") {
+      entry.endedAt = Date.now();
+      entry.durationMs = entry.endedAt - entry.startedAt;
+      entry.status = status;
+      if (status === "success") {
+        entry.data = data;
+      } else {
+        entry.error = error;
+      }
+      this.notifyMutations();
+    }
+  }
+
+  getMutationHistory(): MutationLogEntry[] {
+    return [...this.mutationHistory];
+  }
+
+  clearMutationHistory(): void {
+    this.mutationHistory = [];
     this.notifyMutations();
   }
 

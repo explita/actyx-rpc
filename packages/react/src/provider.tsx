@@ -3,7 +3,7 @@
 import { createContext, useContext, ReactNode } from "react";
 import { QueryClient } from "./lib/query-client.js";
 
-const ActyxContext = createContext<QueryClient | undefined>(undefined);
+export const ActyxContext = createContext<QueryClient | undefined>(undefined);
 
 export type ActyxProviderProps = {
   client: QueryClient;
@@ -11,6 +11,7 @@ export type ActyxProviderProps = {
 };
 
 export const ActyxProvider = ({ client, children }: ActyxProviderProps) => {
+  _cachedClient = client;
   return (
     <ActyxContext.Provider value={client}>{children}</ActyxContext.Provider>
   );
@@ -19,22 +20,24 @@ export const ActyxProvider = ({ client, children }: ActyxProviderProps) => {
 const defaultQueryClient = new QueryClient();
 
 /**
- * Module-level reference set on every `useQueryClient()` call.
- * Allows non-hook code (e.g. SDK `invalidate`) to access the active
+ * Module-level reference set on every `useQueryClient()` call or ActyxProvider render.
+ * Allows non-hook code (e.g. SDK `invalidate` or DevTools) to access the active
  * client without calling `useContext` outside render.
  */
 let _cachedClient: QueryClient | undefined;
 
 /**
  * Non-hook accessor — returns the QueryClient from the most recent
- * `useQueryClient()` call, or the default client as a fallback.
+ * `useQueryClient()` or `ActyxProvider` call, or the default client as a fallback.
  */
 export const getCachedQueryClient = (): QueryClient =>
   _cachedClient ?? defaultQueryClient;
 
-export const useQueryClient = (): QueryClient => {
+export const useQueryClient = (explicitClient?: QueryClient): QueryClient => {
   const client = useContext(ActyxContext);
-  const resolved = client ?? defaultQueryClient;
-  _cachedClient = resolved;
+  const resolved = explicitClient ?? client ?? _cachedClient ?? defaultQueryClient;
+  if (resolved !== defaultQueryClient) {
+    _cachedClient = resolved;
+  }
   return resolved;
 };

@@ -1824,6 +1824,44 @@ describe("Client normalization for Axios and custom HTTP methods", () => {
     expect(res).toEqual([{ ok: true }, null]);
   });
 
+  it("should forward trailing arguments as extraArgs in direct proxy calls", async () => {
+    let capturedBody: any = null;
+    const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      if (init?.body) {
+        capturedBody = JSON.parse(init.body);
+      }
+      return new Response(JSON.stringify({ id: "123", success: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    // Direct mutation call with input and userId extraArg
+    const [res] = await client.todos.add({ text: "buy milk" }, "user-999");
+    expect(res).toEqual({ id: "123", success: true });
+    expect(capturedBody).toEqual({
+      input: { text: "buy milk" },
+      args: ["user-999"],
+    });
+
+    // Direct mutation call with input, custom ClientHttpOpts, and extraArg
+    capturedBody = null;
+    await client.todos.add(
+      { text: "buy milk" },
+      { headers: { "X-Custom": "val" } },
+      "user-999",
+    );
+    expect(capturedBody).toEqual({
+      input: { text: "buy milk" },
+      args: ["user-999"],
+    });
+  });
+
   it("should support usePaginatedQuery with bi-directional pagination on client proxy", async () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       const urlObj = new URL(url, "http://localhost");

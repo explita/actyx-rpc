@@ -1,6 +1,6 @@
 "use client";
 
-import { ActyxProvider, QueryClient } from "@/dist/react";
+import { ActyxDevtools, ActyxProvider, QueryClient } from "@/dist/react";
 import { useState, ReactNode } from "react";
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -13,5 +13,10 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
 
-  return <ActyxProvider client={queryClient}>{children}</ActyxProvider>;
+  return (
+    <ActyxProvider client={queryClient}>
+      {children}
+      <ActyxDevtools />
+    </ActyxProvider>
+  );
 }

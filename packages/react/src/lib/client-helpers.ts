@@ -395,6 +395,52 @@ function isPlainObject(val: unknown): val is Record<string, any> {
   );
 }
 
+export function isClientHttpOpts(val: unknown): boolean {
+  if (!isPlainObject(val)) return false;
+  const keys = Object.keys(val);
+  if (keys.length === 0) return false;
+  const knownHttpKeys = new Set(["method", "headers", "signal", "onProgress"]);
+  return keys.every((k) => knownHttpKeys.has(k));
+}
+
+export function parseDirectCallArgs(rawArgs: any[]): {
+  input: any;
+  opts: any;
+  extraArgs: any[];
+} {
+  if (rawArgs.length === 0) {
+    return { input: undefined, opts: undefined, extraArgs: [] };
+  }
+
+  const [first, ...rest] = rawArgs;
+
+  if (isClientHttpOpts(first)) {
+    return {
+      input: undefined,
+      opts: first,
+      extraArgs: rest,
+    };
+  }
+
+  let opts: any = undefined;
+  let extraArgs: any[] = [];
+
+  if (rest.length > 0) {
+    if (isClientHttpOpts(rest[0])) {
+      opts = rest[0];
+      extraArgs = rest.slice(1);
+    } else {
+      extraArgs = rest;
+    }
+  }
+
+  return {
+    input: first,
+    opts,
+    extraArgs,
+  };
+}
+
 export function parseHookArgs(args: any[]) {
   if (args.length === 0) {
     return { input: undefined, opts: undefined, extraArgs: [] };
@@ -424,3 +470,4 @@ export function scopeQueryKey(path: string[], key?: any[]): any[] | undefined {
     path.length > 0 && path.every((segment, i) => key[i] === segment);
   return alreadyScoped ? key : [...path, ...key];
 }
+

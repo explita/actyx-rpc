@@ -44,3 +44,24 @@ export type QueryState<TData = any, TError = any> = {
   updatedAt: number;
   isFetched: boolean;
 };
+
+export type MutationLogEntry = {
+  id: string;
+  mutationKey: string;
+  status: "pending" | "success" | "error";
+  startedAt: number;
+  endedAt?: number;
+  durationMs?: number;
+  variables?: any;
+  data?: any;
+  error?: any;
+};
+
+export type QueryCacheEntry = {
+  queryKey: string;
+  state: QueryState;
+  isStale: boolean;
+  listenersCount: number;
+  staleTimeMs: number;
+};
+

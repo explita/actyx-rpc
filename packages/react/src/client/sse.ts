@@ -1,10 +1,17 @@
 import { SSEEvent } from "../types/misc.js";
+import { actyxStreamTracker } from "../devtools/stream-tracker.js";
 
 export type SSEConnectionOptions = {
   url: string;
   params?: Record<string, any>;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /**
+   * Whether to register this connection in the Actyx DevTools stream tracker.
+   * Set to false when already tracked by a higher-level hook like `useSSE`.
+   * @default true
+   */
+  track?: boolean;
 };
 
 /**
@@ -19,14 +26,44 @@ export async function SSEClient<T = any>(
   let controller = new AbortController();
   let isClosed = false;
 
+  const shouldTrack = options.track !== false;
+  let streamId: string | null = null;
+  if (shouldTrack) {
+    try {
+      let displayUrl = options.url;
+      if (options.params && Object.keys(options.params).length > 0) {
+        const qs = new URLSearchParams(
+          Object.entries(options.params).map(([k, v]) => [k, String(v)]),
+        ).toString();
+        displayUrl = `${options.url}${options.url.includes("?") ? "&" : "?"}${qs}`;
+      }
+      streamId = actyxStreamTracker.registerStream("sse", displayUrl);
+      actyxStreamTracker.updateStatus(streamId, "connecting");
+    } catch {
+      // Optional tracking
+    }
+  }
+
   if (options.signal) {
     if (options.signal.aborted) {
       isClosed = true;
+      if (streamId) {
+        actyxStreamTracker.updateStatus(streamId, "disconnected");
+        actyxStreamTracker.unregisterStream(streamId);
+      }
     }
-    options.signal.addEventListener("abort", () => {
-      isClosed = true;
-      controller.abort();
-    });
+    options.signal.addEventListener(
+      "abort",
+      () => {
+        isClosed = true;
+        controller.abort();
+        if (streamId) {
+          actyxStreamTracker.updateStatus(streamId, "disconnected");
+          actyxStreamTracker.unregisterStream(streamId);
+        }
+      },
+      { once: true },
+    );
   }
 
   const onOnline = () => {
@@ -78,7 +115,18 @@ export async function SSEClient<T = any>(
           });
 
           if (!response.ok || !response.body) {
+            if (streamId) {
+              actyxStreamTracker.updateStatus(
+                streamId,
+                "error",
+                response.statusText,
+              );
+            }
             throw new Error(`Failed to connect to SSE: ${response.statusText}`);
+          }
+
+          if (streamId) {
+            actyxStreamTracker.updateStatus(streamId, "connected");
           }
 
           const reader = response.body.getReader();
@@ -120,6 +168,13 @@ export async function SSEClient<T = any>(
                   } catch {
                     event.data = dataBuffer;
                   }
+                  if (streamId) {
+                    actyxStreamTracker.recordEvent(
+                      streamId,
+                      event.event,
+                      event.data,
+                    );
+                  }
                   yield event as SSEEvent<T>;
                 }
               }
@@ -129,6 +184,13 @@ export async function SSEClient<T = any>(
             reader.releaseLock();
           }
         } catch (error) {
+          if (streamId) {
+            actyxStreamTracker.updateStatus(
+              streamId,
+              isClosed ? "disconnected" : "error",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
           if (isClosed) break;
           // Small warning for debugging, but doesn't break the client app
           console.warn(
@@ -142,6 +204,10 @@ export async function SSEClient<T = any>(
     close: () => {
       isClosed = true;
       controller.abort();
+      if (streamId) {
+        actyxStreamTracker.updateStatus(streamId, "disconnected");
+        actyxStreamTracker.unregisterStream(streamId);
+      }
       if (typeof window !== "undefined") {
         window.removeEventListener("online", onOnline);
       }
