@@ -23,6 +23,7 @@ import {
   UseWSOpts,
   UseWSResult,
   WindowTime,
+  WithoutCursor,
   WSAdapterOptions,
 } from "./main";
 import { SSEEvent } from "./misc";
@@ -131,11 +132,26 @@ export interface BatchMetrics {
   };
 }
 
+/**
+ * Options for configuring a typed RPC client proxy via `createClient<AppRouter>(options)`.
+ *
+ * Configures base URL, authentication headers, routing strategy (`path` or `query`),
+ * default query HTTP methods, interceptors (for token refreshes or retries), and batching.
+ */
 export interface CreateClientOptions {
+  /**
+   * Root API URL prefix (e.g. `/api/rpc` or `https://api.example.com/rpc`).
+   */
   baseUrl: string;
+  /**
+   * Static or dynamic headers attached to outgoing requests.
+   */
   headers?:
     | Record<string, string>
     | (() => MaybePromise<Record<string, string>>);
+  /**
+   * Custom fetch implementation (e.g. for SSR or polyfilled environments).
+   */
   fetch?: typeof fetch | ((url: string, init?: any) => Promise<any>) | any;
   /**
    * Procedure routing strategy in HTTP requests:
@@ -239,8 +255,12 @@ export type ClientUseSSEInfiniteQueryOpts<
   TData,
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
+  TArgs extends any[] = any[],
 > = Prettify<
-  Omit<SSEAdapterOptions<TInput, TData, TData, TQueryKey, TFullPage>, "url"> & {
+  Omit<
+    SSEAdapterOptions<TInput, TData, TData, TQueryKey, TFullPage, TArgs>,
+    "url"
+  > & {
     /**
      * The streaming procedure (e.g. `rpc.notifications.sse` or `rpc.feed.stream`)
      * or a direct URL string to listen to for incoming real-time SSE events.
@@ -297,6 +317,17 @@ export type ClientUseWSResult<
 
 export type QueryCall<T = unknown> = Promise<[T, null] | [null, ErrorResponse]>;
 
+/**
+ * Typed client methods for a Query procedure within a client proxy.
+ *
+ * Exposes direct async procedure calls `rpc.path(...)` alongside React query hooks:
+ * - `useQuery`: Standard data fetching and caching hook.
+ * - `useSuspenseQuery`: React Suspense compatible query hook.
+ * - `invalidate`: Invalidates this query's cache entry across the application.
+ * - `prefetch`: Warms the query cache in the background.
+ * - `getQueryData` / `setQueryData`: Directly reads or updates the cached value.
+ * - `useInfiniteQuery` / `usePaginatedQuery`: Available if the output conforms to a paginated shape.
+ */
 export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
   | [void]
   | [undefined]
@@ -522,7 +553,7 @@ export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
               O,
               P
             > & {
-              input: I | ((pageParam: any) => I);
+              input: WithoutCursor<I> | I | ((pageParam: any) => I);
             },
             ...args: P
           ) => InfiniteQueryResult<ExtractPaginatedItem<O>, O>;
@@ -534,7 +565,7 @@ export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
               O,
               P
             > & {
-              input: I | ((pageParam: any) => I);
+              input: WithoutCursor<I> | I | ((pageParam: any) => I);
             },
             ...args: P
           ) => InfiniteQueryResult<ExtractPaginatedItem<O>, O>;
@@ -543,9 +574,10 @@ export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
               I,
               ExtractPaginatedItem<O>,
               unknown[],
-              O
+              O,
+              P
             > & {
-              input: I | ((pageParam: any) => I);
+              input: WithoutCursor<I> | I | ((pageParam: any) => I);
             },
             ...args: P
           ) => ClientUseSSEResult<ExtractPaginatedItem<O>, O>;
@@ -557,28 +589,35 @@ export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
               O,
               P
             > & {
-              input: I | ((pageParam: any) => I);
+              input: WithoutCursor<I> | I | ((pageParam: any) => I);
             },
             ...args: P
           ) => ClientUseWSResult<ExtractPaginatedItem<O>, O>;
         }
       : {});
 
+/**
+ * Typed client methods for a Mutation procedure within a client proxy.
+ *
+ * Exposes direct async mutation execution `rpc.path(...)` and the `useMutation` hook:
+ * - `useMutation`: React mutation hook managing execution state, optimistic updates, and callbacks.
+ * - `isMutating` / `useIsMutating`: Checks or observes whether this mutation is actively in-flight.
+ */
 export type MutationCall<I, O, P extends unknown[] = []> = ([I] extends
   | [void]
   | [undefined]
   | [never]
   ? {
-      (...args: P): Promise<MutationResult<O>>;
+      (...args: P): Promise<MutationResult<O, undefined, P>>;
       useMutation: <TContext = unknown>(
         opts?: ClientUseMutationOpts<O, P, TContext>,
-      ) => UseMutationResult<O, P, TContext, any>;
+      ) => UseMutationResult<O, P, TContext, any, undefined>;
     }
   : {
-      (input: I, ...args: P): Promise<MutationResult<Awaited<O>>>;
+      (input: I, ...args: P): Promise<MutationResult<Awaited<O>, I, P>>;
       useMutation: <TContext = unknown>(
-        opts?: ClientUseMutationOpts<O, [I, ...P], TContext>,
-      ) => UseMutationResult<O, [I, ...P], TContext, any>;
+        opts?: ClientUseMutationOpts<O, [input: I, ...args: P], TContext>,
+      ) => UseMutationResult<O, [input: I, ...args: P], TContext, any, I>;
     }) & {
   isMutating: (
     inputOrOpts?: I | { input?: I; queryKey?: unknown[] },
@@ -609,6 +648,11 @@ export type IsEmptyOrOptionalInput<T> = [T] extends
       ? true
       : false;
 
+/**
+ * Typed client methods for a Streaming or Server-Sent Events procedure within a client proxy.
+ *
+ * Exposes direct async stream iteration and the `useSSE` React hook.
+ */
 export type StreamCall<
   I,
   O,
@@ -633,6 +677,11 @@ export type StreamCall<
 
 export type SSECall<I, O, P extends unknown[] = []> = StreamCall<I, O, P>;
 
+/**
+ * Typed client methods for a WebSocket procedure within a client proxy.
+ *
+ * Exposes the `useWS` React hook for bi-directional real-time communication.
+ */
 export type WSCall<I, P extends unknown[] = []> = {
   useWS: [I] extends [void] | [undefined] | [never]
     ? <TOutput = any>(

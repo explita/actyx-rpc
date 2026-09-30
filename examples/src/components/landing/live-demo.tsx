@@ -50,13 +50,11 @@ export function LiveDemo() {
     data: greetResult,
     isFetching: isGreeting,
     refetch: refetchGreeting,
-  } = useQuery(
-    () => greet({ name }),
-    {
-      queryKey: ["landing-greet", name],
-      enabled: false,
-    },
-  );
+  } = useQuery(greet, {
+    input: { name },
+    queryKey: ["landing-greet", name],
+    enabled: false,
+  });
 
   const handleGreet = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,57 +93,136 @@ export function LiveDemo() {
           </div>
 
           <div className="flex-1 overflow-y-auto text-left select-none nextra-scrollbar bg-slate-950 text-slate-300 p-4 font-mono text-[13px] leading-relaxed whitespace-pre">
-            <span className="text-purple-400">import</span><span> </span><span className="text-yellow-300">createProcedure</span><span> </span><span className="text-purple-400">from</span><span> </span><span className="text-green-400">&quot;@explita/actyx-rpc&quot;</span><span>;</span>
-{'\n'}
-            <span className="text-purple-400">import</span><span> </span><span className="text-yellow-300">z</span><span> </span><span className="text-purple-400">from</span><span> </span><span className="text-green-400">&quot;zod&quot;</span><span>;</span>
-{'\n'}
-            <span className="text-purple-400">import</span><span> </span><span className="text-yellow-300">zodResolver</span><span> </span><span className="text-purple-400">from</span><span> </span><span className="text-green-400">&quot;@explita/actyx-rpc/resolvers/zod&quot;</span><span>;</span>
-{'\n\n'}
-            <span className="text-slate-500">// Define a procedure with context</span>
-{'\n'}
-            <span className="text-purple-400">const</span><span> procedure </span><span className="text-slate-300">=</span><span> createProcedure(</span>
-{'\n'}
-            <span>  </span><span className="text-slate-500">createContext</span><span className="text-slate-300">:</span><span> </span><span className="text-slate-300">()</span><span> </span><span className="text-slate-300">{'=>'}</span><span> ({'{'}</span>
-{'\n'}
-            <span>    db, auth</span>
-{'\n'}
-            <span>  {'}'}),</span>
-{'\n'}
-            <span>{'}'});</span>
-{'\n\n'}
+            <span className="text-purple-400">import</span>
+            <span> </span>
+            <span className="text-yellow-300">createProcedure</span>
+            <span> </span>
+            <span className="text-purple-400">from</span>
+            <span> </span>
+            <span className="text-green-400">
+              &quot;@explita/actyx-rpc&quot;
+            </span>
+            <span>;</span>
+            {"\n"}
+            <span className="text-purple-400">import</span>
+            <span> </span>
+            <span className="text-yellow-300">z</span>
+            <span> </span>
+            <span className="text-purple-400">from</span>
+            <span> </span>
+            <span className="text-green-400">&quot;zod&quot;</span>
+            <span>;</span>
+            {"\n"}
+            <span className="text-purple-400">import</span>
+            <span> </span>
+            <span className="text-yellow-300">zodResolver</span>
+            <span> </span>
+            <span className="text-purple-400">from</span>
+            <span> </span>
+            <span className="text-green-400">
+              &quot;@explita/actyx-rpc/resolvers/zod&quot;
+            </span>
+            <span>;</span>
+            {"\n\n"}
+            <span className="text-slate-500">
+              // Define a procedure with context
+            </span>
+            {"\n"}
+            <span className="text-purple-400">const</span>
+            <span> procedure </span>
+            <span className="text-slate-300">=</span>
+            <span> createProcedure(</span>
+            {"\n"}
+            <span> </span>
+            <span className="text-slate-500">createContext</span>
+            <span className="text-slate-300">:</span>
+            <span> </span>
+            <span className="text-slate-300">()</span>
+            <span> </span>
+            <span className="text-slate-300">{"=>"}</span>
+            <span> ({"{"}</span>
+            {"\n"}
+            <span> db, auth</span>
+            {"\n"}
+            <span> {"}"}),</span>
+            {"\n"}
+            <span>{"}"});</span>
+            {"\n\n"}
             <span className="text-slate-500">// Type-safe query procedure</span>
-{'\n'}
-            <span className="text-purple-400">export</span><span> </span><span className="text-purple-400">const</span><span> ping </span><span className="text-slate-300">=</span><span> procedure.query(</span>
-{'\n'}
-            <span>  </span><span className="text-yellow-300">async</span><span> ({'{'} ctx, input {'}'}) </span><span className="text-slate-300">{'=>'}</span><span> ({'{'}</span>
-{'\n'}
-            <span>    message</span><span className="text-slate-300">:</span><span> </span><span className="text-green-400">&quot;pong&quot;</span><span>,</span>
-{'\n'}
-            <span>    serverTime</span><span className="text-slate-300">:</span><span> </span><span className="text-yellow-300">new</span><span> Date().toISOString(),</span>
-{'\n'}
-            <span>  {'}'}),</span>
-{'\n'}
-            <span>{'}'});</span>
-{'\n\n'}
+            {"\n"}
+            <span className="text-purple-400">export</span>
+            <span> </span>
+            <span className="text-purple-400">const</span>
+            <span> ping </span>
+            <span className="text-slate-300">=</span>
+            <span> procedure.query(</span>
+            {"\n"}
+            <span> </span>
+            <span className="text-yellow-300">async</span>
+            <span>
+              {" "}
+              ({"{"} ctx, input {"}"}){" "}
+            </span>
+            <span className="text-slate-300">{"=>"}</span>
+            <span> ({"{"}</span>
+            {"\n"}
+            <span> message</span>
+            <span className="text-slate-300">:</span>
+            <span> </span>
+            <span className="text-green-400">&quot;pong&quot;</span>
+            <span>,</span>
+            {"\n"}
+            <span> serverTime</span>
+            <span className="text-slate-300">:</span>
+            <span> </span>
+            <span className="text-yellow-300">new</span>
+            <span> Date().toISOString(),</span>
+            {"\n"}
+            <span> {"}"}),</span>
+            {"\n"}
+            <span>{"}"});</span>
+            {"\n\n"}
             <span className="text-slate-500">// With input validation</span>
-{'\n'}
-            <span className="text-purple-400">export</span><span> </span><span className="text-purple-400">const</span><span> greet </span><span className="text-slate-300">=</span><span> procedure</span>
-{'\n'}
-            <span>  .input(zodResolver(z.object({'{'}</span>
-{'\n'}
-            <span>    name</span><span className="text-slate-300">:</span><span> z.string().min(1),</span>
-{'\n'}
-            <span>  {'}'})))</span>
-{'\n'}
-            <span>  .query(</span><span className="text-yellow-300">async</span><span> ({'{'} input {'}'}) </span><span className="text-slate-300">{'=>'}</span><span> ({'{'}</span>
-{'\n'}
-            <span>    greeting</span><span className="text-slate-300">:</span><span> </span><span className="text-green-400">{'`Hello, ${input.name}!`'}</span><span>,</span>
-{'\n'}
-            <span>    serverTime</span><span className="text-slate-300">:</span><span> </span><span className="text-yellow-300">new</span><span> Date().toISOString(),</span>
-{'\n'}
-            <span>  {'}'}),</span>
-{'\n'}
-            <span>{'}'});</span>
+            {"\n"}
+            <span className="text-purple-400">export</span>
+            <span> </span>
+            <span className="text-purple-400">const</span>
+            <span> greet </span>
+            <span className="text-slate-300">=</span>
+            <span> procedure</span>
+            {"\n"}
+            <span> .input(zodResolver(z.object({"{"}</span>
+            {"\n"}
+            <span> name</span>
+            <span className="text-slate-300">:</span>
+            <span> z.string().min(1),</span>
+            {"\n"}
+            <span> {"}"})))</span>
+            {"\n"}
+            <span> .query(</span>
+            <span className="text-yellow-300">async</span>
+            <span>
+              {" "}
+              ({"{"} input {"}"}){" "}
+            </span>
+            <span className="text-slate-300">{"=>"}</span>
+            <span> ({"{"}</span>
+            {"\n"}
+            <span> greeting</span>
+            <span className="text-slate-300">:</span>
+            <span> </span>
+            <span className="text-green-400">{"`Hello, ${input.name}!`"}</span>
+            <span>,</span>
+            {"\n"}
+            <span> serverTime</span>
+            <span className="text-slate-300">:</span>
+            <span> </span>
+            <span className="text-yellow-300">new</span>
+            <span> Date().toISOString(),</span>
+            {"\n"}
+            <span> {"}"}),</span>
+            {"\n"}
+            <span>{"}"});</span>
           </div>
         </div>
 
@@ -176,11 +253,14 @@ export function LiveDemo() {
                     disabled={isPinging}
                     className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50 transition-colors"
                   >
-                    <RefreshCw size={12} className={isPinging ? "animate-spin" : ""} />
+                    <RefreshCw
+                      size={12}
+                      className={isPinging ? "animate-spin" : ""}
+                    />
                     {isPinging ? "Pinging..." : "Refetch"}
                   </button>
                 </div>
-                    {pingResult ? (
+                {pingResult ? (
                   <div className="space-y-1 text-xs font-mono">
                     <div className="flex items-center gap-2">
                       <span className="text-slate-400">Message:</span>

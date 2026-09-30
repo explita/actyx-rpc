@@ -80,23 +80,23 @@ export type SchemaOrStandard<T = any> =
 /**
  * Inactive/fallback type inference for schemas and resolvers.
  */
-export type InferSchemaOutput<S> = S extends StandardSchemaV1<any, infer Output>
-  ? Output
-  : S extends SchemaResolver<infer Output>
+export type InferSchemaOutput<S> =
+  S extends StandardSchemaV1<any, infer Output>
     ? Output
-    : S extends {
-          parse: (
-            ...args: any[]
-          ) =>
-            | ResolverResult<infer Output>
-            | Promise<ResolverResult<infer Output>>;
-        }
+    : S extends SchemaResolver<infer Output>
       ? Output
-      : unknown;
+      : S extends {
+            parse: (
+              ...args: any[]
+            ) =>
+              | ResolverResult<infer Output>
+              | Promise<ResolverResult<infer Output>>;
+          }
+        ? Output
+        : unknown;
 
-export type InferSchemaInput<S> = S extends StandardSchemaV1<infer Input, any>
-  ? Input
-  : InferSchemaOutput<S>;
+export type InferSchemaInput<S> =
+  S extends StandardSchemaV1<infer Input, any> ? Input : InferSchemaOutput<S>;
 
 export type InputMode = "strict" | "form" | "partial" | "patch";
 
@@ -157,47 +157,121 @@ export type InputParams<
         ? { [K in keyof I]: MappedInputValue<I[K]> }
         : Partial<{ [K in keyof I]: MappedInputValue<I[K]> }>;
 
-export type QueryResult<T = unknown, TInput = undefined> = (
+export type QueryResult<
+  T = unknown,
+  TInput = undefined,
+  TArgs extends unknown[] = unknown[],
+> = (
   | [T, null]
   | [null, ErrorResponse]
 ) & {
   readonly _type?: "query";
   readonly _input?: TInput;
+  readonly _args?: TArgs;
 };
-export type MutationResult<T = unknown, TInput = undefined> = (
+export type MutationResult<
+  T = unknown,
+  TInput = undefined,
+  TArgs extends unknown[] = unknown[],
+> = (
   | [T, null]
   | [null, ErrorResponse]
 ) & {
   readonly _type?: "mutation";
   readonly _input?: TInput;
+  readonly _args?: TArgs;
 };
 
 export type ContextResult<T> =
   | { ok: true; ctx: T }
   | { ok: false; reason: FailureReason };
 
-export type ErrorResponse = Prettify<
-  {
-    message: string;
-    reason: FailureReason;
-    errors?: Record<string, string>;
-  } & BaseError
->;
+export type ErrorResponse = {
+  message: string;
+  reason: FailureReason;
+  errors?: Record<string, string>;
+} & BaseError;
 
-export type FailureReason =
+export type BuiltinFailureReason =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "MAINTENANCE_MODE"
   | "VALIDATION_ERROR"
   | "UNEXPECTED_ERROR"
+  | "INTERNAL_ERROR"
   | "INVALID_SESSION"
   | "ABORTED"
   | "INVALID_CACHE_KEY"
+  | "EMPTY_CACHE_KEY"
   | "TIMEOUT"
   | "RETRY_EXHAUSTED"
   | "CIRCUIT_OPEN"
   | "RATE_LIMITED"
-  | (string & {});
+  | "BAD_REQUEST"
+  | "NOT_FOUND"
+  | "STREAM_BATCH_UNSUPPORTED"
+  | "CLIENT_ERROR"
+  | "SERVER_ERROR"
+  | "NETWORK_ERROR"
+  | "HTTP_ERROR"
+  | "MAX_RETRIES_EXCEEDED"
+  | "BATCH_RESULT_MISSING"
+  | "INVALID_BATCH_RESPONSE";
+
+declare global {
+  namespace ActyxRPC {
+    /**
+     * Ambient namespace to register custom error reasons globally for both
+     * `@explita/actyx-rpc` and `@explita/actyx-rpc-react`.
+     *
+     * @example
+     * declare global {
+     *   namespace ActyxRPC {
+     *     interface RegisterCustomErrors {
+     *       reasons: "KYC_REQUIRED" | "INSUFFICIENT_FUNDS";
+     *     }
+     *   }
+     * }
+     */
+    interface RegisterCustomErrors {}
+  }
+}
+
+/**
+ * Register custom error reasons globally via declaration merging.
+ *
+ * Supports both styles:
+ *
+ * Style 1 (Union property):
+ * ```ts
+ * declare module "@explita/actyx-rpc" {
+ *   interface RegisterCustomErrors {
+ *     reasons: "KYC_REQUIRED" | "INSUFFICIENT_FUNDS";
+ *   }
+ * }
+ * ```
+ *
+ * Style 2 (Object keys):
+ * ```ts
+ * declare module "@explita/actyx-rpc" {
+ *   interface RegisterCustomErrors {
+ *     KYC_REQUIRED: true;
+ *     INSUFFICIENT_FUNDS: true;
+ *   }
+ * }
+ * ```
+ */
+export interface RegisterCustomErrors extends ActyxRPC.RegisterCustomErrors {}
+
+export type CustomFailureReason =
+  | (RegisterCustomErrors extends { reasons: infer R extends string }
+      ? R
+      : never)
+  | (Exclude<keyof RegisterCustomErrors, "reasons"> extends never
+      ? never
+      : Extract<Exclude<keyof RegisterCustomErrors, "reasons">, string>);
+
+export type FailureReason = BuiltinFailureReason | CustomFailureReason;
 
 export type SSEEvent<T = any, TInput = undefined> = {
   event?: string;

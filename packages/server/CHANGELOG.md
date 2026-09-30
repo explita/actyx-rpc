@@ -3,6 +3,18 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-09-30
+
+### Added
+
+- **Configurable `validationHint` on `createProcedure`**:
+  - Added optional `validationHint?: string` to `ProcedureProps` and procedure configuration.
+  - Allows customizing the default `"Invalid data provided"` error message produced when schema validation fails.
+- **Raw Positional Arguments for Schema-Less Procedures**:
+  - Procedures defined without an input schema now preserve the raw incoming payload directly into positional arguments (`args = [payload, ...args]`), allowing primitive and positional parameters (such as `string`, `number`, or custom identifiers) to pass through cleanly without being normalized to an empty object.
+- **Comprehensive JSDoc Documentation**:
+  - Added detailed JSDoc comments across `createProcedure`, `ProcedureProps`, `ProcedureInstance`, and all middleware interfaces (`Middleware`, `MiddlewareOptions`, `MiddlewareResult`).
+
 ## [0.11.0] - 2026-09-25
 
 ### Added

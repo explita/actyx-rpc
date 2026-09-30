@@ -76,7 +76,7 @@ export function UserProfile({ id }: { id: string }) {
     data: user,
     isLoading,
     error,
-  } = useQuery(() => getUser({ id }), { queryKey: ["user", id] });
+  } = useQuery(getUser, { input: { id }, queryKey: ["user", id] });
 
   if (isLoading) return <p>Loading...</p>;
   if (error) return <p>Error: {error.message}</p>;

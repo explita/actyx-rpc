@@ -48,7 +48,6 @@ export function toSchemaResolver<T = any>(
           return {
             success: false,
             errors,
-            message: result.issues[0]?.message || "Validation failed",
           };
         }
         return {

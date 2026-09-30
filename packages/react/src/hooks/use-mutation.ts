@@ -13,9 +13,36 @@ import { parseWindow } from "../lib/utils.js";
 import { hasFile, objectToFormData } from "../lib/client-helpers.js";
 
 /**
- * `useMutation` for a procedure (function) action.
- * `TOutput` and `TArgs` are inferred from the action's signature, so
- * `mutate` receives the exact procedure input and returns its typed data.
+ * React hook for executing state-modifying mutations using an Actyx RPC procedure or server action.
+ *
+ * Automatically infers input parameters and return types from the procedure signature. Supports
+ * optimistic updates, debounce, upload progress tracking, cache invalidation, and custom contexts.
+ *
+ * @template TAction - The procedure function returning a `Promise<MutationResult<TOutput>>`.
+ * @template TOutput - The inferred resolved output data type.
+ * @template TArgs - The parameter types accepted by `mutate` and `mutateAsync`.
+ * @template TContext - Optional optimistic context type returned by `onMutate`.
+ * @template TMutationKey - Tuple key identifying this mutation for `useIsMutating`.
+ *
+ * @param action - The procedure function or server action to execute.
+ * @param opts - Mutation options including `onSuccess`, `onError`, `onMutate`, `optimisticUpdate`, and `debounceMs`.
+ * @returns A `UseMutationResult` object containing `mutate`, `mutateAsync`, `status`, `data`, `error`, `isPending`, and `reset`.
+ *
+ * @example
+ * ```tsx
+ * const { mutate, isPending } = useMutation(createPost, {
+ *   onSuccess: (post) => {
+ *     toast.success(`Post ${post.title} created!`);
+ *   },
+ *   onError: (error) => {
+ *     toast.error(error.message);
+ *   },
+ * });
+ *
+ * <button onClick={() => mutate({ title: "Hello World" })} disabled={isPending}>
+ *   Create
+ * </button>
+ * ```
  */
 export function useMutation<
   TAction extends (...args: any[]) => Promise<any>,
@@ -29,9 +56,26 @@ export function useMutation<
 ): UseMutationResult<TOutput, Parameters<TAction>, TContext, TAction>;
 
 /**
- * `useMutation` for a URL (string) action.
- * `TOutput`/`TArgs` fall back to `unknown`/`any[]` — provide them explicitly
- * when you want the mutation return typed (e.g. `useMutation<MyData, [File]>(url)`).
+ * React hook for executing mutations against a raw URL endpoint (e.g. file upload or REST webhook).
+ *
+ * Supports multipart file uploads with upload progress (`onProgress`), cancellation via `abort()`,
+ * and typed output response data.
+ *
+ * @template TOutput - Expected response data type.
+ * @template TArgs - Parameter types passed to `mutate` (e.g. `[FormData]` or `[File]`).
+ * @template TContext - Optional optimistic context type returned by `onMutate`.
+ * @template TMutationKey - Tuple key identifying this mutation for `useIsMutating`.
+ *
+ * @param action - The HTTP URL string to mutate against.
+ * @param opts - Mutation options including progress tracking, abort controllers, and callbacks.
+ * @returns A `UseMutationResult` object with `mutate`, `mutateAsync`, `abort`, `progress`, etc.
+ *
+ * @example
+ * ```tsx
+ * const { mutate, progress, abort } = useMutation<UploadResponse, [File]>("/api/upload", {
+ *   onProgress: (p) => setPercent(p),
+ * });
+ * ```
  */
 export function useMutation<
   TOutput = unknown,
@@ -257,7 +301,7 @@ export function useMutation<
           }
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
-          const errObj = {
+          const errObj: ErrorResponse = {
             success: false,
             message,
             reason: "CLIENT_ERROR",
@@ -425,10 +469,10 @@ export function useMutation<
         if (err) {
           setStatus("error");
           const message = err?.message || "An unexpected error occurred";
-          const error =
+          const error: ErrorResponse =
             typeof err === "object"
-              ? { ...err, success: false, message }
-              : { message, reason: "", handlerName: "", statusCode: 500 };
+              ? ({ ...err, success: false, message } as ErrorResponse)
+              : { success: false, message, reason: "UNEXPECTED_ERROR", handlerName: "", statusCode: 500 };
           setError(error);
 
           if (err.reason === "VALIDATION_ERROR" && err.errors) {
@@ -503,7 +547,7 @@ export function useMutation<
         const message =
           err instanceof Error ? err.message : "An unexpected error occurred";
 
-        const error = {
+        const error: ErrorResponse = {
           success: false,
           message,
           reason: "CLIENT_ERROR",

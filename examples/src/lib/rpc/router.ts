@@ -1,4 +1,4 @@
-import { createRouter, InferOutput } from "@/dist";
+import { createRouter } from "@/dist";
 import { procedure } from "./init";
 import { zodResolver } from "@/dist/resolvers/zod";
 import { z } from "zod";

@@ -28,9 +28,24 @@ const addItem = <T>(
 ): T[] => (dedupKey ? applyDedup(prev, item, dedupKey) : [...prev, item]);
 
 /**
- * Hook for connecting to a WebSocket server and receiving real-time messages.
+ * React hook for managing real-time WebSocket connections and bidirectional messaging.
  *
- * @param opts Options for the connection, including the WebSocket URL.
+ * Automatically manages connection state (`idle`, `connecting`, `connected`, `error`), message history,
+ * deduplication, and sending messages over the active socket.
+ *
+ * @template TInitialData - Type of optional initial data or initial data generator.
+ * @template TOutput - The received message item type.
+ *
+ * @param opts - Connection options including `url`, `protocols`, `onMessage`, `onOpen`, `onClose`, and `onError`.
+ * @returns A `UseWSResult` object containing `data`, `status`, `send`, `clear`, and `disconnect`.
+ *
+ * @example
+ * ```tsx
+ * const { data, send, status } = useWS<ChatMessage>({
+ *   url: "wss://api.example.com/chat",
+ *   onMessage: (msg) => console.log("Incoming message:", msg),
+ * });
+ * ```
  */
 export function useWS<
   TInitialData = undefined,

@@ -27,12 +27,13 @@ function UserProfile({ userId }) {
     error,
     refetch,
     reset,
-  } = useQuery(() => getUser({ id: userId }), {
+  } = useQuery(getUser, {
+    input: { id: userId },
     enabled: !!userId,
     refetchOnWindowFocus: true,
     // Function support for lazy initialData resolution
     initialData: () => ({ id: "", name: "Loading..." }),
-    // Optional queryKey allows cache deduplication across components
+    // Optional queryKey allows cache deduplication across components (auto-generated if omitted)
     queryKey: ["user", { id: userId }],
   });
 
@@ -51,16 +52,58 @@ function UserProfile({ userId }) {
 }
 ```
 
+### Calling Conventions
+
+`useQuery` supports multiple calling patterns depending on how your procedure is structured:
+
+#### 1. Procedure with Input Schema
+Pass your typed procedure directly and specify `input` inside `options`. TypeScript automatically enforces required schema keys:
+
+```tsx
+const { data, isLoading } = useQuery(getUserProfile, {
+  input: { id: userId },
+  enabled: !!userId,
+});
+```
+
+#### 2. Procedure with Positional Arguments
+Procedures or server actions without an explicit input schema accept their arguments as trailing positional parameters (`...extraArgs`):
+
+```tsx
+const { data } = useQuery(
+  getTemplateById,
+  {
+    enabled: !!templateId,
+    unwrap: true,
+  },
+  templateId,       // 1st procedure argument
+  "full-detail",    // 2nd procedure argument (optional)
+);
+```
+
+#### 3. Custom Closures & Arrow Functions
+Zero-argument functions and inline closures continue to work with full backward compatibility:
+
+```tsx
+const { data } = useQuery(() => customFetch(paramA, paramB), {
+  queryKey: ["custom", paramA, paramB],
+});
+```
+
+---
+
 ### Configuration Options
 
-The `useQuery` hook accepts two arguments:
+The `useQuery` hook accepts:
 
-1. **`proc`**: An async procedure function returning a `[data, error]` tuple.
-2. **`options`**: An optional configuration object (`UseQueryOpts`):
+1. **`proc`**: An async procedure function or server action returning a `[data, error]` tuple or payload.
+2. **`options`**: An optional configuration object (`UseQueryOpts`).
+3. **`...extraArgs`**: Additional positional arguments forwarded directly to the procedure call.
 
 | Option                 | Type                    | Default         | Description                                                                                                |
 | :--------------------- | :---------------------- | :-------------- | :--------------------------------------------------------------------------------------------------------- |
-| `queryKey`             | `unknown[]`             | —               | Unique array key for cache identification and deduplication.                                               |
+| `input`                | `TInput`                | —               | Input parameters payload passed as the first argument to the procedure.                                    |
+| `queryKey`             | `unknown[]`             | —               | Unique array key for cache identification and deduplication. Automatically generated if omitted.           |
 | `initialData`          | `data \| (() => data)`  | —               | Pre-populates cache on mount. Supports lazy evaluation functions.                                          |
 | `enabled`              | `boolean`               | `true`          | Set to `false` to disable automatic fetching on mount.                                                     |
 | `staleTime`            | `number \| string`      | `0`             | Time in milliseconds (or string window e.g., `"5m"`) before data is considered stale.                      |

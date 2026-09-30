@@ -1,51 +1,159 @@
-import type { QueryResult as ProcQueryResult } from "./misc.js";
-
-export type FailureReason =
+/**
+ * All built-in error reason strings emitted by the Actyx RPC runtime.
+ *
+ * Covers authentication, validation, network, circuit-breaker, batching,
+ * and internal failure categories.
+ */
+export type BuiltinFailureReason =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "MAINTENANCE_MODE"
   | "VALIDATION_ERROR"
   | "UNEXPECTED_ERROR"
+  | "INTERNAL_ERROR"
   | "INVALID_SESSION"
   | "ABORTED"
   | "INVALID_CACHE_KEY"
+  | "EMPTY_CACHE_KEY"
   | "TIMEOUT"
   | "RETRY_EXHAUSTED"
   | "CIRCUIT_OPEN"
   | "RATE_LIMITED"
-  | (string & {});
+  | "BAD_REQUEST"
+  | "NOT_FOUND"
+  | "STREAM_BATCH_UNSUPPORTED"
+  | "CLIENT_ERROR"
+  | "SERVER_ERROR"
+  | "NETWORK_ERROR"
+  | "HTTP_ERROR"
+  | "MAX_RETRIES_EXCEEDED"
+  | "BATCH_RESULT_MISSING"
+  | "INVALID_BATCH_RESPONSE";
 
+declare global {
+  namespace ActyxRPC {
+    /**
+     * Ambient namespace to register custom error reasons globally for both
+     * `@explita/actyx-rpc` and `@explita/actyx-rpc-react`.
+     *
+     * @example
+     * declare global {
+     *   namespace ActyxRPC {
+     *     interface RegisterCustomErrors {
+     *       reasons: "KYC_REQUIRED" | "INSUFFICIENT_FUNDS";
+     *     }
+     *   }
+     * }
+     */
+    interface RegisterCustomErrors {}
+  }
+}
+
+/**
+ * Register custom error reasons globally via declaration merging.
+ *
+ * Supports both styles:
+ *
+ * Style 1 (Union property):
+ * ```ts
+ * declare module "@explita/actyx-rpc-react" {
+ *   interface RegisterCustomErrors {
+ *     reasons: "KYC_REQUIRED" | "INSUFFICIENT_FUNDS";
+ *   }
+ * }
+ * ```
+ *
+ * Style 2 (Object keys):
+ * ```ts
+ * declare module "@explita/actyx-rpc-react" {
+ *   interface RegisterCustomErrors {
+ *     KYC_REQUIRED: true;
+ *     INSUFFICIENT_FUNDS: true;
+ *   }
+ * }
+ * ```
+ */
+export interface RegisterCustomErrors extends ActyxRPC.RegisterCustomErrors {}
+
+export type CustomFailureReason =
+  | (RegisterCustomErrors extends { reasons: infer R extends string }
+      ? R
+      : never)
+  | (Exclude<keyof RegisterCustomErrors, "reasons"> extends never
+      ? never
+      : Extract<Exclude<keyof RegisterCustomErrors, "reasons">, string>);
+
+export type FailureReason = BuiltinFailureReason | CustomFailureReason;
+
+/**
+ * Identity-mapped type that forces TypeScript to eagerly resolve and display
+ * the full shape of `T` in tooltips instead of showing intersection chains.
+ */
 export type Prettify<T> = {
   [K in keyof T]: T[K];
 } & {};
 
+/** A value that may be synchronous or wrapped in a `Promise`. */
 export type MaybePromise<T> = Promise<T> | T;
 
+/**
+ * A time duration expressed as either a plain number (milliseconds) or a
+ * human-readable string with a unit suffix (`"5s"`, `"30m"`, `"2h"`, `"1d"`, `"1w"`, `"1M"`).
+ */
 export type WindowTime =
   | `${number}${"s" | "m" | "h" | "d" | "w" | "M"}`
   | number;
 
+/**
+ * Base shape present on every error response from the RPC runtime.
+ *
+ * All error responses extend this with additional structured fields.
+ */
 export type BaseError = {
+  /** Whether the operation succeeded (always `false` for errors). */
   success: boolean;
+  /** The name of the server-side handler that produced the error. */
   handlerName: string;
+  /** HTTP status code associated with the error. */
   statusCode: number;
+  /** Additional arbitrary metadata attached by the server. */
   [key: string]: unknown;
 };
 
-export type MutationResult<T = unknown, TInput = undefined> = (
-  | [T, null]
-  | [null, ErrorResponse]
-) & {
+/**
+ * A mutation result tuple returned by RPC mutation procedures.
+ *
+ * Returns `[data, null]` on success or `[null, error]` on failure.
+ * Carries phantom type brands for type-level inference in hooks and client proxy types.
+ *
+ * @template T - The resolved data type on success.
+ * @template TInput - The validated input type (phantom brand).
+ * @template TArgs - Extra positional arguments tuple (phantom brand).
+ */
+export type MutationResult<
+  T = unknown,
+  TInput = undefined,
+  TArgs extends unknown[] = unknown[],
+> = ([T, null] | [null, ErrorResponse]) & {
   readonly _type?: "mutation";
   readonly _input?: TInput;
+  readonly _args?: TArgs;
 };
-export type ErrorResponse = Prettify<
-  {
-    message: string;
-    reason: FailureReason;
-    errors?: Record<string, string>;
-  } & BaseError
->;
+
+/**
+ * Structured error response returned in the failure branch of query/mutation result tuples.
+ *
+ * Includes a human-readable `message`, a machine-readable `reason` code, and optional
+ * field-level `errors` for validation failures.
+ */
+export type ErrorResponse = {
+  /** Human-readable error message. */
+  message: string;
+  /** Machine-readable failure reason code. */
+  reason: FailureReason;
+  /** Optional field-level validation error messages keyed by field name. */
+  errors?: Record<string, string>;
+} & BaseError;
 
 /**
  * Lifecycle status of a mutation.
@@ -185,15 +293,24 @@ export interface UseMutationResult<
   TArgs extends any[] = any[],
   TContext = unknown,
   TAction extends
-    | ((...args: TArgs) => Promise<MutationResult<TOutput>>)
+    | ((...args: TArgs) => Promise<MutationResult<TOutput, any, any>>)
     | string = string,
+  TInput = TArgs extends [infer First, ...any[]] ? First : undefined,
 > {
   /**
    * Execute the mutation.
    * Returns `[data, null]` on success and `[null, error]` on failure.
    * @param args - The arguments accepted by the procedure.
    */
-  mutate: (...args: TArgs) => Promise<MutationResult<TOutput>>;
+  mutate: (
+    ...args: TArgs
+  ) => Promise<
+    MutationResult<
+      TOutput,
+      TInput,
+      TArgs extends [any, ...infer Rest] ? Rest : []
+    >
+  >;
   /**
    * Execute the mutation and resolve with the data, throwing on failure.
    * @param args - The arguments accepted by the procedure.
@@ -226,7 +343,38 @@ export interface UseMutationResult<
  * Removes the `cursor` key from an input shape.
  * Used by paginated/infinite queries to keep page params separate from the base input.
  */
-export type WithoutCursor<TInput> = Omit<TInput, "cursor">;
+export type WithoutCursor<TInput> = [TInput] extends [void | undefined | never]
+  ? undefined
+  : Omit<TInput, "cursor">;
+
+/**
+ * Checks whether an input type has at least one required property.
+ */
+export type HasRequiredKeys<T> = [T] extends [void | undefined | never]
+  ? false
+  : [keyof T] extends [never]
+    ? false
+    : {} extends T
+      ? false
+      : true;
+
+/**
+ * For paginated procedures without an input schema:
+ * If the first argument is an object containing `cursor` (e.g. `{ cursor: number }`),
+ * strips `cursor` and relaxes the argument so the caller doesn't have to pass `cursor`.
+ */
+export type PaginationArgs<TArgs extends unknown[]> = TArgs extends [
+  infer First,
+  ...infer Rest,
+]
+  ? [First] extends [Function | readonly any[]]
+    ? TArgs
+    : [First] extends [object]
+      ? HasRequiredKeys<WithoutCursor<First>> extends true
+        ? [WithoutCursor<First>, ...Rest]
+        : [WithoutCursor<First>?, ...Rest]
+      : TArgs
+  : TArgs;
 
 /**
  * A single page of data produced by infinite/paginated queries.
@@ -575,13 +723,20 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
  * @template TQueryKey - The type of the query key array (defaults to `unknown[]`).
  * @template TUnwrap - Whether `unwrap: true` was passed.
  * @template TSelectData - The final data type after `select` (defaults to `Unwrap<TOutput, TUnwrap>`).
+ * @template TInput - The procedure's input payload type (defaults to `any`).
  */
 export type UseQueryOpts<
   TOutput,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
   TSelectData = Unwrap<TOutput, TUnwrap>,
+  TInput = any,
 > = {
+  /**
+   * Input payload passed as the first argument to the procedure.
+   */
+  input?: TInput;
+
   /**
    * Whether the query is enabled and should automatically fetch data.
    * If false, the query will not run automatically.
@@ -703,16 +858,79 @@ export type ExtractInfiniteItem<TFullPage> = TFullPage extends {
     ? TItem
     : any;
 
+/**
+ * Extract the validated input type from a procedure's result phantom brand or function signature.
+ *
+ * Returns `undefined` when the procedure has no input schema.
+ */
 export type ExtractProcInput<R> = R extends { readonly _input?: infer I }
-  ? I
-  : undefined;
+  ? [I] extends [void | undefined | never]
+    ? undefined
+    : I
+  : R extends (...args: any[]) => Promise<infer Res>
+    ? Res extends { readonly _input?: infer I }
+      ? [I] extends [void | undefined | never]
+        ? undefined
+        : I
+      : undefined
+    : undefined;
 
+/**
+ * Extract the extra positional arguments tuple from a procedure's result phantom brand
+ * or by inspecting the function parameters (with the input parameter stripped).
+ */
+export type ExtractProcArgs<TProc> = TProc extends {
+  readonly _args?: infer P extends unknown[];
+}
+  ? [unknown[]] extends [P]
+    ? TProc extends (...args: infer FnArgs) => any
+      ? ExtractProcInput<TProc> extends infer I
+        ? [I] extends [void | undefined | never]
+          ? FnArgs
+          : FnArgs extends [any, ...infer Rest]
+            ? Rest
+            : []
+        : FnArgs
+      : []
+    : P
+  : TProc extends (...args: infer FnArgs) => Promise<infer Res>
+    ? Res extends { readonly _args?: infer P extends unknown[] }
+      ? [unknown[]] extends [P]
+        ? ExtractProcInput<TProc> extends infer I
+          ? [I] extends [void | undefined | never]
+            ? FnArgs
+            : FnArgs extends [any, ...infer Rest]
+              ? Rest
+              : []
+          : FnArgs
+        : P
+      : ExtractProcInput<TProc> extends infer I
+        ? [I] extends [void | undefined | never]
+          ? FnArgs
+          : FnArgs extends [any, ...infer Rest]
+            ? Rest
+            : []
+        : FnArgs
+    : TProc extends (...args: infer FnArgs) => any
+      ? FnArgs
+      : [];
+
+/**
+ * Type-level predicate that returns `true` when `O` has a paginated shape
+ * (`{ data: unknown[]; hasMore: boolean }`).
+ *
+ * Used by client proxy types to conditionally expose infinite/paginated query hooks.
+ */
 export type IsPaginated<O> = boolean extends (O extends never ? true : false)
   ? true
   : [O] extends [{ data: unknown[]; hasMore: boolean }]
     ? true
     : false;
 
+/**
+ * Extract the individual item type from a paginated output shape.
+ * Falls back to `ExtractInfiniteItem` for non-standard page shapes.
+ */
 export type ExtractPaginatedItem<O> = O extends { data: (infer TItem)[] }
   ? TItem
   : ExtractInfiniteItem<O>;
@@ -1407,13 +1625,89 @@ export interface SSEAdapterOptions<
   TPage,
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
+  TArgs extends unknown[] = [],
 > extends Omit<UseSSEOpts<TData>, "onData"> {
   // Infinite Query options
   queryOpts?: Omit<
-    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage>,
+    UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
     "arrange"
   >;
 
-  // Custom onWSData with query cache actions
-  onData?: (opts: Prettify<WSEventContext<TData> & { event?: string }>) => void;
+  // Custom onData with query cache actions
+  onData?: (
+    opts: Prettify<
+      WSEventContext<TData> & {
+        event: string | undefined;
+      }
+    >,
+  ) => void;
 }
+
+/**
+ * Return type of `useSSEInfiniteQuery`.
+ *
+ * Combines the standard `InfiniteQueryResult` (minus backward pagination)
+ * with SSE-specific fields: live `data` stream, `lastData`, `event` name,
+ * connection status, and control methods.
+ *
+ * @template TPage - Item type contained in each page.
+ * @template TFullPage - The full page shape.
+ * @template TData - Parsed SSE event data type.
+ */
+export type UseSSEInfiniteQueryResult<
+  TPage,
+  TFullPage = InfiniteQueryPage<TPage>,
+  TData = TPage,
+> = Prettify<
+  Omit<
+    InfiniteQueryResult<TPage, TFullPage>,
+    "fetchPrevious" | "hasPrevious" | "data"
+  > & {
+    /** Flattened live data items received from the SSE stream. */
+    data: TData[];
+    /** The most recently received SSE event data. */
+    lastData: TData | undefined;
+    /** The event type name of the most recently received event. */
+    event: string | undefined;
+    /** Whether the SSE connection is currently active. */
+    isConnected: boolean;
+    /** Closes the SSE connection. */
+    close: () => void;
+    /** Clears accumulated SSE data from state. */
+    clear: () => void;
+  }
+>;
+
+/**
+ * Return type of `useWSInfiniteQuery`.
+ *
+ * Combines the standard `InfiniteQueryResult` (minus backward pagination)
+ * with WebSocket-specific fields: live `data` stream, `send` for outbound
+ * messages, connection `status`, and a `queryError` for fetch failures.
+ *
+ * @template TPage - Item type contained in each page.
+ * @template TFullPage - The full page shape.
+ * @template TData - Incoming WebSocket message data type.
+ */
+export type UseWSInfiniteQueryResult<
+  TPage,
+  TFullPage = InfiniteQueryPage<TPage>,
+  TData = TPage,
+> = Prettify<
+  Omit<
+    InfiniteQueryResult<TPage, TFullPage>,
+    "fetchPrevious" | "hasPrevious" | "data"
+  > & {
+    /** Flattened live data items received from the WebSocket. */
+    data: TData[];
+    /** Sends a message over the WebSocket connection. */
+    send: (data: any) => void;
+    /** Closes the WebSocket connection. */
+    unsubscribe: () => void;
+    /** Current WebSocket connection state. */
+    status: "idle" | "connecting" | "connected" | "error";
+    /** Error from the underlying infinite query fetch, if any. */
+    queryError: ErrorResponse | null;
+  }
+>;
+

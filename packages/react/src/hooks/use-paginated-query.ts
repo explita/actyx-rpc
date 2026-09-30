@@ -11,10 +11,15 @@ import {
 import type {
   ErrorResponse,
   ExtractInfiniteItem,
-  ExtractInfinitePage,
   InfiniteQueryPage,
   UseInfiniteQueryOpts,
   InfiniteQueryResult,
+  HasRequiredKeys,
+  WithoutCursor,
+  Prettify,
+  ExtractProcInput,
+  ExtractProcArgs,
+  PaginationArgs,
 } from "../types/main.js";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
@@ -27,20 +32,131 @@ type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   pageParams: (string | number)[];
 };
 
+/**
+ * React hook for managing discrete page-by-page paginated queries (Procedure with input schema).
+ *
+ * Supports bi-directional page navigation (`fetchNextPage`, `fetchPreviousPage`, `hasNextPage`, `hasPreviousPage`),
+ * page state retention, cursor tracking, and single-item selection.
+ *
+ * @template TProc - The RPC procedure function.
+ * @template TInput - Inferred input schema payload type.
+ * @template TArgs - Inferred additional arguments accepted by the procedure.
+ * @template TFullPage - Full page payload returned by each fetch.
+ * @template TPage - Individual item type extracted from the paginated collection.
+ * @template TQueryKey - Tuple type of the query cache key.
+ *
+ * @param proc - The RPC query procedure.
+ * @param opts - Paginated query options including `input`, `getNextPageParam`, `getPreviousPageParam`, and cache settings.
+ * @param extraArgs - Additional positional arguments forwarded to the procedure call.
+ * @returns An `InfiniteQueryResult` object with bi-directional navigation controls and loaded pages.
+ *
+ * @example
+ * ```tsx
+ * const { data, fetchNextPage, fetchPreviousPage, hasNextPage, hasPreviousPage } = usePaginatedQuery(
+ *   getUsers,
+ *   {
+ *     input: { role: "admin" },
+ *     getNextPageParam: (page) => page.nextCursor,
+ *     getPreviousPageParam: (page) => page.prevCursor,
+ *   }
+ * );
+ * ```
+ */
 export function usePaginatedQuery<
   TProc extends (...args: any[]) => Promise<any>,
-  TFullPage = ExtractInfinitePage<TProc>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
+  TReturn = Awaited<ReturnType<TProc>>,
+  TFullPage = [Extract<TReturn, [any, null]>] extends [never]
+    ? TReturn
+    : Extract<TReturn, [any, null]>[0],
   TPage = ExtractInfiniteItem<TFullPage>,
-  TInput = Parameters<TProc>[0],
   TQueryKey extends unknown[] = unknown[],
-  TArgs extends unknown[] = Parameters<TProc> extends [any, ...infer Rest]
-    ? Rest
-    : [],
 >(
   proc: TProc,
-  opts?: UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
-  ...extraArgs: unknown[]
-): InfiniteQueryResult<TPage, TFullPage> {
+  opts: [TInput] extends [void | undefined | never]
+    ? never
+    : HasRequiredKeys<WithoutCursor<TInput>> extends true
+      ? UseInfiniteQueryOpts<NoInfer<TInput>, TPage, TQueryKey, TFullPage, NoInfer<TArgs>> & {
+          input:
+            | WithoutCursor<NoInfer<TInput>>
+            | NoInfer<TInput>
+            | ((pageParam: any) => NoInfer<TInput>);
+        }
+      : UseInfiniteQueryOpts<NoInfer<TInput>, TPage, TQueryKey, TFullPage, NoInfer<TArgs>> & {
+          input?:
+            | WithoutCursor<NoInfer<TInput>>
+            | NoInfer<TInput>
+            | ((pageParam: any) => NoInfer<TInput>);
+        },
+  ...extraArgs: NoInfer<TArgs>
+): Prettify<InfiniteQueryResult<TPage, TFullPage>>;
+
+/**
+ * React hook for managing discrete page-by-page paginated queries (Procedure without input schema).
+ *
+ * When a procedure does not define an input schema, `opts.input` is omitted, and procedure parameters
+ * are supplied directly via trailing `...extraArgs`.
+ *
+ * @template TProc - The RPC procedure function.
+ * @template TArgs - Inferred positional arguments accepted by the procedure.
+ * @template TFullPage - Full page payload returned by each fetch.
+ * @template TPage - Individual item type extracted from the paginated collection.
+ * @template TQueryKey - Tuple type of the query cache key.
+ *
+ * @param proc - The RPC query procedure.
+ * @param opts - Paginated query options (e.g. `getNextPageParam`, `getPreviousPageParam`, `queryKey`).
+ * @param extraArgs - Positional arguments passed to the procedure call (e.g. pagination options).
+ * @returns An `InfiniteQueryResult` object with bi-directional navigation controls and loaded pages.
+ *
+ * @example
+ * ```tsx
+ * const { data, fetchNextPage, fetchPreviousPage } = usePaginatedQuery(
+ *   getNewsItems,
+ *   {
+ *     getNextPageParam: (page) => page.nextCursor,
+ *   },
+ *   { limit: 10 }
+ * );
+ * ```
+ */
+export function usePaginatedQuery<
+  TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
+  TReturn = Awaited<ReturnType<TProc>>,
+  TFullPage = [Extract<TReturn, [any, null]>] extends [never]
+    ? TReturn
+    : Extract<TReturn, [any, null]>[0],
+  TPage = ExtractInfiniteItem<TFullPage>,
+  TQueryKey extends unknown[] = unknown[],
+>(
+  proc: TProc,
+  opts?: [TInput] extends [void | undefined | never]
+    ? UseInfiniteQueryOpts<
+        undefined,
+        TPage,
+        TQueryKey,
+        TFullPage,
+        NoInfer<PaginationArgs<TArgs>>
+      > & {
+        input?: undefined;
+      }
+    : never,
+  ...extraArgs: NoInfer<PaginationArgs<TArgs>>
+): Prettify<InfiniteQueryResult<TPage, TFullPage>>;
+
+export function usePaginatedQuery<
+  TPage = any,
+  TFullPage = any,
+  TQueryKey extends unknown[] = any[],
+  TInput = any,
+  TArgs extends unknown[] = any[],
+>(
+  proc: any,
+  opts?: any,
+  ...extraArgs: any[]
+): any {
   const [selectedItem, setSelectedItem] = useState<TPage | undefined>(
     undefined,
   );
@@ -260,22 +376,46 @@ export function usePaginatedQuery<
 
   const fetchPage = useCallback(
     async (cursor?: string | number): Promise<TFullPage> => {
-      const fetcher = async () =>
-        await callbacksRef.current.proc(
-          {
-            ...callbacksRef.current.baseInput,
-            cursor,
-          } as TInput,
-          ...(callbacksRef.current.args as TArgs),
-        );
+      const hasBaseInput =
+        callbacksRef.current.baseInput !== undefined &&
+        callbacksRef.current.baseInput !== null;
+      const pageInput =
+        cursor !== undefined
+          ? hasBaseInput
+            ? { ...callbacksRef.current.baseInput, cursor }
+            : { cursor }
+          : callbacksRef.current.baseInput;
+
+      const fetcher = async () => {
+        const callArgs = (callbacksRef.current.args as any[]) || [];
+        if (hasBaseInput) {
+          return await callbacksRef.current.proc(
+            pageInput as TInput,
+            ...(callArgs as TArgs),
+          );
+        }
+        if (callArgs.length > 0) {
+          const firstArg =
+            cursor !== undefined &&
+            typeof callArgs[0] === "object" &&
+            callArgs[0] !== null
+              ? { ...callArgs[0], cursor }
+              : callArgs[0];
+          return await callbacksRef.current.proc(firstArg, ...callArgs.slice(1));
+        }
+        return await callbacksRef.current.proc(pageInput as TInput);
+      };
 
       const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
       let resultTuple: [TFullPage, null] | [null, ErrorResponse];
 
       if (!queryKey.startsWith("__local__")) {
-        resultTuple = await globalRequestManager.fetch(subKey, fetcher);
+        resultTuple = (await globalRequestManager.fetch(
+          subKey,
+          fetcher,
+        )) as any;
       } else {
-        resultTuple = await fetcher();
+        resultTuple = (await fetcher()) as any;
       }
 
       const [result, err] = resultTuple;

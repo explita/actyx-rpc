@@ -23,6 +23,8 @@ export type {
   ExtractInfiniteItem,
   ExtractProcOutput,
   ExtractProcInput,
+  ExtractProcArgs,
+  PaginationArgs,
   ExtractTupleData,
   IsPaginated,
   ExtractPaginatedItem,
@@ -34,6 +36,9 @@ export type {
   QueryResult,
   MutationResult,
   ErrorResponse,
+  BuiltinFailureReason,
+  RegisterCustomErrors,
+  CustomFailureReason,
   FailureReason,
   WindowTime,
   UseQueryOpts,
@@ -47,6 +52,8 @@ export type {
   WSAdapterOptions,
   WSEventContext,
   SSEAdapterOptions,
+  UseSSEInfiniteQueryResult,
+  UseWSInfiniteQueryResult,
 } from "./types/main.js";
 export type {
   CreateClientOptions,

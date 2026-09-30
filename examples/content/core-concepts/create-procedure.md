@@ -63,6 +63,7 @@ const procedure = createProcedure({
 | `cache` | `CacheAdapter` | The global cache adapter used for caching queries and rate-limit tracking (defaults to `MemoryCache`). |
 | `compression` | `Compressor` | The global compressor instance used for response compression (defaults to `Compressor`). |
 | `meta` | `TMeta` | Default global metadata attached to all child procedures. |
+| `validationHint` | `string` | Custom error message used when input schema validation fails (defaults to `"Invalid data provided"`). |
 
 ---
 

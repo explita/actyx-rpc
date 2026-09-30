@@ -88,10 +88,10 @@ import { useQuery } from "@explita/actyx-rpc-react";
 import { getUserProfile } from "./server/procedures";
 
 function UserProfileComponent({ userId }: { userId: string }) {
-  const { data: profile, isLoading } = useQuery(
-    () => getUserProfile({ id: userId }),
-    { queryKey: ["user", userId] }
-  );
+  const { data: profile, isLoading } = useQuery(getUserProfile, {
+    input: { id: userId },
+    queryKey: ["user", userId],
+  });
 
   if (isLoading) return <p>Loading...</p>;
   return <h1>{profile?.name}</h1>;

@@ -38,6 +38,42 @@ import { webRouter } from "./helpers/web-router.js";
 import { toSchemaResolver } from "./helpers/to-schema-resolver.js";
 import { parseFrameworkError } from "../lib/parse-framework-error.js";
 
+/**
+ * Creates a root RPC procedure builder instance.
+ *
+ * Configures the base context creation factory, input enrichment, lifecycle hooks (`onError`, `onSuccess`),
+ * default middlewares, plugins, cache adapters, and response compression for all derived procedures.
+ *
+ * @template TCtx - The base context object constructed by `createContext` for each incoming request.
+ * @template TEnrich - Enriched input data automatically injected into procedures via `enrichInput`.
+ * @template TMeta - Base custom metadata record attached to all derived procedures.
+ * @template GIM - The default global input validation mode (`strict`, `form`, `patch`, etc.).
+ *
+ * @param opts - Configuration options for initializing the root procedure builder.
+ * @returns A fluid `ProcedureInstance` builder ready for chaining validation, middlewares, and terminal endpoints (`query`, `mutation`, `stream`, `sse`, `webRoute`, `ws`).
+ *
+ * @example
+ * ```ts
+ * import { createProcedure } from "@explita/actyx-rpc";
+ * import { z } from "zod";
+ *
+ * export const procedure = createProcedure({
+ *   createContext: async (prevCtx, req) => {
+ *     const user = await authenticate(req);
+ *     return { ok: true, ctx: { user } };
+ *   },
+ *   onError: ({ error, ctx }) => {
+ *     console.error("RPC Error:", error);
+ *   },
+ * });
+ *
+ * export const getUser = procedure
+ *   .input(z.object({ id: z.string() }))
+ *   .query(async ({ input, ctx }) => {
+ *     return ctx.user;
+ *   });
+ * ```
+ */
 export function createProcedure<
   TCtx extends Record<string, unknown>,
   TEnrich extends Record<string, unknown> = {},
@@ -65,15 +101,13 @@ export function createProcedure<
   opts.createContext ??= (async () => ({ ok: true, ctx: {} as any })) as any;
 
   function procedureBuilder<
-    I = undefined,
+    I = void,
     Ctx = TCtx,
     TLocalMeta extends Record<string, any> = TMeta,
     TICtx extends InputCtx = {},
     TName extends string = string,
   >(
-    config: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
-      name: "unnamed",
-    },
+    config: ProcedureConfig<Ctx, TEnrich, TLocalMeta>,
   ): ProcedureInstance<Ctx, TEnrich, TLocalMeta, I, TICtx, GIM, TName> {
     const nextConfig = { ...config };
 
@@ -252,7 +286,7 @@ export function createProcedure<
         return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>(nextConfig);
       },
 
-      input(r: any, options?: any) {
+      input(r: any) {
         return procedureBuilder({
           ...config,
           resolver: toSchemaResolver(r),
@@ -266,7 +300,7 @@ export function createProcedure<
           handler,
           //@ts-ignore
           opts,
-          config,
+          nextConfig,
           globalCache,
           globalPubSub,
         );
@@ -516,5 +550,6 @@ export function createProcedure<
     middlewares: opts.middlewares,
     plugins: opts.plugins,
     name: "unnamed",
+    validationHint: opts.validationHint ?? "Invalid data provided",
   });
 }

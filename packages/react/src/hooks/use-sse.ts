@@ -6,6 +6,24 @@ import type { UseSSEOpts, UseSSEResult } from "../types/main.js";
 import { SSEClient } from "../client/index.js";
 import { actyxStreamTracker } from "../devtools/stream-tracker.js";
 
+/**
+ * React hook for consuming Server-Sent Events (SSE) from an Actyx RPC endpoint or URL.
+ *
+ * Automatically manages connection lifecycle, reconnection, event parsing, history buffering,
+ * and streaming devtools tracking.
+ *
+ * @template T - The parsed SSE event data payload type.
+ * @param options - Configuration options including `url`, `params`, `headers`, `maxHistory`, `onData`, and `onError`.
+ * @returns A `UseSSEResult` object containing `data` (buffered history), `lastData`, `event`, `isConnected`, `close`, and `clear`.
+ *
+ * @example
+ * ```tsx
+ * const { lastData, isConnected, close } = useSSE<TickerData>({
+ *   url: "/api/rpc/crypto.ticker",
+ *   onData: (data) => console.log("New tick:", data),
+ * });
+ * ```
+ */
 export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
   const {
     url,

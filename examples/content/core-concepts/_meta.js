@@ -3,4 +3,5 @@ export default {
   builders: "Builder Chaining",
   "routing-handlers": "Routing & Terminal Handlers",
   "middleware-plugins": "Middleware & Plugins",
+  "error-handling": "Error Handling",
 };

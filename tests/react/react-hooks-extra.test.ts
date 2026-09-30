@@ -12,6 +12,8 @@ import { QueryClient } from "../../packages/react/src/lib/query-client.js";
 import { ActyxProvider } from "../../packages/react/src/provider.js";
 import { useState, useEffect, Suspense, Component } from "react";
 import type { ErrorResponse } from "../../packages/react/src/types/main.js";
+import { useQuery } from "../../packages/react/src/hooks/use-query.js";
+import { useSuspenseQuery } from "../../packages/react/src/hooks/use-suspense-query.js";
 
 // ---------------------------------------------------------------------------
 // Minimal test harness
@@ -676,3 +678,118 @@ describe("useWSInfiniteQuery", () => {
     expect(mockWsInstances.length).toBe(0);
   });
 });
+
+// ===========================================================================
+// useQuery with input in opts and ...extraArgs
+// ===========================================================================
+
+describe("useQuery with input in opts and extraArgs", () => {
+  it("passes input from opts and trailing extraArgs to procedure", async () => {
+    const mockProc = vi
+      .fn()
+      .mockImplementation(async (input: { id: string }, extra: string) => {
+        return [{ id: input.id, receivedExtra: extra }, null];
+      });
+
+    function TestComponent() {
+      const { data, isLoading } = useQuery(
+        mockProc as any,
+        {
+          input: { id: "user_123" },
+          queryKey: ["test-user", "123"],
+        },
+        "extra_val",
+      );
+      if (isLoading || !data) return h("div", null, "loading");
+      return h("div", null, `id:${data.id} extra:${data.receivedExtra}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(mockProc).toHaveBeenCalledWith({ id: "user_123" }, "extra_val");
+    expect(container?.textContent).toContain("id:user_123 extra:extra_val");
+  });
+
+  it("handles procedure with no input schema and trailing extraArgs", async () => {
+    const mockProc = vi
+      .fn()
+      .mockImplementation(async (arg1: string, arg2: number) => {
+        return [{ sum: `${arg1}-${arg2}` }, null];
+      });
+
+    function TestComponent() {
+      const { data } = useQuery(
+        mockProc as any,
+        { queryKey: ["test-no-input"] },
+        "hello",
+        42,
+      );
+      if (!data) return h("div", null, "loading");
+      return h("div", null, `res:${data.sum}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(mockProc).toHaveBeenCalledWith("hello", 42);
+    expect(container?.textContent).toContain("res:hello-42");
+  });
+
+  it("automatically incorporates input into default local queryKey when queryKey is not provided", async () => {
+    const mockProc = vi
+      .fn()
+      .mockImplementation(async (input: { id: string }) => {
+        return [{ id: input.id }, null];
+      });
+
+    function TestComponent({ id }: { id: string }) {
+      const { data } = useQuery(mockProc as any, {
+        input: { id },
+      });
+      return h("div", null, `data:${data ? data.id : "loading"}`);
+    }
+
+    renderComponent(
+      h(
+        ActyxProvider,
+        { client: new QueryClient() },
+        h(TestComponent, { id: "a" }),
+      ),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(container?.textContent).toContain("data:a");
+
+    // Re-render with new id should trigger a fetch with new input
+    rerenderComponent(
+      h(
+        ActyxProvider,
+        { client: new QueryClient() },
+        h(TestComponent, { id: "b" }),
+      ),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(container?.textContent).toContain("data:b");
+    expect(mockProc).toHaveBeenCalledWith({ id: "a" });
+    expect(mockProc).toHaveBeenCalledWith({ id: "b" });
+  });
+});
+

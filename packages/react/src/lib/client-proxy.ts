@@ -237,7 +237,10 @@ export function createProxy(
         return Reflect.get(target, prop, receiver);
       }
 
-      if (path.length === 0 && (prop === "$batch" || prop === "getBatchMetrics")) {
+      if (
+        path.length === 0 &&
+        (prop === "$batch" || prop === "getBatchMetrics")
+      ) {
         return () => getBatchManager(baseUrl, clientOpts).getMetrics();
       }
 
@@ -321,8 +324,8 @@ export function createProxy(
           };
 
           return prop === "usePaginatedQuery"
-            ? usePaginatedQuery(procRunner, hookOpts, ...extraArgs)
-            : useInfiniteQuery(procRunner, hookOpts, ...extraArgs);
+            ? (usePaginatedQuery as any)(procRunner, hookOpts, ...extraArgs)
+            : (useInfiniteQuery as any)(procRunner, hookOpts, ...extraArgs);
         };
       }
       if (prop === "useSSEInfiniteQuery") {
@@ -367,16 +370,20 @@ export function createProxy(
 
           const { stream, ...restOpts } = opts || {};
 
-          return useSSEInfiniteQuery(procRunner, {
-            ...restOpts,
-            url: sseUrl,
-            params: sseParams,
-            queryOpts: {
-              ...opts?.queryOpts,
-              input: typeof input === "function" ? undefined : input,
-              queryKey,
+          return (useSSEInfiniteQuery as any)(
+            procRunner,
+            {
+              ...restOpts,
+              url: sseUrl,
+              params: sseParams,
+              queryOpts: {
+                ...opts?.queryOpts,
+                input: typeof input === "function" ? undefined : input,
+                queryKey,
+              },
             },
-          });
+            ...extraArgs,
+          );
         };
       }
       if (prop === "useWSInfiniteQuery") {
@@ -415,15 +422,19 @@ export function createProxy(
 
           const { ws, ...restOpts } = opts || {};
 
-          return useWSInfiniteQuery(procRunner, {
-            ...restOpts,
-            url: wsUrl,
-            queryOpts: {
-              ...opts?.queryOpts,
-              input: typeof input === "function" ? undefined : input,
-              queryKey,
+          return (useWSInfiniteQuery as any)(
+            procRunner,
+            {
+              ...restOpts,
+              url: wsUrl,
+              queryOpts: {
+                ...opts?.queryOpts,
+                input: typeof input === "function" ? undefined : input,
+                queryKey,
+              },
             },
-          });
+            ...extraArgs,
+          );
         };
       }
       if (prop === "useSSE" || prop === "useStream") {

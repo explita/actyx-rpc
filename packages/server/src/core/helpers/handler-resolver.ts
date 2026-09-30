@@ -169,7 +169,7 @@ export function handlerResolver<O, P = any>(
         if (!result.success) {
           const error = {
             ...baseError,
-            message: "Invalid data provided",
+            message: config.validationHint,
             reason: "VALIDATION_ERROR",
             statusCode: 400,
             ...result,
@@ -204,10 +204,9 @@ export function handlerResolver<O, P = any>(
         if (config.type === "webRoute") {
           input = payload ?? {};
         } else {
-          const rawData = normalizeInput(payload);
-          input = rawData ?? {};
+          input = {};
           if (payload !== undefined && payload !== null) {
-            args = [rawData as any, ...args];
+            args = [payload as any, ...args];
           }
         }
       }
@@ -250,7 +249,7 @@ export function handlerResolver<O, P = any>(
               {
                 ...baseError,
                 //@ts-ignore
-                message: vResult._message ?? "Validation Error",
+                message: vResult._message ?? opts.validationHint,
                 ...vResult,
                 reason: "VALIDATION_ERROR",
                 statusCode: 400,

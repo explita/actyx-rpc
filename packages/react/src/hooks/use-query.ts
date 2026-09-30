@@ -1,6 +1,16 @@
 "use client";
 
-import type { ErrorResponse, ExtractProcOutput } from "../types/main.js";
+import type {
+  ErrorResponse,
+  ExtractProcOutput,
+  ExtractProcInput,
+  ExtractProcArgs,
+  HasRequiredKeys,
+  QueryData,
+  QueryResult,
+  Unwrap,
+  UseQueryOpts,
+} from "../types/main.js";
 import {
   useCallback,
   useEffect,
@@ -10,14 +20,45 @@ import {
   useMemo,
 } from "react";
 import { globalRequestManager } from "../lib/request-manager.js";
-import { QueryData, QueryResult, Unwrap, UseQueryOpts } from "../types/main.js";
 import { useQueryClient } from "../provider.js";
 import { parseWindow } from "../lib/utils.js";
 import { Timeout } from "../types/misc.js";
 import { QueryState } from "../types/query-client.js";
 
+/**
+ * React hook for executing and caching an Actyx RPC query procedure or server action
+ * (with input schema and synchronous `initialData`).
+ *
+ * Automatically manages asynchronous state, in-flight request deduplication, cache synchronization,
+ * background polling, window-focus refetching, and error handling. Because `initialData` is provided,
+ * `data` is guaranteed to be defined on initial render.
+ *
+ * @template TProc - The procedure function or server action returning a promise.
+ * @template TInput - Inferred input payload type accepted by the procedure.
+ * @template TArgs - Inferred extra positional arguments accepted by the procedure.
+ * @template TOutput - Inferred resolved data type returned by the procedure.
+ * @template TQueryKey - Tuple type of the query cache key.
+ * @template TUnwrap - Boolean flag indicating whether to automatically unwrap the `{ data }` payload.
+ * @template TSelectData - Transformed data type if a `select` transformer is supplied.
+ * @template TInitialData - Type of synchronous initial data provided.
+ *
+ * @param proc - The RPC query procedure to execute.
+ * @param opts - Query configuration options including `input`, `initialData`, `queryKey`, `enabled`, and lifecycle callbacks.
+ * @param extraArgs - Additional positional arguments forwarded to the procedure call.
+ * @returns A `QueryResult` object containing non-nullable `data`, `error`, `isLoading`, `refetch`, and status flags.
+ *
+ * @example
+ * ```tsx
+ * const { data } = useQuery(getUser, {
+ *   input: { id: "123" },
+ *   initialData: fallbackUser,
+ * });
+ * ```
+ */
 export function useQuery<
   TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
   TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
@@ -27,13 +68,53 @@ export function useQuery<
   >,
 >(
   proc: TProc,
-  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
-    initialData: TInitialData;
-  },
+  opts: [TInput] extends [void | undefined | never]
+    ? never
+    : (HasRequiredKeys<TInput> extends true
+        ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+            input: NoInfer<TInput>;
+          }
+        : UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+            input?: NoInfer<TInput>;
+          }) & {
+        initialData: TInitialData;
+      },
+  ...extraArgs: NoInfer<TArgs>
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 
+/**
+ * React hook for executing and caching an Actyx RPC query procedure or server action
+ * (with input schema, without `initialData`).
+ *
+ * Automatically manages asynchronous state, in-flight request deduplication, cache synchronization,
+ * background polling, window-focus refetching, and error handling.
+ *
+ * @template TProc - The procedure function or server action returning a promise.
+ * @template TInput - Inferred input payload type accepted by the procedure.
+ * @template TArgs - Inferred extra positional arguments accepted by the procedure.
+ * @template TOutput - Inferred resolved data type returned by the procedure.
+ * @template TQueryKey - Tuple type of the query cache key.
+ * @template TUnwrap - Boolean flag indicating whether to automatically unwrap the `{ data }` payload.
+ * @template TInitialData - Defaults to `undefined`.
+ * @template TSelectData - Transformed data type if a `select` transformer is supplied.
+ *
+ * @param proc - The RPC query procedure to execute.
+ * @param opts - Query configuration options including `input`, `queryKey`, `enabled`, `staleTime`, and lifecycle callbacks.
+ * @param extraArgs - Additional positional arguments forwarded to the procedure call.
+ * @returns A `QueryResult` object containing `data` (undefined until resolved), `error`, `isLoading`, `refetch`, etc.
+ *
+ * @example
+ * ```tsx
+ * const { data, isLoading, error } = useQuery(getUser, {
+ *   input: { id: "123" },
+ *   staleTime: "5m",
+ * });
+ * ```
+ */
 export function useQuery<
   TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
   TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
@@ -41,13 +122,123 @@ export function useQuery<
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
   proc: TProc,
-  opts?: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
-    initialData?: undefined;
-  },
+  opts: [TInput] extends [void | undefined | never]
+    ? never
+    : (HasRequiredKeys<TInput> extends true
+        ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+            input: NoInfer<TInput>;
+          }
+        : UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+            input?: NoInfer<TInput>;
+          }) & {
+        initialData?: undefined;
+      },
+  ...extraArgs: NoInfer<TArgs>
+): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
+
+/**
+ * React hook for executing and caching an Actyx RPC query procedure or server action
+ * (procedure without input schema, with synchronous `initialData`).
+ *
+ * Automatically manages asynchronous state, in-flight request deduplication, cache synchronization,
+ * background polling, window-focus refetching, and error handling. Because `initialData` is provided,
+ * `data` is guaranteed to be defined on initial render.
+ *
+ * @template TProc - The procedure function or server action returning a promise.
+ * @template TInput - Inferred input payload type (`undefined` for procedures without input schema).
+ * @template TArgs - Inferred positional arguments accepted by the procedure.
+ * @template TOutput - Inferred resolved data type returned by the procedure.
+ * @template TQueryKey - Tuple type of the query cache key.
+ * @template TUnwrap - Boolean flag indicating whether to automatically unwrap the `{ data }` payload.
+ * @template TSelectData - Transformed data type if a `select` transformer is supplied.
+ * @template TInitialData - Type of synchronous initial data provided.
+ *
+ * @param proc - The RPC query procedure to execute.
+ * @param opts - Query configuration options including `initialData`, `queryKey`, `enabled`, and lifecycle callbacks.
+ * @param extraArgs - Positional arguments forwarded to the procedure call.
+ * @returns A `QueryResult` object containing non-nullable `data`, `error`, `isLoading`, `refetch`, and status flags.
+ *
+ * @example
+ * ```tsx
+ * const { data } = useQuery(getAllUsers, {
+ *   initialData: [],
+ * });
+ * ```
+ */
+export function useQuery<
+  TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
+  TOutput = ExtractProcOutput<TProc>,
+  TQueryKey extends unknown[] = unknown[],
+  TUnwrap extends boolean = false,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
+  TInitialData extends QueryData<Unwrap<TOutput, TUnwrap>> = QueryData<
+    Unwrap<TOutput, TUnwrap>
+  >,
+>(
+  proc: TProc,
+  opts: [TInput] extends [void | undefined | never]
+    ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, undefined> & {
+        initialData: TInitialData;
+        input?: undefined;
+      }
+    : never,
+  ...extraArgs: NoInfer<TArgs>
+): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
+
+/**
+ * React hook for executing and caching an Actyx RPC query procedure or server action
+ * (procedure without input schema, without `initialData`).
+ *
+ * Automatically manages asynchronous state, in-flight request deduplication, cache synchronization,
+ * background polling, window-focus refetching, and error handling.
+ *
+ * @template TProc - The procedure function or server action returning a promise.
+ * @template TInput - Inferred input payload type (`undefined` for procedures without input schema).
+ * @template TArgs - Inferred positional arguments accepted by the procedure.
+ * @template TOutput - Inferred resolved data type returned by the procedure.
+ * @template TQueryKey - Tuple type of the query cache key.
+ * @template TUnwrap - Boolean flag indicating whether to automatically unwrap the `{ data }` payload.
+ * @template TInitialData - Defaults to `undefined`.
+ * @template TSelectData - Transformed data type if a `select` transformer is supplied.
+ *
+ * @param proc - The RPC query procedure to execute.
+ * @param opts - Query configuration options including `queryKey`, `enabled`, `staleTime`, and lifecycle callbacks.
+ * @param extraArgs - Positional arguments forwarded to the procedure call.
+ * @returns A `QueryResult` object containing `data` (undefined until resolved), `error`, `isLoading`, `refetch`, etc.
+ *
+ * @example
+ * ```tsx
+ * const { data, isLoading } = useQuery(getAllUsers, {
+ *   staleTime: "5m",
+ * });
+ * ```
+ */
+export function useQuery<
+  TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
+  TOutput = ExtractProcOutput<TProc>,
+  TQueryKey extends unknown[] = unknown[],
+  TUnwrap extends boolean = false,
+  TInitialData extends undefined = undefined,
+  TSelectData = Unwrap<TOutput, TUnwrap>,
+>(
+  proc: TProc,
+  opts?: [TInput] extends [void | undefined | never]
+    ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, undefined> & {
+        initialData?: undefined;
+        input?: undefined;
+      }
+    : never,
+  ...extraArgs: NoInfer<TArgs>
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 
 export function useQuery<
   TProc extends (...args: any[]) => Promise<any>,
+  TInput = ExtractProcInput<TProc>,
+  TArgs extends unknown[] = ExtractProcArgs<TProc>,
   TOutput = ExtractProcOutput<TProc>,
   TQueryKey extends unknown[] = unknown[],
   TUnwrap extends boolean = false,
@@ -55,84 +246,111 @@ export function useQuery<
   TSelectData = Unwrap<TOutput, TUnwrap>,
 >(
   proc: TProc,
-  opts: UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData> & {
-    initialData?: TInitialData;
-  } = {
-    enabled: true,
-    refetchOnWindowFocus: false,
-    staleTime: 0,
-    refetchOnMount: true,
-    keepPreviousData: true,
-  },
+  opts?: any,
+  ...extraArgs: any[]
 ): QueryResult<TOutput, TInitialData, TUnwrap, TSelectData> {
   const queryClient = useQueryClient();
 
   const localId = useId();
 
-  const queryKey = opts.queryKey
-    ? opts.queryKey
-        .map((i) =>
+  const resolvedOpts = opts || {
+    enabled: true,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchOnMount: true,
+    keepPreviousData: true,
+  };
+
+  const serializedInput =
+    resolvedOpts?.input !== undefined
+      ? typeof resolvedOpts.input === "object" && resolvedOpts.input !== null
+        ? JSON.stringify(resolvedOpts.input)
+        : String(resolvedOpts.input)
+      : "";
+
+  const serializedExtraArgs =
+    extraArgs.length > 0
+      ? extraArgs
+          .map((i: any) =>
+            typeof i === "object" && i !== null ? JSON.stringify(i) : String(i),
+          )
+          .join("|")
+      : "";
+
+  const queryKey = resolvedOpts.queryKey
+    ? resolvedOpts.queryKey
+        .map((i: any) =>
           typeof i === "object" && i !== null ? JSON.stringify(i) : String(i),
         )
         .join("|")
-    : `__local__${localId}`;
+    : serializedInput || serializedExtraArgs
+      ? `__local__${localId}|${[serializedInput, serializedExtraArgs].filter(Boolean).join("|")}`
+      : `__local__${localId}`;
 
   const queryDefaults = queryClient.getQueryDefaults(queryKey);
 
-  const enabled = opts?.enabled ?? queryDefaults?.enabled ?? true;
-  const staleTime = opts?.staleTime ?? queryDefaults?.staleTime ?? 0;
-  const gcTime = opts?.gcTime ?? queryDefaults?.gcTime;
+  const enabled = resolvedOpts?.enabled ?? queryDefaults?.enabled ?? true;
+  const staleTime = resolvedOpts?.staleTime ?? queryDefaults?.staleTime ?? 0;
+  const gcTime = resolvedOpts?.gcTime ?? queryDefaults?.gcTime;
   const refetchOnMount =
-    opts?.refetchOnMount ?? queryDefaults?.refetchOnMount ?? true;
+    resolvedOpts?.refetchOnMount ?? queryDefaults?.refetchOnMount ?? true;
   const refetchOnWindowFocus =
-    opts?.refetchOnWindowFocus ?? queryDefaults?.refetchOnWindowFocus ?? false;
+    resolvedOpts?.refetchOnWindowFocus ??
+    queryDefaults?.refetchOnWindowFocus ??
+    false;
   const refetchOnReconnect =
-    opts?.refetchOnReconnect ?? queryDefaults?.refetchOnReconnect ?? true;
+    resolvedOpts?.refetchOnReconnect ??
+    queryDefaults?.refetchOnReconnect ??
+    true;
   const refetchInterval =
-    opts?.refetchInterval ?? queryDefaults?.refetchInterval ?? 0;
+    resolvedOpts?.refetchInterval ?? queryDefaults?.refetchInterval ?? 0;
   const keepPreviousData =
-    opts?.keepPreviousData ?? queryDefaults?.keepPreviousData ?? true;
+    resolvedOpts?.keepPreviousData ?? queryDefaults?.keepPreviousData ?? true;
 
   // Store callbacks in a ref to avoid re-creating fetchData when they change
   const callbacksRef = useRef({
     onSuccess: (data: any) => {
-      opts?.onSuccess?.(data);
+      resolvedOpts?.onSuccess?.(data);
       queryDefaults?.onSuccess?.(data);
     },
     onError: (err: ErrorResponse) => {
-      opts?.onError?.(err);
+      resolvedOpts?.onError?.(err);
       queryDefaults?.onError?.(err);
     },
     onSettled: (data: any, err: ErrorResponse | null) => {
-      opts?.onSettled?.(data, err);
+      resolvedOpts?.onSettled?.(data, err);
       queryDefaults?.onSettled?.(data, err);
     },
-    initialData: opts?.initialData,
-    select: opts?.select,
+    initialData: resolvedOpts?.initialData,
+    select: resolvedOpts?.select,
     proc,
+    input: resolvedOpts?.input,
+    extraArgs,
     keepPreviousData,
-    unwrap: opts.unwrap,
+    unwrap: resolvedOpts.unwrap,
   });
 
   useEffect(() => {
     callbacksRef.current = {
       onSuccess: (data: any) => {
-        opts?.onSuccess?.(data);
+        resolvedOpts?.onSuccess?.(data);
         queryDefaults?.onSuccess?.(data);
       },
       onError: (err: ErrorResponse) => {
-        opts?.onError?.(err);
+        resolvedOpts?.onError?.(err);
         queryDefaults?.onError?.(err);
       },
       onSettled: (data: any, err: ErrorResponse | null) => {
-        opts?.onSettled?.(data, err);
+        resolvedOpts?.onSettled?.(data, err);
         queryDefaults?.onSettled?.(data, err);
       },
-      initialData: opts?.initialData,
-      select: opts?.select,
+      initialData: resolvedOpts?.initialData,
+      select: resolvedOpts?.select,
       proc,
+      input: resolvedOpts?.input,
+      extraArgs,
       keepPreviousData,
-      unwrap: opts.unwrap,
+      unwrap: resolvedOpts.unwrap,
     };
   });
 
@@ -143,9 +361,9 @@ export function useQuery<
   // Ensure initial state exists in cache before subscribing
   if (!queryClient.getQueryState(queryKey)) {
     const resolvedInitialData =
-      typeof opts?.initialData === "function"
-        ? opts.initialData()
-        : opts?.initialData;
+      typeof resolvedOpts?.initialData === "function"
+        ? resolvedOpts.initialData()
+        : resolvedOpts?.initialData;
     queryClient.setQueryState(
       queryKey,
       {
@@ -217,19 +435,38 @@ export function useQuery<
       }),
     });
 
-    let resultTuple: [TOutput, null] | [null, ErrorResponse];
+    let resultTuple: any;
 
     const fetcher = async () => {
-      return await callbacksRef.current.proc();
+      const { proc, input, extraArgs: args } = callbacksRef.current;
+      if (input !== undefined) {
+        return await proc(input, ...(args || []));
+      }
+      if (args && args.length > 0) {
+        return await proc(...args);
+      }
+      return await proc();
     };
 
-    if (!queryKey.startsWith("__local__")) {
-      resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
-    } else {
-      resultTuple = await fetcher();
+    try {
+      if (!queryKey.startsWith("__local__")) {
+        resultTuple = await globalRequestManager.fetch(queryKey, fetcher);
+      } else {
+        resultTuple = await fetcher();
+      }
+    } catch (e: any) {
+      resultTuple = [null, e];
     }
 
-    const [result, err] = resultTuple;
+    let result: any;
+    let err: ErrorResponse | null = null;
+    if (Array.isArray(resultTuple) && resultTuple.length === 2) {
+      result = resultTuple[0];
+      err = resultTuple[1];
+    } else {
+      result = resultTuple;
+      err = null;
+    }
 
     // Abort if a newer call superseded this one (e.g. reset + re-fetch)
     if (generation !== generationRef.current) return result;

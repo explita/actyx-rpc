@@ -3,6 +3,17 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-30
+
+### Added
+
+- **First-Class Procedure `input` and `...extraArgs` on `useQuery` and `useSuspenseQuery`**:
+  - `useQuery` and `useSuspenseQuery` now accept `opts.input` matching procedure schemas, eliminating the need to wrap calls in inline arrow functions (`() => proc(args)`).
+  - Procedures without input schemas or with additional arguments forward trailing positional parameters directly (`useQuery(proc, opts, ...extraArgs)`).
+  - Strict compile-time type safety: procedures with required input enforce `input` in `opts`, while procedures with optional or no input make `input` optional.
+  - Automatic cache key generation: when `queryKey` is omitted, `input` and `extraArgs` are automatically serialized into the fallback cache key, ensuring input changes trigger immediate background refetches without key collisions.
+  - Full backward compatibility: zero-argument procedures and custom closures (`() => ...`) continue to work seamlessly.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added

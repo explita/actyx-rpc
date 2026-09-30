@@ -320,22 +320,8 @@ Procedures in Actyx RPC return a standardized **`[data, error]` tuple**.
 ]
 ```
 
-### Known Failure Reasons
-
-| Reason | Description |
-| :--- | :--- |
-| `UNAUTHORIZED` | Authentication required |
-| `FORBIDDEN` | Insufficient permissions |
-| `MAINTENANCE_MODE` | System is in maintenance mode |
-| `VALIDATION_ERROR` | Input validation failed |
-| `UNEXPECTED_ERROR` | Unhandled server error |
-| `INVALID_SESSION` | Session expired or invalid |
-| `ABORTED` | Request was aborted |
-| `INVALID_CACHE_KEY` | Cache key resolution failed |
-| `TIMEOUT` | Execution exceeded time limit |
-| `RETRY_EXHAUSTED` | All retry attempts exhausted |
-| `CIRCUIT_OPEN` | Circuit breaker is open |
-| `RATE_LIMITED` | Rate limit exceeded |
+> [!TIP]
+> For a comprehensive list of built-in failure reasons and instructions on globally registering your own domain-specific reasons, see the dedicated [Error Handling](./error-handling) guide.
 
 ---
 
