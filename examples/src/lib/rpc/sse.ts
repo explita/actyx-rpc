@@ -7,17 +7,17 @@ export const watchStock = procedure
     zodResolver(
       z.object({
         symbol: z.string(),
-      })
-    )
+      }),
+    ),
   )
   .sse(async function* ({ input }) {
     let price = 150.0; // Base price for AAPL simulation
-    
+
     // Simulate stock price changes over time
     while (true) {
       // Send the current price
       yield {
-        event: "price-update",
+        type: "price-update",
         data: {
           symbol: input.symbol,
           price: parseFloat(price.toFixed(2)),

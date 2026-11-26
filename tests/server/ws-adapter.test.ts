@@ -91,9 +91,9 @@ describe("applyWSHandler", () => {
     expect(JSON.parse(ws.sentMessages[0])).toEqual({ type: "hello", data: 42 });
   });
 
-  it("should send string data via send()", async () => {
+  it("should send string data via send() if bypassed at runtime", async () => {
     const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
-      ctx.send("raw text");
+      (ctx.send as any)("raw text");
     });
 
     applyWSHandler(procedureFn, { ws });
@@ -105,7 +105,7 @@ describe("applyWSHandler", () => {
     ws.readyState = 3; // CLOSED
 
     const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
-      ctx.send({ shouldNot: "arrive" });
+      ctx.send({ type: "test", data: "shouldNotArrive" });
     });
 
     applyWSHandler(procedureFn, { ws });
@@ -117,13 +117,68 @@ describe("applyWSHandler", () => {
     const broadcastFn = vi.fn();
 
     const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
-      ctx.broadcast({ event: "update" });
+      ctx.broadcast({ type: "update" });
     });
 
     applyWSHandler(procedureFn, { ws, broadcast: broadcastFn });
 
     expect(broadcastFn).toHaveBeenCalledTimes(1);
-    expect(broadcastFn).toHaveBeenCalledWith({ event: "update" });
+    expect(broadcastFn).toHaveBeenCalledWith({ type: "update" });
+  });
+
+  it("should support signal events without data on send() and broadcast()", async () => {
+    const broadcastFn = vi.fn();
+
+    const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
+      // Signal events without data
+      ctx.send({ type: "typing" });
+      ctx.broadcast({ type: "ping" });
+    });
+
+    applyWSHandler(procedureFn, { ws, broadcast: broadcastFn });
+
+    expect(ws.sentMessages).toHaveLength(1);
+    expect(JSON.parse(ws.sentMessages[0])).toEqual({ type: "typing" });
+    expect(broadcastFn).toHaveBeenCalledWith({ type: "ping" });
+  });
+
+  it("should support payload events with data on send() and broadcast()", async () => {
+    const broadcastFn = vi.fn();
+
+    const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
+      ctx.send({ type: "message", data: { text: "hello" } });
+      ctx.broadcast({ type: "notification", data: { count: 5 } });
+    });
+
+    applyWSHandler(procedureFn, { ws, broadcast: broadcastFn });
+
+    expect(ws.sentMessages).toHaveLength(1);
+    expect(JSON.parse(ws.sentMessages[0])).toEqual({
+      type: "message",
+      data: { text: "hello" },
+    });
+    expect(broadcastFn).toHaveBeenCalledWith({
+      type: "notification",
+      data: { count: 5 },
+    });
+  });
+
+  it("should enforce WSEvent contract on send and broadcast", async () => {
+    const procedureFn = vi.fn(async (ctx: WSProcedureContext) => {
+      // Valid calls
+      ctx.send({ type: "pong" });
+      ctx.send({ type: "message", data: { text: "hi" } });
+      ctx.broadcast({ type: "alert" });
+      ctx.broadcast({ type: "event", data: 123 });
+
+      // @ts-expect-error - missing required 'type'
+      ctx.send({ message: "invalid" });
+
+      // @ts-expect-error - missing required 'type'
+      ctx.broadcast({ message: "invalid" });
+    });
+
+    applyWSHandler(procedureFn, { ws });
   });
 
   it("should forward close events to onClose callback", async () => {

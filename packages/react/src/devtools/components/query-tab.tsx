@@ -311,7 +311,7 @@ export const QueryTab: React.FC<QueryTabProps> = ({
                     marginBottom: "6px",
                   }}
                 >
-                  {parsedActive?.path.map((seg, i) => (
+                  {parsedActive?.path.filter(Boolean).map((seg, i) => (
                     <React.Fragment key={i}>
                       {i > 0 && (
                         <span style={{ color: "#64748b", fontSize: "11px" }}>

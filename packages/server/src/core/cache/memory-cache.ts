@@ -1,5 +1,10 @@
 import { getStaleAt, isStale, parseWindow } from "../../lib/utils.js";
-import type { CacheAdapter, CacheEntry, WindowTime } from "./types.js";
+import type {
+  CacheAdapter,
+  CacheEntry,
+  WindowTime,
+  CacheSetOpts,
+} from "./types.js";
 
 export class MemoryCache implements CacheAdapter {
   private cache = new Map<string, CacheEntry>();
@@ -18,21 +23,50 @@ export class MemoryCache implements CacheAdapter {
     this.defaultStaleTime = parseWindow(options?.defaultStaleTime ?? "0m");
   }
 
-  set<T>(
+  async remember<T>(
     key: string,
-    data: T,
-    options?: { ttl?: number; staleTime?: number },
-  ): void {
+    fn: () => Promise<T>,
+    options?: CacheSetOpts,
+  ): Promise<T> {
+    const cached = this.get<T>(key);
+    if (cached !== undefined) {
+      if (this.isStale(key)) {
+        Promise.resolve(fn())
+          .then((val) => this.set(key, val, options))
+          .catch(() => {});
+      }
+      if (options?.tags) {
+        this.addTag(key, options.tags);
+      }
+      return cached.data;
+    }
+
+    const result = await fn();
+    if (result !== undefined && result !== null) {
+      this.set(key, result, options);
+      if (options?.tags) {
+        this.addTag(key, options.tags);
+      }
+    }
+
+    return result;
+  }
+
+  set<T>(key: string, data: T, options?: CacheSetOpts): void {
     if (data === undefined || data === null) return;
 
-    const ttl = options?.ttl ?? this.defaultTTL;
-    const staleTime = options?.staleTime ?? this.defaultStaleTime;
+    const ttl = parseWindow(options?.ttl ?? this.defaultTTL);
+    const staleTime = parseWindow(options?.staleTime ?? this.defaultStaleTime);
     const now = Date.now();
 
     // Evict oldest if at capacity
     if (this.cache.size >= this.maxSize) {
       const oldest = this.getOldestEntry();
       if (oldest) this.cache.delete(oldest);
+    }
+
+    if (options?.tags) {
+      this.addTag(key, options.tags);
     }
 
     this.cache.set(key, {

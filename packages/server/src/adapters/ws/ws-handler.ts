@@ -1,3 +1,5 @@
+import type { WSEvent } from "../../types/misc.js";
+
 /** Socket that uses EventEmitter-style `.on()` (e.g. `ws` library). */
 interface EventEmitterSocket {
   on: (event: string, listener: (...args: any[]) => void) => void;
@@ -6,9 +8,9 @@ interface EventEmitterSocket {
 }
 
 /** Context object passed to the WebSocket procedure. */
-export interface WSProcedureContext<TData = any> {
-  send: (data: any) => void;
-  broadcast: (data: TData) => void;
+export interface WSProcedureContext<TEvent extends WSEvent = WSEvent> {
+  send: (event: TEvent) => void;
+  broadcast: (event: TEvent) => void;
   onMessage: (cb: (data: any) => void) => void;
   onClose: (cb: (evt: CloseEvent) => void) => void;
   onError: (cb: (err: Event) => void) => void;
@@ -19,7 +21,7 @@ export interface WSProcedureContext<TData = any> {
  * standard WebSocket (like ws library, Node.js built-in, or browser).
  */
 export function applyWSHandler<
-  TData = any,
+  TEvent extends WSEvent = WSEvent,
   WSClient extends EventEmitterSocket | WebSocket = EventEmitterSocket,
 >(
   /**
@@ -27,7 +29,7 @@ export function applyWSHandler<
    * This procedure should be of type ".ws" and handle the WebSocket events.
    * It will receive a context object with send, broadcast, onMessage, onClose, and onError methods.
    */
-  procedure: (wsContext: WSProcedureContext<TData>) => Promise<void>,
+  procedure: (wsContext: WSProcedureContext<TEvent>) => Promise<void>,
   options: {
     /**
      * The WebSocket instance to attach the procedure to.
@@ -40,7 +42,7 @@ export function applyWSHandler<
      *
      * Typically: `(data) => wss.clients.forEach(client => client.send(...))`.
      */
-    broadcast?: (data: TData) => void;
+    broadcast?: (event: TEvent) => void;
   },
 ) {
   const { ws } = options;
@@ -51,13 +53,15 @@ export function applyWSHandler<
   let errorCallback: ((err: Event) => void) | undefined = undefined;
 
   procedure({
-    send: (data: any) => {
+    send: (event: TEvent) => {
       if (ws.readyState === 1) {
         // OPEN
-        ws.send(typeof data === "object" ? JSON.stringify(data) : String(data));
+        ws.send(
+          typeof event === "object" ? JSON.stringify(event) : String(event),
+        );
       }
     },
-    broadcast: (data) => options.broadcast?.(data),
+    broadcast: (event: TEvent) => options.broadcast?.(event),
     onMessage: (cb: (data: any) => void) => {
       messageCallback = cb;
     },

@@ -32,15 +32,15 @@ export default function SSEDemo() {
 
     const startStream = async () => {
       try {
-        const stream = await SSEClient({
+        const stream = await SSEClient<StockUpdate>({
           url: "/api/sse",
           params: { symbol: manualSymbol },
           signal: controller.signal,
         });
 
-        for await (const { event, data } of stream) {
+        for await (const { type, data } of stream) {
           if (isCancelled) break;
-          if (event === "price-update") {
+          if (type === "price-update") {
             const parsed = typeof data === "string" ? JSON.parse(data) : data;
 
             setManualUpdates((prev) => {

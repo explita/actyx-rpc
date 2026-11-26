@@ -43,10 +43,18 @@ nextApp.prepare().then(() => {
             if (
               client !== ws &&
               client.readyState === WebSocket.OPEN &&
-              clientReq &&
-              clientReq.url === req.url
+              clientReq
             ) {
-              client.send(payload);
+              const { pathname: clientPath, query: clientQuery } = parse(
+                clientReq.url || "",
+                true,
+              );
+              if (
+                clientPath === "/api/ws/room" &&
+                (clientQuery.roomId || "lobby") === roomId
+              ) {
+                client.send(payload);
+              }
             }
           });
         },
@@ -63,10 +71,12 @@ nextApp.prepare().then(() => {
             if (
               client !== ws &&
               client.readyState === WebSocket.OPEN &&
-              clientReq &&
-              clientReq.url === req.url
+              clientReq
             ) {
-              client.send(payload);
+              const { pathname: clientPath } = parse(clientReq.url || "", true);
+              if (clientPath === "/api/ws") {
+                client.send(payload);
+              }
             }
           });
         },

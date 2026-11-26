@@ -9,13 +9,13 @@ import type {
   ExtractProcArgs,
   ExtractProcInput,
   HasRequiredKeys,
-  InfiniteQueryPage,
   Prettify,
   UseInfiniteQueryOpts,
   UseWSInfiniteQueryResult,
   WithoutCursor,
   WSAdapterOptions,
   PaginationArgs,
+  ExtractTypingUserFromOutput,
 } from "../types/main.js";
 
 /**
@@ -35,7 +35,7 @@ import type {
  * @param queryProcedure - The paginated query procedure.
  * @param opts - Combined options for WebSocket connection (`url`, `onMessage`) and infinite query (`queryOpts.input`, `getNextPageParam`).
  * @param extraArgs - Additional positional arguments forwarded to the procedure call.
- * @returns An infinite query result augmented with WebSocket messaging controls (`send`, `status`, `unsubscribe`).
+ * @returns An infinite query result augmented with WebSocket messaging controls (`send`, `status`, `connect`, `disconnect`, `sendTyping`).
  *
  * @example
  * ```tsx
@@ -59,6 +59,8 @@ export function useWSInfiniteQuery<
   TPage = ExtractInfiniteItem<TFullPage>,
   TQueryKey extends unknown[] = unknown[],
   TData = TPage,
+  TEvent extends { type: string; data?: any } = any,
+  TTypingUser = ExtractTypingUserFromOutput<TData>,
 >(
   queryProcedure: TProc,
   opts: [TInput] extends [void | undefined | never]
@@ -72,7 +74,9 @@ export function useWSInfiniteQuery<
               TPage,
               TQueryKey,
               TFullPage,
-              NoInfer<TArgs>
+              NoInfer<TArgs>,
+              TEvent,
+              TTypingUser
             >,
             "queryOpts"
           > & {
@@ -101,7 +105,9 @@ export function useWSInfiniteQuery<
               TPage,
               TQueryKey,
               TFullPage,
-              NoInfer<TArgs>
+              NoInfer<TArgs>,
+              TEvent,
+              TTypingUser
             >,
             "queryOpts"
           > & {
@@ -123,7 +129,7 @@ export function useWSInfiniteQuery<
           }
         >,
   ...extraArgs: NoInfer<TArgs>
-): UseWSInfiniteQueryResult<TPage, TFullPage, TData>;
+): UseWSInfiniteQueryResult<TPage, TFullPage, TData, TTypingUser>;
 
 /**
  * React hook that combines infinite query pagination with real-time WebSocket streaming (Procedure without input schema).
@@ -150,6 +156,8 @@ export function useWSInfiniteQuery<
   TPage = ExtractInfiniteItem<TFullPage>,
   TQueryKey extends unknown[] = unknown[],
   TData = TPage,
+  TEvent extends { type: string; data?: any } = any,
+  TTypingUser = ExtractTypingUserFromOutput<TData>,
 >(
   queryProcedure: TProc,
   opts: [TInput] extends [void | undefined | never]
@@ -161,7 +169,9 @@ export function useWSInfiniteQuery<
             TPage,
             TQueryKey,
             TFullPage,
-            NoInfer<PaginationArgs<TArgs>>
+            NoInfer<PaginationArgs<TArgs>>,
+            TEvent,
+            TTypingUser
           >,
           "queryOpts"
         > & {
@@ -181,7 +191,7 @@ export function useWSInfiniteQuery<
       >
     : never,
   ...extraArgs: NoInfer<PaginationArgs<TArgs>>
-): UseWSInfiniteQueryResult<TPage, TFullPage, TData>;
+): UseWSInfiniteQueryResult<TPage, TFullPage, TData, TTypingUser>;
 
 export function useWSInfiniteQuery<
   TProc extends (...args: any[]) => Promise<any>,
@@ -200,30 +210,53 @@ export function useWSInfiniteQuery<
     optsRef.current = { arrange, onData };
   });
 
+  const queryEnabled = queryOpts?.enabled ?? wsOpts.enabled ?? true;
+  const wsEnabled = wsOpts.enabled ?? queryOpts?.enabled ?? true;
+
   // 1. Instantiate the paginated query, forwarding extraArgs
   const queryResult = (useInfiniteQuery as any)(
     queryProcedure,
-    queryOpts,
+    {
+      ...queryOpts,
+      search: queryOpts?.search ?? (opts as any)?.search,
+      dedupKey: queryOpts?.dedupKey ?? (opts as any)?.dedupKey,
+      enabled: queryEnabled,
+    },
     ...extraArgs,
   );
 
   // 2. Attach WebSocket listener
-  const wsResult = useWS<TData, TData>({
+  const wsResult = useWS<TData>({
     ...wsOpts,
-    enabled: wsOpts.enabled ?? true,
-    onData: (data, action) => {
+    enabled: wsEnabled,
+    onData: (event, action) => {
+      const data =
+        event && typeof event === "object" && "data" in event
+          ? event.data
+          : event;
+      const dedupKeyFn =
+        (opts as any)?.dedupKey ?? (opts as any)?.queryOpts?.dedupKey;
+      let computedAction = action;
+      if (dedupKeyFn && data !== undefined) {
+        const key = dedupKeyFn(data);
+        const exists = queryResult.data.some(
+          (item: any) => dedupKeyFn(item) === key,
+        );
+        computedAction = exists ? "updated" : "added";
+      }
+
       if (onData) {
         onData({
-          action,
-          data,
-          allData: queryResult.data as unknown as TData[],
-          append: queryResult.append as any,
-          prepend: queryResult.prepend as any,
-          update: queryResult.update as any,
-          insert: queryResult.insert as any,
+          action: computedAction,
+          event,
+          items: queryResult.data,
+          append: queryResult.append,
+          prepend: queryResult.prepend,
+          update: queryResult.update,
+          insert: queryResult.insert,
         });
       } else {
-        queryResult.append(data as any);
+        queryResult.append(data);
       }
     },
   });
@@ -239,6 +272,8 @@ export function useWSInfiniteQuery<
   queryPagesRef.current = queryResult.pages;
   const queryPageParamsRef = useRef(queryResult.pageParams);
   queryPageParamsRef.current = queryResult.pageParams;
+  const queryEnabledRef = useRef(queryEnabled);
+  queryEnabledRef.current = queryEnabled;
 
   useEffect(() => {
     const buildContext = () => ({
@@ -268,8 +303,14 @@ export function useWSInfiniteQuery<
       snapshot: queryResult.snapshot,
     });
 
-    const onFocus = () => onWindowFocusRef.current?.(buildContext());
-    const onOnline = () => onReconnectRef.current?.(buildContext());
+    const onFocus = () => {
+      if (!queryEnabledRef.current) return;
+      onWindowFocusRef.current?.(buildContext());
+    };
+    const onOnline = () => {
+      if (!queryEnabledRef.current) return;
+      onReconnectRef.current?.(buildContext());
+    };
 
     // Always register — ref guards handle undefined callbacks,
     // so late-provided callbacks work without re-subscribing.
@@ -293,9 +334,13 @@ export function useWSInfiniteQuery<
     ...queryResult,
     data: arrangedData,
     send: wsResult.send,
-    unsubscribe: wsResult.unsubscribe,
+    connect: wsResult.connect,
+    disconnect: wsResult.disconnect,
     status: wsResult.status,
     error: wsResult.error,
     queryError: queryResult.error,
+    isTyping: wsResult.isTyping,
+    typingUsers: wsResult.typingUsers,
+    sendTyping: wsResult.sendTyping,
   };
 }

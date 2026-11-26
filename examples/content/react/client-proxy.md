@@ -435,12 +435,22 @@ Procedures configured with `.ws()` can be consumed using `useWS`:
 
 ```tsx
 function LiveChat() {
-  const { send, lastMessage, isConnected } = rpc.chat.useWS();
+  const { data: messages, status, connect, disconnect, send, isTyping, typingUsers, sendTyping } =
+    rpc.chat.useWS({
+      typing: true,
+    });
 
   return (
     <div>
-      <p>Status: {isConnected ? "Online" : "Offline"}</p>
+      <p>Status: {status}</p>
+      <div className="messages">
+        {messages.map((m, i) => (
+          <p key={i}>{m.text}</p>
+        ))}
+      </div>
+      {isTyping && <p>{typingUsers.map((u) => u.name).join(", ")} is typing...</p>}
       <button onClick={() => send({ text: "Hello!" })}>Send</button>
+      <button onClick={disconnect}>Disconnect</button>
     </div>
   );
 }

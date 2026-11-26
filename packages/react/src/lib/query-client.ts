@@ -1,5 +1,5 @@
 import { globalRequestManager } from "./request-manager.js";
-import type { WindowTime } from "../types/main.js";
+import type { QueryCacheMutationOpts, WindowTime } from "../types/main.js";
 import { normalizeKey, parseWindow } from "../lib/utils.js";
 import { Timeout, QueryResult as ProcQueryResult } from "../types/misc.js";
 import {
@@ -18,6 +18,18 @@ import {
   PrefetchQueryOptions,
 } from "../types/query-client.js";
 
+type ExtractPrefetchData<T> = T extends readonly [infer D, null]
+  ? D
+  : T extends readonly [null, any]
+    ? never
+    : T;
+
+type ExtractPrefetchError<T> = T extends readonly [null, infer E]
+  ? E
+  : T extends readonly [any, null]
+    ? never
+    : any;
+
 export class QueryClient {
   private cache = new Map<string, QueryState>();
   private listeners = new Map<string, Set<() => void>>();
@@ -27,11 +39,15 @@ export class QueryClient {
   private defaultOptions: DefaultOptions;
   private queryDefaults = new Map<string, DefaultQueryOptions>();
   private mutationDefaults = new Map<string, DefaultMutationOptions>();
+  private queryOptions = new Map<string, { dedupKey?: (item: any) => any }>();
   private maxCacheSize: number;
 
   constructor(config?: QueryClientConfig) {
     this.defaultOptions = {
-      queries: config?.queries,
+      queries: {
+        ...config?.queries,
+        search: { debounce: 500, ...config?.queries?.search },
+      },
       mutations: config?.mutations,
     };
     this.maxCacheSize = config?.maxCacheSize ?? 1000;
@@ -117,6 +133,20 @@ export class QueryClient {
         ...keyOrDefaults,
       };
     }
+  }
+
+  getQueryOptions(queryKeyArr: unknown[] | string) {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    return this.queryOptions.get(queryKey);
+  }
+
+  setQueryOptions(
+    queryKeyArr: unknown[] | string,
+    options: { dedupKey?: (item: any) => any },
+  ) {
+    const queryKey = this.normalizeQueryKey(queryKeyArr);
+    const existing = this.queryOptions.get(queryKey) || {};
+    this.queryOptions.set(queryKey, { ...existing, ...options });
   }
 
   getQueryState<TData = any, TError = any>(
@@ -559,40 +589,39 @@ export class QueryClient {
     return [oldData, newData];
   }
 
-  async prefetchQuery<TOutput = any, TError = any>(
-    options: PrefetchQueryOptions<TOutput, TError>,
-  ): Promise<void>;
-  async prefetchQuery<TOutput = any, TError = any>(
+  async prefetchQuery<TFetcher extends () => Promise<any>>(
+    options: Omit<PrefetchQueryOptions<any, any>, "queryFn"> & {
+      queryFn: TFetcher;
+    },
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  >;
+  async prefetchQuery<TFetcher extends () => Promise<any>>(
     queryKey:
       | string
       | unknown[]
       | { getQueryKey: (...args: any[]) => unknown[] },
-    fetcher:
-      | (() => Promise<ProcQueryResult<TOutput>>)
-      | (() => Promise<[TOutput, null] | [null, TError]>)
-      | (() => Promise<
-          ([TOutput, null] | [null, TError]) & { readonly _type?: "query" }
-        >)
-      | (() => Promise<TOutput>)
-      | (() => Promise<any>),
+    fetcher: TFetcher,
     opts?: { staleTime?: WindowTime; unwrap?: boolean },
-  ): Promise<void>;
-  async prefetchQuery<TOutput = any, TError = any>(
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  >;
+  async prefetchQuery<TFetcher extends () => Promise<any>>(
     arg1:
       | string
       | unknown[]
       | { getQueryKey: (...args: any[]) => unknown[] }
-      | PrefetchQueryOptions<TOutput, TError>,
-    arg2?:
-      | (() => Promise<ProcQueryResult<TOutput>>)
-      | (() => Promise<[TOutput, null] | [null, TError]>)
-      | (() => Promise<
-          ([TOutput, null] | [null, TError]) & { readonly _type?: "query" }
-        >)
-      | (() => Promise<TOutput>)
-      | (() => Promise<any>),
+      | (Omit<PrefetchQueryOptions<any, any>, "queryFn"> & {
+          queryFn: TFetcher;
+        }),
+    arg2?: TFetcher,
     arg3?: { staleTime?: WindowTime; unwrap?: boolean },
-  ): Promise<void> {
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  > {
     let rawKey: any;
     let fetcher: (() => Promise<any>) | undefined;
     let opts: { staleTime?: WindowTime; unwrap?: boolean } | undefined;
@@ -603,7 +632,7 @@ export class QueryClient {
       "queryKey" in arg1 &&
       "queryFn" in arg1
     ) {
-      const options = arg1 as PrefetchQueryOptions<TOutput, TError>;
+      const options = arg1 as PrefetchQueryOptions<any, any>;
       rawKey = options.queryKey;
       fetcher = options.queryFn;
       opts = { staleTime: options.staleTime, unwrap: options.unwrap };
@@ -613,10 +642,10 @@ export class QueryClient {
       opts = arg3;
     }
 
-    if (!fetcher) return;
+    if (!fetcher) return [null, null as any];
 
     const queryKey = normalizeKey(rawKey);
-    if (!queryKey) return;
+    if (!queryKey) return [null, null as any];
 
     const existing = this.getQueryState(queryKey);
 
@@ -628,7 +657,7 @@ export class QueryClient {
       resolvedStale !== undefined ? parseWindow(resolvedStale) : 0;
     if (existing?.isSuccess && existing.updatedAt) {
       if (Date.now() - existing.updatedAt < staleTime) {
-        return;
+        return [existing.data, null];
       }
     }
 
@@ -677,6 +706,7 @@ export class QueryClient {
         updatedAt: Date.now(),
         isFetched: true,
       });
+      return [data, null];
     } else {
       this.setQueryState(queryKey, {
         error: err,
@@ -685,37 +715,45 @@ export class QueryClient {
         isFetching: false,
         isFetched: true,
       });
+      return [null, err];
     }
   }
 
-  async prefetchInfiniteQuery<TOutput = any, TError = any>(
-    options: PrefetchQueryOptions<TOutput, TError> & { initialPageParam?: any },
-  ): Promise<void>;
-  async prefetchInfiniteQuery<TOutput = any, TError = any>(
+  async prefetchInfiniteQuery<TFetcher extends () => Promise<any>>(
+    options: Omit<PrefetchQueryOptions<any, any>, "queryFn"> & {
+      queryFn: TFetcher;
+      initialPageParam?: any;
+    },
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  >;
+  async prefetchInfiniteQuery<TFetcher extends () => Promise<any>>(
     queryKey:
       | string
       | unknown[]
       | { getQueryKey: (...args: any[]) => unknown[] },
-    fetcher:
-      | (() => Promise<ProcQueryResult<TOutput>>)
-      | (() => Promise<[TOutput, null] | [null, TError]>)
-      | (() => Promise<TOutput>)
-      | (() => Promise<any>),
+    fetcher: TFetcher,
     opts?: { staleTime?: WindowTime; initialPageParam?: any },
-  ): Promise<void>;
-  async prefetchInfiniteQuery<TOutput = any, TError = any>(
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  >;
+  async prefetchInfiniteQuery<TFetcher extends () => Promise<any>>(
     arg1:
       | string
       | unknown[]
       | { getQueryKey: (...args: any[]) => unknown[] }
-      | (PrefetchQueryOptions<TOutput, TError> & { initialPageParam?: any }),
-    arg2?:
-      | (() => Promise<ProcQueryResult<TOutput>>)
-      | (() => Promise<[TOutput, null] | [null, TError]>)
-      | (() => Promise<TOutput>)
-      | (() => Promise<any>),
+      | (Omit<PrefetchQueryOptions<any, any>, "queryFn"> & {
+          queryFn: TFetcher;
+          initialPageParam?: any;
+        }),
+    arg2?: TFetcher,
     arg3?: { staleTime?: WindowTime; initialPageParam?: any },
-  ): Promise<void> {
+  ): Promise<
+    | [ExtractPrefetchData<Awaited<ReturnType<TFetcher>>>, null]
+    | [null, ExtractPrefetchError<Awaited<ReturnType<TFetcher>>>]
+  > {
     let rawKey: any;
     let fetcher: (() => Promise<any>) | undefined;
     let opts: { staleTime?: WindowTime; initialPageParam?: any } | undefined;
@@ -726,7 +764,7 @@ export class QueryClient {
       "queryKey" in arg1 &&
       "queryFn" in arg1
     ) {
-      const options = arg1 as PrefetchQueryOptions<TOutput, TError> & {
+      const options = arg1 as PrefetchQueryOptions<any, any> & {
         initialPageParam?: any;
       };
       rawKey = options.queryKey;
@@ -741,10 +779,10 @@ export class QueryClient {
       opts = arg3;
     }
 
-    if (!fetcher) return;
+    if (!fetcher) return [null, null as any];
 
     const queryKey = normalizeKey(rawKey);
-    if (!queryKey) return;
+    if (!queryKey) return [null, null as any];
 
     const existing = this.getQueryState(queryKey);
     const defaultStale = this.getQueryDefaults(queryKey)?.staleTime;
@@ -754,7 +792,13 @@ export class QueryClient {
       resolvedStale !== undefined ? parseWindow(resolvedStale) : 0;
     if (existing?.isSuccess && existing.updatedAt) {
       if (Date.now() - existing.updatedAt < staleTime) {
-        return;
+        const cachedPage =
+          existing.data &&
+          typeof existing.data === "object" &&
+          Array.isArray((existing.data as any).pages)
+            ? (existing.data as any).pages[0]
+            : existing.data;
+        return [cachedPage, null];
       }
     }
 
@@ -810,6 +854,7 @@ export class QueryClient {
           isFetched: true,
         });
       }
+      return [pageData, null];
     } else {
       this.setQueryState(queryKey, {
         error: err,
@@ -818,6 +863,7 @@ export class QueryClient {
         isFetching: false,
         isFetched: true,
       });
+      return [null, err];
     }
   }
 
@@ -943,7 +989,11 @@ export class QueryClient {
     return queryKeyArr.map(String).join("|");
   }
 
-  prepend<T>(queryKeyArr: unknown[] | string, item: T | T[]): () => void {
+  prepend<T>(
+    queryKeyArr: unknown[] | string,
+    item: T | T[],
+    options?: QueryCacheMutationOpts<T>,
+  ): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
     const previousData = currentState?.data;
@@ -951,10 +1001,23 @@ export class QueryClient {
       this.setQueryState(queryKey, { data: previousData });
     };
     const items = Array.isArray(item) ? item : [item];
+    const dedupKey =
+      options?.dedupKey ?? this.queryOptions.get(queryKey)?.dedupKey;
 
     if (!currentState || currentState.data === undefined) {
+      const initialItems = dedupKey
+        ? items.reduce<T[]>((acc, cur) => {
+            const key = dedupKey(cur);
+            const idx = acc.findIndex((x) => dedupKey(x) === key);
+            if (idx >= 0) {
+              acc[idx] = cur;
+              return acc;
+            }
+            return [...acc, cur];
+          }, [])
+        : items;
       this.setQueryState(queryKey, {
-        data: items,
+        data: initialItems,
         isSuccess: true,
         updatedAt: Date.now(),
         isFetched: true,
@@ -973,7 +1036,56 @@ export class QueryClient {
       const oldPages = (data as any).pages as any[];
       let newPages: any[] = [];
       if (oldPages.length === 0) {
-        newPages = [{ data: items, nextCursor: null, hasMore: false }];
+        const uniqueItems = dedupKey
+          ? items.reduce<any[]>((acc, cur) => {
+              const key = dedupKey(cur);
+              const idx = acc.findIndex((x) => dedupKey(x) === key);
+              if (idx >= 0) {
+                acc[idx] = cur;
+                return acc;
+              }
+              return [...acc, cur];
+            }, [])
+          : items;
+        newPages = [{ data: uniqueItems, nextCursor: null, hasMore: false }];
+      } else if (dedupKey) {
+        newPages = oldPages.map((page) => ({
+          ...page,
+          data: Array.isArray(page.data) ? [...page.data] : page.data,
+        }));
+
+        const itemsToPrepend: any[] = [];
+
+        for (const newItem of items) {
+          const targetKey = dedupKey(newItem);
+          let found = false;
+
+          for (const page of newPages) {
+            if (Array.isArray(page.data)) {
+              const idx = page.data.findIndex(
+                (existing: any) => dedupKey(existing) === targetKey,
+              );
+              if (idx !== -1) {
+                page.data[idx] = newItem;
+                found = true;
+                break;
+              }
+            }
+          }
+
+          if (!found) {
+            itemsToPrepend.push(newItem);
+          }
+        }
+
+        if (itemsToPrepend.length > 0) {
+          const firstPage = newPages[0];
+          if (Array.isArray(firstPage.data)) {
+            firstPage.data = [...itemsToPrepend, ...firstPage.data];
+          } else {
+            firstPage.data = itemsToPrepend;
+          }
+        }
       } else {
         newPages = oldPages.map((page, idx) => {
           if (idx === 0) {
@@ -1000,10 +1112,30 @@ export class QueryClient {
       });
     } else {
       if (Array.isArray(data)) {
-        this.setQueryState(queryKey, {
-          data: [...items, ...data],
-          updatedAt: Date.now(),
-        });
+        if (dedupKey) {
+          const nextData = [...data];
+          const itemsToPrepend: any[] = [];
+          for (const newItem of items) {
+            const targetKey = dedupKey(newItem);
+            const idx = nextData.findIndex(
+              (existing) => dedupKey(existing) === targetKey,
+            );
+            if (idx !== -1) {
+              nextData[idx] = newItem;
+            } else {
+              itemsToPrepend.push(newItem);
+            }
+          }
+          this.setQueryState(queryKey, {
+            data: [...itemsToPrepend, ...nextData],
+            updatedAt: Date.now(),
+          });
+        } else {
+          this.setQueryState(queryKey, {
+            data: [...items, ...data],
+            updatedAt: Date.now(),
+          });
+        }
       } else if (data && typeof data === "object") {
         this.setQueryState(queryKey, {
           data: { ...items[0], ...data },
@@ -1015,7 +1147,11 @@ export class QueryClient {
     return rollback;
   }
 
-  append<T>(queryKeyArr: unknown[] | string, item: T | T[]): () => void {
+  append<T>(
+    queryKeyArr: unknown[] | string,
+    item: T | T[],
+    options?: QueryCacheMutationOpts<T>,
+  ): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
     const previousData = currentState?.data;
@@ -1023,10 +1159,23 @@ export class QueryClient {
       this.setQueryState(queryKey, { data: previousData });
     };
     const items = Array.isArray(item) ? item : [item];
+    const dedupKey =
+      options?.dedupKey ?? this.queryOptions.get(queryKey)?.dedupKey;
 
     if (!currentState || currentState.data === undefined) {
+      const initialItems = dedupKey
+        ? items.reduce<T[]>((acc, cur) => {
+            const key = dedupKey(cur);
+            const idx = acc.findIndex((x) => dedupKey(x) === key);
+            if (idx >= 0) {
+              acc[idx] = cur;
+              return acc;
+            }
+            return [...acc, cur];
+          }, [])
+        : items;
       this.setQueryState(queryKey, {
-        data: items,
+        data: initialItems,
         isSuccess: true,
         updatedAt: Date.now(),
         isFetched: true,
@@ -1045,7 +1194,56 @@ export class QueryClient {
       const oldPages = (data as any).pages as any[];
       let newPages: any[] = [];
       if (oldPages.length === 0) {
-        newPages = [{ data: items, nextCursor: null, hasMore: false }];
+        const uniqueItems = dedupKey
+          ? items.reduce<any[]>((acc, cur) => {
+              const key = dedupKey(cur);
+              const idx = acc.findIndex((x) => dedupKey(x) === key);
+              if (idx >= 0) {
+                acc[idx] = cur;
+                return acc;
+              }
+              return [...acc, cur];
+            }, [])
+          : items;
+        newPages = [{ data: uniqueItems, nextCursor: null, hasMore: false }];
+      } else if (dedupKey) {
+        newPages = oldPages.map((page) => ({
+          ...page,
+          data: Array.isArray(page.data) ? [...page.data] : page.data,
+        }));
+
+        const itemsToAppend: any[] = [];
+
+        for (const newItem of items) {
+          const targetKey = dedupKey(newItem);
+          let found = false;
+
+          for (const page of newPages) {
+            if (Array.isArray(page.data)) {
+              const idx = page.data.findIndex(
+                (existing: any) => dedupKey(existing) === targetKey,
+              );
+              if (idx !== -1) {
+                page.data[idx] = newItem;
+                found = true;
+                break;
+              }
+            }
+          }
+
+          if (!found) {
+            itemsToAppend.push(newItem);
+          }
+        }
+
+        if (itemsToAppend.length > 0) {
+          const lastPage = newPages[newPages.length - 1];
+          if (Array.isArray(lastPage.data)) {
+            lastPage.data = [...lastPage.data, ...itemsToAppend];
+          } else {
+            lastPage.data = itemsToAppend;
+          }
+        }
       } else {
         newPages = oldPages.map((page, idx) => {
           if (idx === oldPages.length - 1) {
@@ -1072,10 +1270,30 @@ export class QueryClient {
       });
     } else {
       if (Array.isArray(data)) {
-        this.setQueryState(queryKey, {
-          data: [...data, ...items],
-          updatedAt: Date.now(),
-        });
+        if (dedupKey) {
+          const nextData = [...data];
+          const itemsToAppend: any[] = [];
+          for (const newItem of items) {
+            const targetKey = dedupKey(newItem);
+            const idx = nextData.findIndex(
+              (existing) => dedupKey(existing) === targetKey,
+            );
+            if (idx !== -1) {
+              nextData[idx] = newItem;
+            } else {
+              itemsToAppend.push(newItem);
+            }
+          }
+          this.setQueryState(queryKey, {
+            data: [...nextData, ...itemsToAppend],
+            updatedAt: Date.now(),
+          });
+        } else {
+          this.setQueryState(queryKey, {
+            data: [...data, ...items],
+            updatedAt: Date.now(),
+          });
+        }
       } else if (data && typeof data === "object") {
         this.setQueryState(queryKey, {
           data: { ...data, ...items[0] },
@@ -1091,6 +1309,7 @@ export class QueryClient {
     queryKeyArr: unknown[] | string,
     index: number,
     item: T | T[],
+    options?: QueryCacheMutationOpts<T>,
   ): () => void {
     const queryKey = this.normalizeQueryKey(queryKeyArr);
     const currentState = this.getQueryState(queryKey);
@@ -1100,7 +1319,7 @@ export class QueryClient {
     };
 
     if (!currentState || currentState.data === undefined) {
-      return this.prepend(queryKey, item);
+      return this.prepend(queryKey, item, options);
     }
 
     const data = currentState.data;
@@ -1121,7 +1340,7 @@ export class QueryClient {
       }
 
       if (oldPages.length === 0 || index <= 0) {
-        return this.prepend(queryKey, items);
+        return this.prepend(queryKey, items, options);
       }
 
       let targetIndex = index;
@@ -1132,7 +1351,7 @@ export class QueryClient {
       );
 
       if (targetIndex >= totalLength) {
-        return this.append(queryKey, items);
+        return this.append(queryKey, items, options);
       }
 
       const newPages = oldPages.map((page) => {

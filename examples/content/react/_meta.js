@@ -12,5 +12,6 @@ export default {
   subscriptions: "WebSocket Subscriptions",
   sse: "Server-Sent Events (SSE)",
   "real-time-infinite-queries": "Real-Time Infinite Queries",
+  "typing-indicators": "Real-Time Typing Indicators",
   utilities: "React Utilities",
 };

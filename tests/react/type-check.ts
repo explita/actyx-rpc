@@ -27,6 +27,158 @@ const testNonStandard: UnwrappedNonStandard = { other: "field" };
 
 // Test: InputParams in form mode with Date check and recursive mapping
 import { InputParams } from "../../packages/server/src/types/misc.js";
+import type { TypingUser } from "../../packages/react/src/types/main.js";
+
+type ExtractTypingUserFromOutput<T> = T extends { user: infer U }
+  ? (U extends object ? U : any)
+  : T extends { sender: infer S }
+    ? (S extends object ? S : any)
+    : T extends { author: infer A }
+      ? (A extends object ? A : any)
+      : any;
+
+type NormalizeTypingUser<T> = T extends object
+  ? (T extends { id: any } ? T : { id: string | number } & T)
+  : Record<string, any>;
+
+type ExtractTypingUserFromOpts<TOpts, TOutput> =
+  TOpts extends { typing: infer TTyping }
+    ? TTyping extends { getUser: (...args: any[]) => infer R }
+      ? NormalizeTypingUser<R>
+      : Prettify<TypingUser<ExtractTypingUserFromOutput<TOutput>>>
+    : Prettify<TypingUser<ExtractTypingUserFromOutput<TOutput>>>;
+
+type ExtractOutputFromOpts<TOpts, TExplicit = any> =
+  unknown extends TExplicit
+    ? TOpts extends { initialData: (infer Item)[] | (() => any) }
+      ? Item
+      : any
+    : TExplicit;
+
+type WsMessage = { message: string; user: { id: string; name: string } };
+
+declare function testWS<
+  TOutput = any,
+  TOpts extends {
+    url: string;
+    typing?: any;
+    initialData?: any;
+  } = any,
+>(opts: TOpts): {
+  data: ExtractOutputFromOpts<TOpts, TOutput>[];
+  typingUsers: TypingUser<ExtractTypingUserFromOpts<TOpts, ExtractOutputFromOpts<TOpts, TOutput>>>[];
+};
+
+// Test 1: User in playground with <WsMessage> and getUser returning { id: string }
+const res1 = testWS<WsMessage>({
+  url: "/ws",
+  typing: {
+    timeout: "2s",
+    throttle: "1.5s",
+    getUser(data) {
+      return {
+        id: data.user.id,
+      };
+    },
+  },
+  initialData: [{ message: "Hello", user: { id: "1", name: "Alice" } }],
+});
+
+// typingUsers should be { id: string; name?: string }[], NOT require name: string!
+const u1: { id: string; name?: string }[] = res1.typingUsers;
+// @ts-expect-error - u1 does NOT require name because getUser only returned { id: string }!
+const u1_fail: { id: string; name: string }[] = res1.typingUsers;
+// data should be WsMessage[]
+const d1: WsMessage[] = res1.data;
+
+// Test 2: User without <WsMessage> but WITH initialData
+const res2 = testWS({
+  url: "/ws",
+  initialData: [{ message: "Hello", user: { id: "1", name: "Alice" } }],
+});
+// data should be inferred as WsMessage[]
+const d2: WsMessage[] = res2.data;
+// typingUsers should be inferred from initialData.user -> { id: string; name: string }
+const u2: { id: string; name: string }[] = res2.typingUsers;
+
+
+
+type ExtractTypingUserFromOutput<T> = T extends { user: infer U }
+  ? (U extends object ? U : any)
+  : T extends { sender: infer S }
+    ? (S extends object ? S : any)
+    : T extends { author: infer A }
+      ? (A extends object ? A : any)
+      : any;
+
+type NormalizeTypingUser<T> = T extends { id: any }
+  ? T
+  : T extends string | number
+    ? { id: T; name?: string }
+    : { id: string | number } & (T extends object ? T : Record<string, any>);
+
+type ChatMessage = {
+  id: string;
+  text: string;
+  user: { id: string; name: string; avatar: string };
+};
+
+// Overload 1: with getUser
+function testInferWS<
+  TOutput = any,
+  TUser = any,
+>(opts: {
+  url: string;
+  typing: {
+    getUser: (data: TOutput) => TUser;
+  };
+}): {
+  data: TOutput[];
+  typingUsers: NormalizeTypingUser<TUser>[];
+};
+
+// Overload 2: without getUser
+function testInferWS<
+  TOutput = any,
+>(opts: {
+  url: string;
+  typing?: boolean | { timeout?: string };
+}): {
+  data: TOutput[];
+  typingUsers: TypingUser<ExtractTypingUserFromOutput<TOutput>>[];
+};
+
+function testInferWS(opts: any): any {
+  return { data: [], typingUsers: [] };
+}
+
+// Test A: with getUser returning { customId: 1, role: "admin" }
+const a = testInferWS<ChatMessage>({
+  url: "/ws",
+  typing: {
+    getUser: (data) => ({ customId: 1, role: "admin" as const }),
+  },
+});
+// @ts-expect-error - nonExistentProperty should NOT exist
+const testFail: { nonExistentProperty: boolean }[] = a.typingUsers;
+
+// Test B: with getUser returning string
+const b = testInferWS<ChatMessage>({
+  url: "/ws",
+  typing: {
+    getUser: (data) => "user-123",
+  },
+});
+const testB: { id: string; name?: string }[] = b.typingUsers;
+
+// Test C: without getUser
+const c = testInferWS<ChatMessage>({
+  url: "/ws",
+  typing: true,
+});
+const testC: { id: string | number; name?: string; avatar: string }[] = c.typingUsers;
+
+import type { TypingUser } from "../../packages/react/src/types/main.js";
 
 type TestInput = {
   createdAt: Date;

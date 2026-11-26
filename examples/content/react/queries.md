@@ -114,6 +114,7 @@ The `useQuery` hook accepts:
 | `refetchInterval`      | `number`                | `0`             | Time in milliseconds for automatic background polling.                                                     |
 | `unwrap`               | `boolean`               | `false`         | Set to `true` to return the nested `data` field of the RPC response directly.                              |
 | `select`               | `(data) => selectData`  | —               | Transform the query response before returning it to the component.                                         |
+| `search`               | `function \| object`    | —               | Client search configuration: a filter function shorthand `(item, query, i, arr) => boolean` or an object `{ filter?, initial? }`. |
 | `keepPreviousData`     | `boolean`               | `true`          | When `false`, clears cached data during refetch so the UI shows a loading state instead of stale data.     |                                         |
 | `onSuccess`            | `(data) => void`        | —               | Callback run on successful data fetch.                                                                     |
 | `onError`              | `(error) => void`       | —               | Callback run when the procedure encounters an error.                                                       |
@@ -127,7 +128,12 @@ The hook returns the following control and state properties (`QueryResult`):
 
 | Property       | Type                         | Description                                                                                                               |
 | :------------- | :--------------------------- | :------------------------------------------------------------------------------------------------------------------------ |
-| `data`         | `TData`                      | The fetched (and optionally transformed/unwrapped) query data, or `undefined` if loading and no `initialData` is present. |
+| `data`         | `TData`                      | The fetched (and optionally filtered/transformed/unwrapped) query data, or `undefined` if loading and no `initialData`.  |
+| `unfilteredData` | `TData`                    | The raw unfiltered query data when `filter` is used.                                                                      |
+| `search`       | `string`                     | The active search string applied to `filter`.                                                                             |
+| `setSearch`    | `(query: string) => void`    | Updates the client-side search query.                                                                                     |
+| `resetSearch`  | `() => void`                 | Resets the client search query back to `""` (or `initialSearch`).                                                         |
+| `isFiltered`   | `boolean`                    | `true` when a client filter is actively applied.                                                                          |
 | `error`        | `ErrorResponse \| undefined` | The error object if the query failed.                                                                                     |
 | `isFetching`   | `boolean`                    | Indicates if a query fetch is currently in progress.                                                                      |
 | `isRefetching` | `boolean`                    | Indicates if a background refresh of the existing cached data is in progress.                                             |
@@ -195,6 +201,14 @@ todos.remove((item) => item.id === "new-1");
 
 // Each array helper returns a rollback() function to undo optimistic changes if a mutation fails:
 // if (mutationFailed) rollback();
+
+// Automatic Upsert via dedupKey:
+// If dedupKey is specified on useQuery (or passed as an option to append/prepend),
+// matching items are updated in-place instead of creating duplicates:
+const todosWithDedup = useQuery(getTodos, {
+  dedupKey: (todo) => todo.id,
+});
+todosWithDedup.append({ id: "123", text: "Updated Task" }); // In-place update if id exists, append if new!
 ```
 
 ---

@@ -62,14 +62,14 @@ export function createBatchHandler(procedures: Record<string, any>) {
         };
       }
 
-      if (proc._def?.type === "sse" || proc._def?.type === "stream") {
+      if (proc._def?.type === "sse") {
         return {
           id: itemId,
           result: [
             null,
             {
               message:
-                "Streaming and SSE procedures cannot be executed in an HTTP batch request",
+                "SSE procedures cannot be executed in an HTTP batch request",
               statusCode: 400,
               reason: "STREAM_BATCH_UNSUPPORTED",
             },

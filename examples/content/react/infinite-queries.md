@@ -97,7 +97,13 @@ The `useInfiniteQuery` hook accepts two arguments:
 | `onSettled` | `() => void` | — | Callback run when a query completes (success or failure). |
 | `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
 | `syncSelection` | `boolean \| ((a: TPage, b: TPage) => boolean)` | `false` | Keeps `selectedItem` in sync with latest query updates (matches by `id` by default or custom comparator). |
+| `dedupKey` | `(item: TPage) => any` | — | Key selector function for automatic in-place upsert deduplication when prepending or appending items. |
+| `arrange` | `(data: TPage[]) => TPage[]` | — | Optional callback to arrange or sort the flattened data array. |
+| `search` | `function \| object` | — | Search configuration: a filter predicate function shorthand `(item, query, i, arr) => boolean` or an object `{ filter?, initial?, mode?, debounce? }`. |
 | `args` | `TArgs` | — | Extra positional arguments passed to the procedure after the input object. |
+
+> [!TIP]
+> **Typing Cursors Globally**: By default, cursor types default to `unknown` or inferred procedure params. You can register your application's global cursor type (e.g. `number`, `string`, or compound `{ id: string; createdAt: Date }`) using [Global Type Augmentation](../advanced/type-registration.md). Once registered, `pageParam`, `initialPageParam`, and procedure `cursor` fields are automatically typed across all infinite and paginated query hooks!
 
 ---
 
@@ -105,7 +111,12 @@ The `useInfiniteQuery` hook accepts two arguments:
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `data` | `TPage[]` | Flattened array containing the combined items from all fetched pages. |
+| `data` | `TPage[]` | Flattened array containing the combined (and optionally filtered) items from all fetched pages. |
+| `unfilteredData` | `TPage[]` | The full, unfiltered flattened array of items across all fetched pages. |
+| `search` | `string` | The current search query string. |
+| `setSearch` | `(query: string) => void` | Updates search query (filters locally or debounces server fetch based on `search.mode`). |
+| `resetSearch` | `() => void` | Resets the search query back to `""` (or `search.initial`). |
+| `isFiltered` | `boolean` | `true` when a search query is actively filtering results. |
 | `pages` | `TFullPage[]` | The raw array of fetched page structures. |
 | `pageParams` | `(string \| number)[]` | The array of cursors/page parameters fetched so far. |
 | `hasNext` | `boolean` | True if another page is available to fetch. |
@@ -128,11 +139,56 @@ The `useInfiniteQuery` hook accepts two arguments:
 
 * **`remove(index | predicate)`**: Removes an item from the cache.
 * **`update(index | predicate, updater)`**: Updates an item in the cache.
-* **`prepend(item | items)`**: Inserts a new item (or array of items) at the beginning of the first page.
-* **`append(item | items)`**: Inserts a new item (or array of items) at the end of the last page.
-* **`insert(index, item | items)`**: Inserts an item (or array of items) at a specific flattened index.
+* **`prepend(item | items, options?)`**: Inserts a new item (or array of items) at the beginning of the first page. When `dedupKey` is provided (either via hook options or `{ dedupKey }` override), matches are automatically updated in-place.
+* **`append(item | items, options?)`**: Inserts a new item (or array of items) at the end of the last page. When `dedupKey` is provided (either via hook options or `{ dedupKey }` override), matches are automatically updated in-place.
+* **`insert(index, item | items, options?)`**: Inserts an item (or array of items) at a specific flattened index.
 * **`setPages(updater)`**: Direct access to mutate the pages array.
 * **`snapshot()`**: Takes a snapshot of current cache state to restore later.
 
 For full examples of cache mutations and rollbacks, see the [Cache Mutations & Rollbacks](cache-mutations.md) documentation page.
+
+---
+
+## Hybrid Search & Client Filtering
+
+`useInfiniteQuery` supports built-in hybrid search and client-side filtering via the `search` option. It accepts either a **function shorthand** or a **configuration object**:
+
+```tsx
+// Pattern 1: Function shorthand
+const {
+  data: filteredPosts,
+  unfilteredData: allPosts,
+  search,
+  setSearch,
+  resetSearch,
+  isFiltered,
+} = useInfiniteQuery(getFeedPosts, {
+  input: { limit: 10 },
+  search: (post, query) =>
+    post.title.toLowerCase().includes(query.toLowerCase()),
+});
+
+// Pattern 2: Configuration object
+const query = useInfiniteQuery(getFeedPosts, {
+  input: { limit: 10 },
+  search: {
+    filter: (post, query) =>
+      post.title.toLowerCase().includes(query.toLowerCase()),
+    initial: "", // Initial search query on mount
+    mode: "auto", // "auto" | "client-only" | "server-only"
+    debounce: 500, // Debounce in ms (or string like "500ms") before server calls
+  },
+});
+```
+
+### Search Modes
+
+* **`"auto"` (default)**:
+  * When more pages exist on the server (`hasNext === true`), calling `setSearch(query)` debounces and queries the server with `{ search: query }`, resetting pagination to page 1.
+  * Once the entire dataset has been loaded (`hasNext === false`), `useInfiniteQuery` automatically switches to instant, zero-latency client filtering in memory without making further network calls.
+* **`"client-only"`**: Never sends search queries to the server. All loaded pages are filtered in memory via the `filter` predicate.
+* **`"server-only"`**: Always fires debounced search queries to the server, resetting pagination to page 1.
+
+> [!NOTE]
+> `search.initial` seeds the search state on mount (and resets it when `queryKey` changes). To keep URL query parameters in sync, call `setSearch(q)` and update the URL in your input handler — a page refresh will then pick up the URL parameter via `search.initial`.
 

@@ -2,7 +2,7 @@ import { CacheContextHelper } from "../core/cache/types";
 import { PubSubAdapter } from "../lib/pubsub";
 
 export type WindowTime =
-  | `${number}${"s" | "m" | "h" | "d" | "w" | "M"}`
+  | `${number}${"ms" | "s" | "m" | "h" | "d" | "w" | "M"}`
   | number;
 
 export type Prettify<T> = {
@@ -26,19 +26,24 @@ export type MergeMeta<T, U> = Prettify<
   } & U
 >;
 
-export type BaseContext<TMeta, TName extends string = string> = {
+export type ProcedureType = "query" | "mutation" | "sse" | "ws" | "webRoute";
+
+export type BaseContext<TMeta = any, TName extends string = string> = {
   handlerName: TName;
+  type: ProcedureType;
   meta: TMeta;
-  /**
-   * Topic-based event distribution.
-   * Uses Redis if configured, otherwise falls back to in-memory.
-   */
-  // pubsub: PubSubAdapter;
+  pubsub: PubSubAdapter;
+  cache: CacheContextHelper<any, any>;
 };
 
 export type ExtraCtx<TCtx = unknown, TInput = unknown> = {
   pubsub: PubSubAdapter;
   cache: CacheContextHelper<TCtx, TInput>;
+};
+
+export type ExtraInput = {
+  cursor?: RegisteredCursor;
+  search?: string;
 };
 
 export type PlusMeta<T> = {
@@ -161,10 +166,7 @@ export type QueryResult<
   T = unknown,
   TInput = undefined,
   TArgs extends unknown[] = unknown[],
-> = (
-  | [T, null]
-  | [null, ErrorResponse]
-) & {
+> = ([T, null] | [null, ErrorResponse]) & {
   readonly _type?: "query";
   readonly _input?: TInput;
   readonly _args?: TArgs;
@@ -173,10 +175,7 @@ export type MutationResult<
   T = unknown,
   TInput = undefined,
   TArgs extends unknown[] = unknown[],
-> = (
-  | [T, null]
-  | [null, ErrorResponse]
-) & {
+> = ([T, null] | [null, ErrorResponse]) & {
   readonly _type?: "mutation";
   readonly _input?: TInput;
   readonly _args?: TArgs;
@@ -234,8 +233,41 @@ declare global {
      * }
      */
     interface RegisterCustomErrors {}
+
+    /**
+     * Ambient namespace to register the global cursor type for infinite and paginated queries.
+     * Defaults to `unknown` if omitted.
+     *
+     * @example
+     * declare global {
+     *   namespace ActyxRPC {
+     *     interface RegisterCursor {
+     *       cursor: number; // or string, or { id: string; createdAt: Date }
+     *     }
+     *   }
+     * }
+     */
+    interface RegisterCursor {}
   }
 }
+
+/**
+ * Register global cursor type via declaration merging.
+ *
+ * @example
+ * ```ts
+ * declare module "@explita/actyx-rpc" {
+ *   interface RegisterCursor {
+ *     cursor: number;
+ *   }
+ * }
+ * ```
+ */
+export interface RegisterCursor extends ActyxRPC.RegisterCursor {}
+
+export type RegisteredCursor = RegisterCursor extends { cursor: infer TCursor }
+  ? TCursor
+  : unknown;
 
 /**
  * Register custom error reasons globally via declaration merging.
@@ -274,23 +306,77 @@ export type CustomFailureReason =
 export type FailureReason = BuiltinFailureReason | CustomFailureReason;
 
 export type SSEEvent<T = any, TInput = undefined> = {
-  event?: string;
+  type: string;
   data: T;
   id?: string;
   retry?: number;
-  readonly _input?: TInput;
+};
+
+export type WSEvent<TData = any, TType extends string = string> = {
+  type: TType;
+  data?: TData;
+  id?: string;
+  [key: string]: any;
 };
 
 export type SubscriptionEmit<T> = (data: T) => void;
 export type SubscriptionCleanup = () => void | Promise<void>;
 export type SubscriptionResult = MaybePromise<SubscriptionCleanup>;
 
-export type WSServerHandler<Ctx = any, I = any, In = any, Out = any> = (opts: {
+export type WSServerHandler<
+  Ctx = any,
+  I = any,
+  In = any,
+  Out extends WSEvent = WSEvent,
+> = (opts: {
   ctx: Ctx;
   input: I;
-  send: (data: Out) => void;
-  broadcast?: (data: any) => void;
+  send: (event: Out) => void;
+  broadcast?: (event: Out) => void;
   onMessage: (cb: (data: In) => void) => void;
   onClose: (cb: () => void) => void;
   onError: (cb: (err: any) => void) => void;
 }) => void | Promise<void>;
+
+export type UnionToIntersection<U> = (
+  U extends any ? (k: U) => void : never
+) extends (k: infer I) => void
+  ? I
+  : never;
+
+export type IsAny<T> = 0 extends 1 & T ? true : false;
+
+export type SafeNextCtx<T> =
+  IsAny<T> extends true
+    ? {}
+    : [T] extends [never]
+      ? {}
+      : [T] extends [Record<string, any>]
+        ? T
+        : {};
+
+export type InferMiddlewareNextCtx<T> = T extends (...args: any[]) => infer R
+  ? R extends Promise<infer PR>
+    ? PR extends { _isNext: true; ctx: infer C }
+      ? SafeNextCtx<C>
+      : {}
+    : R extends { _isNext: true; ctx: infer C }
+      ? SafeNextCtx<C>
+      : {}
+  : {};
+
+export type InferPluginNextCtx<T> = T extends { onBefore: infer MW }
+  ? InferMiddlewareNextCtx<MW>
+  : {};
+
+export type MergedRootCtx<TCtx, TMiddlewares, TPlugins> = Prettify<
+  TCtx &
+    (TMiddlewares extends readonly any[]
+      ? SafeNextCtx<
+          UnionToIntersection<InferMiddlewareNextCtx<TMiddlewares[number]>>
+        >
+      : {}) &
+    (TPlugins extends readonly any[]
+      ? SafeNextCtx<UnionToIntersection<InferPluginNextCtx<TPlugins[number]>>>
+      : {})
+>;

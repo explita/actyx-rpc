@@ -71,20 +71,40 @@ export const onChatEvent = procedure
     broadcast({ type: "event", data: { message: "A user joined!" } });
 
     onMessage((data) => {
-      // Echo back to sender
-      send({ type: "event", data });
+      // 1. Transient events (like typing indicators) — broadcast only to others
+      if (data && data.type === "typing") {
+        broadcast({
+          type: "typing",
+          data: {
+            // Securely resolve user identity from authenticated connection context
+            user: {
+              id: ctx.user?.id ?? "anonymous",
+              name: ctx.user?.name ?? "Anonymous",
+            },
+            ...data.data,
+          },
+        });
+        return;
+      }
 
-      // Broadcast to others
+      // 2. Regular chat messages — echo back to sender + broadcast to others
+      send({ type: "event", data });
       broadcast({ type: "event", data });
     });
 
     onClose(() => {
-      broadcast({ type: "event", data: { message: "A user left!" } });
+      broadcast({
+        type: "event",
+        data: { message: "A user left!" },
+      });
     });
   });
 ```
 
 The adapter supports both the `ws` library (EventEmitter `.on()` style) and DOM/WHATWG WebSocket (browser, Node.js 21+) by detecting the socket API at runtime.
+
+> [!TIP]
+> **Client Normalization**: On the client (`useWS` / `useWSInfiniteQuery`), Actyx RPC automatically recognizes standard user payload fields (`user`, `author`, `sender`, or `userId`) and extracts `{ id, name }` without requiring any manual `getUser` transform. In 1-on-1 chats, the client only needs `typing: { currentUserId }` to power typing indicators.
 
 ---
 
@@ -195,6 +215,35 @@ export const onChatRoom = procedure
 ```
 
 Now when any client calls `sendMessage`, the message is saved to the database and broadcast to all connected clients across all server instances — without the WebSocket handler needing to know about the database at all.
+
+---
+
+## Ephemeral Signals & Typing Indicators
+
+Ephemeral events (such as typing indicators, mouse presence, or cursor positions) are transient: they should not be written to permanent storage like databases.
+
+When handling ephemeral signals in `.ws()`:
+1. **Never persist ephemeral events**: Broadcast them immediately using `broadcast()` (single instance) or `ctx.pubsub.publish()` (multi-instance).
+2. **Inject session identity on the server**: If the client calls `sendTyping()` without payload, use authenticated connection context (`ctx.user` or session) to populate the author information so peers receive verified identity metadata.
+3. **Use the `"typing"` event type convention**: Actyx RPC React clients (`useWS` and `useWSInfiniteQuery`) automatically detect `{ type: "typing" }` events, route them to their internal typing indicator timers, and filter them out of message history arrays automatically.
+
+```ts
+onMessage((data: any) => {
+  if (data?.type === "typing") {
+    // Forward typing event with authenticated user identity
+    broadcast({
+      type: "typing",
+      data: {
+        user: { id: ctx.user.id, name: ctx.user.name },
+        ...data.data,
+      },
+    });
+    return;
+  }
+
+  // Handle other messages...
+});
+```
 
 ---
 

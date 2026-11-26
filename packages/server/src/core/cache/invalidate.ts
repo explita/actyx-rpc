@@ -13,9 +13,10 @@ export type InvalidationContext = {
 async function evaluateInvalidationItem(
   item: CacheInvalidateKeyFn,
   opts: InvalidationContext,
+  ...args: any[]
 ): Promise<string[]> {
   if (typeof item === "function") {
-    const result = await item(opts);
+    const result = await item(opts, ...args);
     return Array.isArray(result) ? result : [result];
   }
   return Array.isArray(item) ? item : [item];
@@ -23,8 +24,8 @@ async function evaluateInvalidationItem(
 
 /**
  * Evaluates the `keys`/`patterns`/`tags` of `options` against `opts`
- * (`{ ctx, input }`) and performs the cache invalidation, honoring
- * `options.delay`.
+ * (`{ ctx, input }`) and optional positional `...args`, and performs the
+ * cache invalidation, honoring `options.delay`.
  *
  * Shared by `withInvalidation()` (the builder's `.invalidate()`) and
  * `ctx.cache.invalidate` inside terminal handlers.
@@ -33,17 +34,18 @@ export async function invalidateCache(
   cache: CacheAdapter,
   options: CacheInvalidationOptions,
   opts: InvalidationContext,
+  ...args: any[]
 ): Promise<void> {
   const delay = options.delay ?? 0;
 
   const keys = options.keys
-    ? await evaluateInvalidationItem(options.keys, opts)
+    ? await evaluateInvalidationItem(options.keys, opts, ...args)
     : [];
   const patterns = options.patterns
-    ? await evaluateInvalidationItem(options.patterns, opts)
+    ? await evaluateInvalidationItem(options.patterns, opts, ...args)
     : [];
   const tags = options.tags
-    ? await evaluateInvalidationItem(options.tags, opts)
+    ? await evaluateInvalidationItem(options.tags, opts, ...args)
     : [];
 
   const invalidate = async () => {

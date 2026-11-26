@@ -1,10 +1,33 @@
 import { SSEEvent } from "../types/misc.js";
 import { actyxStreamTracker } from "../devtools/stream-tracker.js";
+import { WindowTime } from "../types/main.js";
+import { parseWindow } from "../lib/utils.js";
+
+export class SSEHttpError extends Error {
+  statusCode: number;
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = "SSEHttpError";
+    this.statusCode = statusCode;
+  }
+}
 
 export type SSEConnectionOptions = {
+  /**
+   * Base URL for the SSE endpoint
+   */
   url: string;
+  /**
+   * URL query parameters
+   */
   params?: Record<string, any>;
+  /**
+   * Request headers
+   */
   headers?: Record<string, string>;
+  /**
+   * Abort signal for the connection
+   */
   signal?: AbortSignal;
   /**
    * Whether to register this connection in the Actyx DevTools stream tracker.
@@ -12,6 +35,12 @@ export type SSEConnectionOptions = {
    * @default true
    */
   track?: boolean;
+  /**
+   * Retry delay in milliseconds when the connection is lost or the server returns an error.
+   * Set to 0 to disable automatic reconnection.
+   * @default 3000
+   */
+  retryDelay?: WindowTime;
 };
 
 /**
@@ -79,10 +108,26 @@ export async function SSEClient<T = any>(
 
   const iterable = {
     async *[Symbol.asyncIterator]() {
-      let retryDelay = 3000;
+      let retryDelay = parseWindow(options.retryDelay ?? 3000);
       let lastEventId: string | undefined = undefined;
 
       while (!isClosed) {
+        if (options.signal?.aborted) {
+          isClosed = true;
+          break;
+        }
+
+        controller = new AbortController();
+        const onSignalAbort = () => {
+          isClosed = true;
+          controller.abort();
+        };
+        if (options.signal) {
+          options.signal.addEventListener("abort", onSignalAbort, {
+            once: true,
+          });
+        }
+
         try {
           const url = new URL(
             options.url,
@@ -100,7 +145,6 @@ export async function SSEClient<T = any>(
             url.searchParams.set("lastEventId", lastEventId);
           }
 
-          controller = new AbortController();
           const response = await fetch(url, {
             headers: {
               ...options.headers,
@@ -120,6 +164,17 @@ export async function SSEClient<T = any>(
                 streamId,
                 "error",
                 response.statusText,
+              );
+            }
+            if (
+              response.status === 401 ||
+              response.status === 403 ||
+              response.status === 404
+            ) {
+              isClosed = true;
+              throw new SSEHttpError(
+                `SSE terminated with HTTP ${response.status} (${response.statusText}). Reconnection aborted.`,
+                response.status,
               );
             }
             throw new Error(`Failed to connect to SSE: ${response.statusText}`);
@@ -150,7 +205,8 @@ export async function SSEClient<T = any>(
                   if (line.startsWith("data: ")) {
                     dataBuffer += (dataBuffer ? "\n" : "") + line.slice(6);
                   } else if (line.startsWith("event: ")) {
-                    event.event = line.slice(7);
+                    const ev = line.slice(7);
+                    event.type = ev;
                   } else if (line.startsWith("id: ")) {
                     event.id = line.slice(4);
                     lastEventId = event.id;
@@ -163,15 +219,31 @@ export async function SSEClient<T = any>(
                 }
 
                 if (dataBuffer) {
+                  let parsedData: any;
                   try {
-                    event.data = JSON.parse(dataBuffer);
+                    parsedData = JSON.parse(dataBuffer);
                   } catch {
-                    event.data = dataBuffer;
+                    parsedData = dataBuffer;
                   }
+
+                  // Detect if parsedData is already an event envelope: { type, data }
+                  const isEnvelope =
+                    parsedData !== null &&
+                    typeof parsedData === "object" &&
+                    "type" in parsedData &&
+                    "data" in parsedData;
+
+                  const type =
+                    event.type ?? (isEnvelope ? parsedData.type : "message");
+                  const data = isEnvelope ? parsedData.data : parsedData;
+
+                  event.type = type;
+                  event.data = data;
+
                   if (streamId) {
                     actyxStreamTracker.recordEvent(
                       streamId,
-                      event.event,
+                      event.type,
                       event.data,
                     );
                   }
@@ -191,13 +263,22 @@ export async function SSEClient<T = any>(
               error instanceof Error ? error.message : String(error),
             );
           }
-          if (isClosed) break;
+          if (isClosed || retryDelay <= 0) {
+            if (error instanceof SSEHttpError) {
+              throw error;
+            }
+            break;
+          }
           // Small warning for debugging, but doesn't break the client app
           console.warn(
             `SSE disconnected. Reconnecting in ${retryDelay}ms...`,
             error,
           );
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        } finally {
+          if (options.signal) {
+            options.signal.removeEventListener("abort", onSignalAbort);
+          }
         }
       }
     },

@@ -5,4 +5,5 @@ export default {
   mocking: "Mocking & Stubbing",
   openapi: "OpenAPI Spec Generation",
   observability: "Observability & Telemetry",
+  "type-registration": "Global Type Augmentation",
 };

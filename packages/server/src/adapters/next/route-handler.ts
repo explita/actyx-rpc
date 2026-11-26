@@ -69,7 +69,9 @@ export function createHandler<T extends Record<string, any>>(
       url.searchParams.has("batch") ||
       req.headers.get("x-actyx-batch") === "1" ||
       url.pathname.endsWith("/batch") ||
-      (Array.isArray(params?.rpc) && params.rpc.length === 1 && params.rpc[0] === "batch") ||
+      (Array.isArray(params?.rpc) &&
+        params.rpc.length === 1 &&
+        params.rpc[0] === "batch") ||
       (typeof params?.rpc === "string" && params.rpc === "batch");
 
     if (isBatch && req.method === "POST") {
@@ -122,17 +124,6 @@ export function createHandler<T extends Record<string, any>>(
         const iterator = current.call(httpScope, input, ...extraArgs);
         const { createSSEResponse } = await import("../../core/helpers/sse.js");
         return createSSEResponse(iterator);
-      }
-
-      if (current._def?.type === "stream") {
-        const iterator = current.call(httpScope, input, ...extraArgs);
-        const { createSSEResponse } = await import("../../core/helpers/sse.js");
-        async function* mapToSSE() {
-          for await (const val of iterator) {
-            yield { data: val };
-          }
-        }
-        return createSSEResponse(mapToSSE());
       }
 
       const [result, error] = await current.call(

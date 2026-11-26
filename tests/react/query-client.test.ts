@@ -507,5 +507,279 @@ describe("React: QueryClient Caching & Invalidation", () => {
       expect(client.getQueryState("posts|list")).toBeUndefined();
     });
   });
+
+  describe("dedupKey automatic upsert in append and prepend", () => {
+    it("should update existing item in-place in its original page on append", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [
+            { data: [{ id: 1, text: "A" }, { id: 2, text: "B" }] },
+            { data: [{ id: 3, text: "C" }] },
+          ],
+        },
+      });
+
+      // Append item with existing id: 2 in page 0
+      client.append(
+        "feed",
+        { id: 2, text: "B-updated" },
+        { dedupKey: (item: any) => item.id },
+      );
+
+      const state = client.getQueryState("feed");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([
+        { id: 1, text: "A" },
+        { id: 2, text: "B-updated" },
+      ]);
+      expect(pages[1].data).toEqual([{ id: 3, text: "C" }]);
+    });
+
+    it("should append new item to the last page when dedupKey does not match", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [
+            { data: [{ id: 1, text: "A" }] },
+            { data: [{ id: 2, text: "B" }] },
+          ],
+        },
+      });
+
+      client.append(
+        "feed",
+        { id: 3, text: "C" },
+        { dedupKey: (item: any) => item.id },
+      );
+
+      const state = client.getQueryState("feed");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([{ id: 1, text: "A" }]);
+      expect(pages[1].data).toEqual([
+        { id: 2, text: "B" },
+        { id: 3, text: "C" },
+      ]);
+    });
+
+    it("should update existing item in-place in its original page on prepend", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [
+            { data: [{ id: 1, text: "A" }] },
+            { data: [{ id: 2, text: "B" }, { id: 3, text: "C" }] },
+          ],
+        },
+      });
+
+      // Prepend item with existing id: 3 in page 1
+      client.prepend(
+        "feed",
+        { id: 3, text: "C-updated" },
+        { dedupKey: (item: any) => item.id },
+      );
+
+      const state = client.getQueryState("feed");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([{ id: 1, text: "A" }]);
+      expect(pages[1].data).toEqual([
+        { id: 2, text: "B" },
+        { id: 3, text: "C-updated" },
+      ]);
+    });
+
+    it("should prepend new item to the first page when dedupKey does not match", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [
+            { data: [{ id: 2, text: "B" }] },
+            { data: [{ id: 3, text: "C" }] },
+          ],
+        },
+      });
+
+      client.prepend(
+        "feed",
+        { id: 1, text: "A" },
+        { dedupKey: (item: any) => item.id },
+      );
+
+      const state = client.getQueryState("feed");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([
+        { id: 1, text: "A" },
+        { id: 2, text: "B" },
+      ]);
+      expect(pages[1].data).toEqual([{ id: 3, text: "C" }]);
+    });
+
+    it("should handle mixed array of existing and new items", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [
+            { data: [{ id: 1, title: "one" }] },
+            { data: [{ id: 2, title: "two" }] },
+          ],
+        },
+      });
+
+      // Append [id: 1 (update), id: 3 (new)]
+      client.append(
+        "feed",
+        [
+          { id: 1, title: "one-updated" },
+          { id: 3, title: "three-new" },
+        ],
+        { dedupKey: (item: any) => item.id },
+      );
+
+      const state = client.getQueryState("feed");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([{ id: 1, title: "one-updated" }]);
+      expect(pages[1].data).toEqual([
+        { id: 2, title: "two" },
+        { id: 3, title: "three-new" },
+      ]);
+    });
+
+    it("should support flat array data queries with dedupKey", () => {
+      const client = new QueryClient();
+      client.setQueryState("items", {
+        data: [
+          { id: 1, val: "old" },
+          { id: 2, val: "keep" },
+        ],
+      });
+
+      client.append(
+        "items",
+        { id: 1, val: "new" },
+        { dedupKey: (item: any) => item.id },
+      );
+      expect(client.getQueryState("items")?.data).toEqual([
+        { id: 1, val: "new" },
+        { id: 2, val: "keep" },
+      ]);
+
+      client.prepend(
+        "items",
+        { id: 3, val: "prepended" },
+        { dedupKey: (item: any) => item.id },
+      );
+      expect(client.getQueryState("items")?.data).toEqual([
+        { id: 3, val: "prepended" },
+        { id: 1, val: "new" },
+        { id: 2, val: "keep" },
+      ]);
+    });
+
+    it("should support query-level registered dedupKey via setQueryOptions", () => {
+      const client = new QueryClient();
+      client.setQueryOptions("messages", { dedupKey: (m: any) => m.msgId });
+      client.setQueryState("messages", {
+        data: {
+          pages: [{ data: [{ msgId: "m1", body: "hello" }] }],
+        },
+      });
+
+      // Call append without passing options - should use registered dedupKey
+      client.append("messages", { msgId: "m1", body: "hello edited" });
+
+      const state = client.getQueryState("messages");
+      const pages = (state?.data as any).pages;
+      expect(pages[0].data).toEqual([{ msgId: "m1", body: "hello edited" }]);
+    });
+
+    it("should rollback in-place update and append cleanly", () => {
+      const client = new QueryClient();
+      client.setQueryState("feed", {
+        data: {
+          pages: [{ data: [{ id: 1, text: "orig" }] }],
+        },
+      });
+
+      const rollback = client.append(
+        "feed",
+        { id: 1, text: "updated" },
+        { dedupKey: (item: any) => item.id },
+      );
+
+      expect(
+        (client.getQueryState("feed")?.data as any).pages[0].data,
+      ).toEqual([{ id: 1, text: "updated" }]);
+
+      rollback();
+
+      expect(
+        (client.getQueryState("feed")?.data as any).pages[0].data,
+      ).toEqual([{ id: 1, text: "orig" }]);
+    });
+  });
+
+  describe("prefetchQuery & prefetchInfiniteQuery tuple return", () => {
+    it("should return [data, null] on success and fresh cache hit, and [null, err] on error", async () => {
+      const client = new QueryClient();
+
+      const [d1, e1] = await client.prefetchQuery(
+        ["user", "1"],
+        async () => [{ id: "1", name: "Alice" }, null] as const,
+        { staleTime: "5m" },
+      );
+      expect(e1).toBeNull();
+      expect(d1).toEqual({ id: "1", name: "Alice" });
+      if (d1) {
+        const _name: string = d1.name;
+        expect(_name).toBe("Alice");
+      }
+
+      // Fresh cache hit returns [existing.data, null] without re-invoking fetcher
+      const fetcher = vi.fn(async () => [{ id: "1", name: "Bob" }, null] as const);
+      const [d2, e2] = await client.prefetchQuery(["user", "1"], fetcher, {
+        staleTime: "5m",
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(e2).toBeNull();
+      expect(d2).toEqual({ id: "1", name: "Alice" });
+
+      // Error tuple
+      const [d3, e3] = await client.prefetchQuery(
+        ["user", "404"],
+        async () => [null, { message: "Not found", statusCode: 404 }] as const,
+      );
+      expect(d3).toBeNull();
+      expect(e3).toEqual({ message: "Not found", statusCode: 404 });
+    });
+
+    it("should return [firstPage, null] and [null, err] from prefetchInfiniteQuery", async () => {
+      const client = new QueryClient();
+
+      const [p1, e1] = await client.prefetchInfiniteQuery(
+        ["posts"],
+        async () => [{ items: ["a", "b"], nextCursor: "c2" }, null] as const,
+        { staleTime: "5m", initialPageParam: "c1" },
+      );
+      expect(e1).toBeNull();
+      expect(p1).toEqual({ items: ["a", "b"], nextCursor: "c2" });
+
+      // Fresh cache hit returns first page from existing.data.pages[0]
+      const [p2, e2] = await client.prefetchInfiniteQuery(
+        ["posts"],
+        async () => [{ items: ["other"], nextCursor: null }, null] as const,
+        { staleTime: "5m" },
+      );
+      expect(e2).toBeNull();
+      expect(p2).toEqual({ items: ["a", "b"], nextCursor: "c2" });
+
+      const [p3, e3] = await client.prefetchInfiniteQuery(
+        ["posts-err"],
+        async () => [null, { message: "Forbidden", statusCode: 403 }] as const,
+      );
+      expect(p3).toBeNull();
+      expect(e3).toEqual({ message: "Forbidden", statusCode: 403 });
+    });
+  });
 });
 

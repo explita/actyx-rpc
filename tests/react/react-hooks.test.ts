@@ -48,6 +48,7 @@ function rerenderComponent(ui: ReactNode): void {
 import { useQuery } from "../../packages/react/src/hooks/use-query.js";
 import { useMutation } from "../../packages/react/src/hooks/use-mutation.js";
 import { useInfiniteQuery } from "../../packages/react/src/hooks/use-infinite-query.js";
+import { usePaginatedQuery } from "../../packages/react/src/hooks/use-paginated-query.js";
 import { useQueries } from "../../packages/react/src/hooks/use-queries.js";
 import type { MutationResult } from "../../packages/react/src/types/main.js";
 import { ActyxProvider } from "../../packages/react/src/provider.js";
@@ -245,10 +246,17 @@ describe("useQuery", () => {
     expect(result.data).toBe("Alice");
 
     // update writes the raw cached data (pre-select); select is re-applied on read
+    let rollback: any;
     act(() => {
-      result.update({ name: "Bob", age: 30 });
+      rollback = result.update({ name: "Bob", age: 30 });
     });
     expect(result.data).toBe("Bob");
+
+    // rollback restores the previous state
+    act(() => {
+      rollback();
+    });
+    expect(result.data).toBe("Alice");
 
     // updater receives the raw cached data
     act(() => {
@@ -645,6 +653,75 @@ describe("useMutation", () => {
 
     expect(onSettled).toHaveBeenCalledTimes(1);
   });
+
+  it("should block execution and return DISABLED error when enabled is false", async () => {
+    const qc = new QueryClient();
+    let result: any = null;
+    const action = vi.fn(async (input: { name: string }): Promise<MutationResult<{ id: number }>> => {
+      return [{ id: 1 }, null];
+    });
+
+    function TestComponent() {
+      result = useMutation(action, {
+        mutationKey: ["disabledMutation"],
+        enabled: false,
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    let mutateRes: any;
+    await act(async () => {
+      mutateRes = await result.mutate({ name: "Alice" });
+    });
+
+    expect(action).not.toHaveBeenCalled();
+    expect(mutateRes[0]).toBeNull();
+    expect(mutateRes[1]).toEqual({
+      success: false,
+      message: "Mutation is disabled",
+      reason: "DISABLED",
+      handlerName: "client",
+      statusCode: 400,
+    });
+  });
+
+  it("should support async enabled function", async () => {
+    const qc = new QueryClient();
+    let result: any = null;
+    const action = vi.fn(async (input: { name: string }): Promise<MutationResult<{ id: number }>> => {
+      return [{ id: 1 }, null];
+    });
+
+    function TestComponent() {
+      result = useMutation(action, {
+        mutationKey: ["asyncDisabledMutation"],
+        enabled: async (input) => {
+          return input.name === "allow";
+        },
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    // When condition returns false
+    let mutateRes1: any;
+    await act(async () => {
+      mutateRes1 = await result.mutate({ name: "disallow" });
+    });
+    expect(action).not.toHaveBeenCalled();
+    expect(mutateRes1[1]?.reason).toBe("DISABLED");
+
+    // When condition returns true
+    let mutateRes2: any;
+    await act(async () => {
+      mutateRes2 = await result.mutate({ name: "allow" });
+    });
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(mutateRes2[0]).toEqual({ id: 1 });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1003,6 +1080,448 @@ describe("useInfiniteQuery", () => {
     // Should NOT have called proc because refetchOnMount is false
     expect(callCount).toBe(0);
     expect(result.data).toEqual(["stale_item"]);
+  });
+
+  it("should display initialData immediately and not refetch when switching queryKey within staleTime", async () => {
+    let callCount = 0;
+    const proc = async () => {
+      callCount++;
+      return [{ data: [`fetched_${callCount}`], nextCursor: undefined }, null] as any;
+    };
+    const qc = new QueryClient();
+
+    let result: any = null;
+    let setFilterFn: any = null;
+
+    function TestComponent() {
+      const [filter, setFilter] = useState("all");
+      setFilterFn = setFilter;
+
+      const initialData =
+        filter === "all"
+          ? { pages: [{ data: ["all_1", "all_2"], nextCursor: undefined }], pageParams: [1] }
+          : { pages: [{ data: ["today_1"], nextCursor: undefined }], pageParams: [1] };
+
+      result = useInfiniteQuery(proc, {
+        queryKey: [filter],
+        initialData,
+        staleTime: 60000,
+        getNextPageParam: () => undefined,
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    // On initial mount with "all"
+    expect(result.data).toEqual(["all_1", "all_2"]);
+    expect(result.isLoading).toBe(false);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(callCount).toBe(0);
+    expect(result.data).toEqual(["all_1", "all_2"]);
+
+    // Switch filter to "today"
+    await act(async () => {
+      setFilterFn("today");
+    });
+
+    // Should immediately display "today" initialData without blank/loading or network fetch
+    expect(result.data).toEqual(["today_1"]);
+    expect(result.isLoading).toBe(false);
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(callCount).toBe(0);
+    expect(result.data).toEqual(["today_1"]);
+  });
+
+  it("should support client-side filtering via filter, search, setSearch, resetSearch, isFiltered, and unfilteredData in useInfiniteQuery", async () => {
+    const page1 = {
+      data: [
+        { id: 1, title: "Buy groceries" },
+        { id: 2, title: "Clean room" },
+      ],
+      nextCursor: "cursor-2",
+    };
+    const page2 = {
+      data: [
+        { id: 3, title: "Buy milk" },
+        { id: 4, title: "Read book" },
+      ],
+      nextCursor: undefined,
+    };
+    let pageCount = 0;
+    const pages = [page1, page2];
+    const proc = vi.fn().mockImplementation(async () => {
+      const page = pages[pageCount] || pages[pages.length - 1];
+      pageCount++;
+      return [page, null] as const;
+    });
+
+    const qc = new QueryClient();
+    let result: any = null;
+
+    function TestComponent() {
+      result = useInfiniteQuery(proc, {
+        queryKey: ["todos-infinite-filter"],
+        input: {},
+        getNextPageParam: (lastPage: any) => lastPage?.nextCursor,
+        search: (item: { id: number; title: string }, query: string) =>
+          item.title.toLowerCase().includes(query.toLowerCase()),
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // 1. Initial state: Page 1 loaded
+    expect(result.data).toEqual(page1.data);
+    expect(result.unfilteredData).toEqual(page1.data);
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
+    expect(result.isEmpty).toBe(false);
+
+    // 2. Fetch next page
+    await act(async () => {
+      await result.fetchNext();
+    });
+    const allTodos = [...page1.data, ...page2.data];
+    expect(result.unfilteredData).toEqual(allTodos);
+    expect(result.data).toEqual(allTodos);
+
+    // 3. Filter by "Buy"
+    await act(async () => {
+      result.setSearch("Buy");
+    });
+    expect(result.search).toBe("Buy");
+    expect(result.isFiltered).toBe(true);
+    expect(result.data).toEqual([
+      { id: 1, title: "Buy groceries" },
+      { id: 3, title: "Buy milk" },
+    ]);
+    expect(result.unfilteredData).toEqual(allTodos);
+
+    // 4. Non-matching query
+    await act(async () => {
+      result.setSearch("nonexistent");
+    });
+    expect(result.isFiltered).toBe(true);
+    expect(result.data).toEqual([]);
+    expect(result.unfilteredData).toEqual(allTodos);
+    expect(result.isEmpty).toBe(true);
+    expect(result.isLoading).toBe(false);
+
+    // 5. resetSearch restores full dataset
+    await act(async () => {
+      result.resetSearch();
+    });
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
+    expect(result.data).toEqual(allTodos);
+
+    // 6. Reset hook clears search and data
+    await act(async () => {
+      result.setSearch("Buy");
+    });
+    expect(result.data).toHaveLength(2);
+    await act(async () => {
+      result.reset();
+    });
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
+    expect(result.data).toEqual([]);
+  });
+
+  it("should respect initialSearch with filter in useInfiniteQuery", async () => {
+    const page = {
+      data: ["apple", "banana", "apricot", "cherry"],
+      nextCursor: undefined,
+    };
+    const proc = createMockProc(page);
+    const qc = new QueryClient();
+    let result: any = null;
+
+    function TestComponent() {
+      result = useInfiniteQuery(proc, {
+        queryKey: ["fruits-infinite-filter"],
+        input: {},
+        search: {
+          initial: "ap",
+          mode: "client-only",
+          filter: (item: string, query: string) => item.includes(query),
+        },
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(result.search).toBe("ap");
+    expect(result.isFiltered).toBe(true);
+    expect(result.data).toEqual(["apple", "apricot"]);
+    expect(result.unfilteredData).toEqual(["apple", "banana", "apricot", "cherry"]);
+  });
+
+  it("should forward pageInput and primitive extra args without corrupting positional params in useInfiniteQuery", async () => {
+    let capturedArgs: any[] = [];
+    const proc = vi.fn(async (...args: any[]) => {
+      capturedArgs = args;
+      return [{ data: ["item1"], nextCursor: undefined }, null];
+    });
+
+    const qc = new QueryClient();
+    let result: any = null;
+
+    function TestComponent() {
+      result = useInfiniteQuery(
+        proc as any,
+        {
+          queryKey: ["primitive-extra-args"],
+          getNextPageParam: () => undefined,
+        },
+        "wale",
+        42,
+      );
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(result.data).toEqual(["item1"]);
+    expect(capturedArgs.length).toBe(3);
+    expect(capturedArgs[0]).toEqual({ cursor: undefined, search: undefined });
+    expect(capturedArgs[1]).toBe("wale");
+    expect(capturedArgs[2]).toBe(42);
+  });
+
+  it("should send initialSearch to server on mount when searchMode is not client-only", async () => {
+    let capturedInput: any = null;
+    const proc = vi.fn(async (input: any) => {
+      capturedInput = input;
+      return [{ data: ["user-1"], nextCursor: undefined }, null];
+    });
+
+    const qc = new QueryClient();
+
+    function TestComponent() {
+      useInfiniteQuery(proc, {
+        queryKey: ["initial-server-search"],
+        search: { initial: "ade" },
+        getNextPageParam: () => undefined,
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(capturedInput).toEqual({ cursor: undefined, search: "ade" });
+  });
+
+  it("should support dedupKey automatic upsert on useInfiniteQuery append and prepend", async () => {
+    const proc = vi.fn().mockImplementation(async () => {
+      return [
+        {
+          data: [
+            { id: 1, text: "First" },
+            { id: 2, text: "Second" },
+          ],
+          hasMore: false,
+          nextCursor: null,
+        },
+        null,
+      ];
+    });
+
+    const qc = new QueryClient();
+    let hookResult: any;
+
+    function TestComponent() {
+      hookResult = useInfiniteQuery(proc, {
+        queryKey: ["inf-dedup-test"],
+        dedupKey: (item: any) => item.id,
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(hookResult.data).toEqual([
+      { id: 1, text: "First" },
+      { id: 2, text: "Second" },
+    ]);
+
+    // Append existing item -> updates in place
+    await act(async () => {
+      hookResult.append({ id: 2, text: "Second-updated" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: 1, text: "First" },
+      { id: 2, text: "Second-updated" },
+    ]);
+
+    // Append new item -> appends to end
+    await act(async () => {
+      hookResult.append({ id: 3, text: "Third" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: 1, text: "First" },
+      { id: 2, text: "Second-updated" },
+      { id: 3, text: "Third" },
+    ]);
+
+    // Prepend existing item -> updates in place
+    await act(async () => {
+      hookResult.prepend({ id: 1, text: "First-updated" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: 1, text: "First-updated" },
+      { id: 2, text: "Second-updated" },
+      { id: 3, text: "Third" },
+    ]);
+
+    // Prepend new item -> prepends to start
+    await act(async () => {
+      hookResult.prepend({ id: 0, text: "Zero" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: 0, text: "Zero" },
+      { id: 1, text: "First-updated" },
+      { id: 2, text: "Second-updated" },
+      { id: 3, text: "Third" },
+    ]);
+  });
+
+  it("should send initial search to server on mount in auto mode even when filter is provided", async () => {
+    let capturedInput: any = null;
+    const proc = vi.fn(async (input: any) => {
+      capturedInput = input;
+      return [{ data: ["user-1"], nextCursor: undefined }, null];
+    });
+
+    const qc = new QueryClient();
+
+    function TestComponent() {
+      useInfiniteQuery(proc, {
+        queryKey: ["initial-server-search-with-filter"],
+        search: {
+          initial: "ade",
+          filter: (item: any, q: string) => true,
+        },
+        getNextPageParam: () => undefined,
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(capturedInput).toEqual({ cursor: undefined, search: "ade" });
+  });
+
+  it("should support client-side filtering via filter, search, setSearch, resetSearch, isFiltered, and unfilteredData in usePaginatedQuery", async () => {
+    const page = {
+      data: [
+        { id: 1, title: "Buy groceries" },
+        { id: 2, title: "Clean room" },
+        { id: 3, title: "Buy milk" },
+      ],
+      nextCursor: undefined,
+    };
+    const proc = createMockProc(page);
+    const qc = new QueryClient();
+    let result: any = null;
+
+    function TestComponent() {
+      result = usePaginatedQuery(proc, {
+        queryKey: ["todos-paginated-filter"],
+        input: {},
+        search: (item: { id: number; title: string }, query: string) =>
+          item.title.toLowerCase().includes(query.toLowerCase()),
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(result.data).toEqual(page.data);
+    expect(result.unfilteredData).toEqual(page.data);
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
+    expect(result.isEmpty).toBe(false);
+
+    // Filter by "Buy"
+    await act(async () => {
+      result.setSearch("Buy");
+    });
+    expect(result.search).toBe("Buy");
+    expect(result.isFiltered).toBe(true);
+    expect(result.data).toEqual([
+      { id: 1, title: "Buy groceries" },
+      { id: 3, title: "Buy milk" },
+    ]);
+    expect(result.unfilteredData).toEqual(page.data);
+
+    // Non-matching query
+    await act(async () => {
+      result.setSearch("nonexistent");
+    });
+    expect(result.isFiltered).toBe(true);
+    expect(result.data).toEqual([]);
+    expect(result.unfilteredData).toEqual(page.data);
+    expect(result.isEmpty).toBe(true);
+    expect(result.isLoading).toBe(false);
+
+    // resetSearch
+    await act(async () => {
+      result.resetSearch();
+    });
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
+    expect(result.data).toEqual(page.data);
+
+    // Reset clears search and data
+    await act(async () => {
+      result.setSearch("Buy");
+    });
+    expect(result.data).toHaveLength(2);
+    await act(async () => {
+      result.reset();
+    });
+    expect(result.search).toBe("");
+    expect(result.isFiltered).toBe(false);
   });
 });
 
@@ -2003,6 +2522,82 @@ describe("Client normalization for Axios and custom HTTP methods", () => {
     expect(hookResult.data).toEqual(["a", "b"]);
   });
 
+  it("should support dedupKey automatic upsert on useQuery append and prepend", async () => {
+    const mockFetch = vi.fn().mockImplementation(async () => {
+      return new Response(
+        JSON.stringify([
+          { id: "1", name: "Alpha" },
+          { id: "2", name: "Beta" },
+        ]),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const client = createClient<any>({
+      baseUrl: "http://localhost/api/rpc",
+      fetch: mockFetch,
+    });
+
+    let hookResult: any = null;
+    function Comp() {
+      hookResult = client.todos.list.useQuery({
+        queryKey: ["todos-dedup"],
+        dedupKey: (item: any) => item.id,
+      });
+      return null;
+    }
+    renderComponent(h(ActyxProvider, { client: new QueryClient() }, h(Comp)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(hookResult.data).toEqual([
+      { id: "1", name: "Alpha" },
+      { id: "2", name: "Beta" },
+    ]);
+
+    // Append existing item -> updates in place
+    await act(async () => {
+      hookResult.append({ id: "1", name: "Alpha-updated" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: "1", name: "Alpha-updated" },
+      { id: "2", name: "Beta" },
+    ]);
+
+    // Append new item -> appends to end
+    await act(async () => {
+      hookResult.append({ id: "3", name: "Gamma" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: "1", name: "Alpha-updated" },
+      { id: "2", name: "Beta" },
+      { id: "3", name: "Gamma" },
+    ]);
+
+    // Prepend existing item -> updates in place
+    await act(async () => {
+      hookResult.prepend({ id: "2", name: "Beta-updated" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: "1", name: "Alpha-updated" },
+      { id: "2", name: "Beta-updated" },
+      { id: "3", name: "Gamma" },
+    ]);
+
+    // Prepend new item -> prepends to start
+    await act(async () => {
+      hookResult.prepend({ id: "0", name: "Zero" });
+    });
+    expect(hookResult.data).toEqual([
+      { id: "0", name: "Zero" },
+      { id: "1", name: "Alpha-updated" },
+      { id: "2", name: "Beta-updated" },
+      { id: "3", name: "Gamma" },
+    ]);
+  });
+
   it("should support proxy procedure helpers: getQueryKey, getQueryData, setQueryData, reset, isFetching, isMutating", async () => {
     const mockFetch = vi.fn(async () => {
       return new Response(JSON.stringify({ data: ["todo 1", "todo 2"], success: true }), {
@@ -2060,6 +2655,664 @@ describe("Client normalization for Axios and custom HTTP methods", () => {
 
     expect(typeof client.todos.list.useSSEInfiniteQuery).toBe("function");
     expect(typeof client.todos.list.useWSInfiniteQuery).toBe("function");
+  });
+
+  it("should support client-side filtering via filter, search, setSearch, resetSearch, isFiltered, and unfilteredData", async () => {
+    const todos = [
+      { id: 1, title: "Buy groceries" },
+      { id: 2, title: "Clean room" },
+      { id: 3, title: "Buy milk" },
+    ];
+    const proc = createMockProc(todos);
+    const qc = new QueryClient();
+    let hookResult: any;
+
+    function TestComponent() {
+      hookResult = useQuery(proc, {
+        queryKey: ["todos-filtered"],
+        search: (item: { id: number; title: string }, query: string) =>
+          item.title.toLowerCase().includes(query.toLowerCase()),
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // 1. Initial fetched state: search is empty, unfilteredData & data both contain all 3 items
+    expect(hookResult.data).toEqual(todos);
+    expect(hookResult.unfilteredData).toEqual(todos);
+    expect(hookResult.search).toBe("");
+    expect(hookResult.isFiltered).toBe(false);
+    expect(hookResult.isEmpty).toBe(false);
+    expect(hookResult.isLoading).toBe(false);
+
+    // 2. Filter by "Buy"
+    await act(async () => {
+      hookResult.setSearch("Buy");
+    });
+    expect(hookResult.search).toBe("Buy");
+    expect(hookResult.isFiltered).toBe(true);
+    expect(hookResult.data).toEqual([
+      { id: 1, title: "Buy groceries" },
+      { id: 3, title: "Buy milk" },
+    ]);
+    expect(hookResult.unfilteredData).toEqual(todos);
+    expect(hookResult.isEmpty).toBe(false);
+
+    // 3. Filter by non-matching query
+    await act(async () => {
+      hookResult.setSearch("nonexistent");
+    });
+    expect(hookResult.search).toBe("nonexistent");
+    expect(hookResult.isFiltered).toBe(true);
+    expect(hookResult.data).toEqual([]);
+    expect(hookResult.unfilteredData).toEqual(todos);
+    expect(hookResult.isEmpty).toBe(true);
+    // Crucial check: isLoading remains false even though data is empty because source is not empty
+    expect(hookResult.isLoading).toBe(false);
+
+    // 4. resetSearch restores full dataset
+    await act(async () => {
+      hookResult.resetSearch();
+    });
+    expect(hookResult.search).toBe("");
+    expect(hookResult.isFiltered).toBe(false);
+    expect(hookResult.data).toEqual(todos);
+    expect(hookResult.isEmpty).toBe(false);
+
+    // 5. Query reset resets both search and query cache
+    await act(async () => {
+      hookResult.setSearch("groceries");
+    });
+    expect(hookResult.data).toHaveLength(1);
+    await act(async () => {
+      hookResult.reset();
+    });
+    expect(hookResult.search).toBe("");
+    expect(hookResult.isFiltered).toBe(false);
+    expect(hookResult.data).toBeUndefined();
+  });
+
+  it("should respect initialSearch with filter", async () => {
+    const items = ["apple", "banana", "apricot", "cherry"];
+    const proc = createMockProc(items);
+    const qc = new QueryClient();
+    let hookResult: any;
+
+    function TestComponent() {
+      hookResult = useQuery(proc, {
+        queryKey: ["fruits-filtered"],
+        search: {
+          initial: "ap",
+          filter: (item: string, query: string) => item.includes(query),
+        },
+      });
+      return null;
+    }
+
+    renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(hookResult.search).toBe("ap");
+    expect(hookResult.isFiltered).toBe(true);
+    expect(hookResult.data).toEqual(["apple", "apricot"]);
+    expect(hookResult.unfilteredData).toEqual(items);
+  });
+
+  describe("Hybrid Search in Paginated / Infinite Queries", () => {
+    it("should perform server search when hasNext is true in auto mode", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        if (input?.search === "fruit") {
+          return [
+            {
+              data: ["fruit-apple", "fruit-pear"],
+              hasMore: false,
+              nextCursor: null,
+            },
+            null,
+          ];
+        }
+        return [
+          {
+            data: ["item-1", "item-2"],
+            hasMore: true,
+            nextCursor: 2,
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["hybrid-server-search"],
+          input: { category: "all" },
+          search: {
+            debounce: 20,
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+      expect(calls[0]).toEqual({ category: "all", cursor: undefined, search: undefined });
+      expect(hookResult.hasNext).toBe(true);
+      expect(hookResult.data).toEqual(["item-1", "item-2"]);
+
+      // Because hasNext is true, setSearch should trigger server search
+      await act(async () => {
+        hookResult.setSearch("fruit");
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(2);
+      expect(calls[1]).toEqual({ category: "all", cursor: undefined, search: "fruit" });
+      expect(hookResult.data).toEqual(["fruit-apple", "fruit-pear"]);
+      expect(hookResult.hasNext).toBe(false);
+    });
+
+    it("should perform client search (0 network calls) when hasNext is false in auto mode", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: ["alpha", "beta", "gamma", "alphabet"],
+            hasMore: false,
+            nextCursor: null,
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["hybrid-client-search"],
+          search: (item: string, q: string) => item.includes(q),
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+      expect(hookResult.hasNext).toBe(false);
+      expect(hookResult.data).toEqual(["alpha", "beta", "gamma", "alphabet"]);
+
+      // hasNext is false -> fullDatasetLoaded! Setting search must filter locally in 0ms without server call
+      await act(async () => {
+        hookResult.setSearch("alph");
+      });
+
+      expect(calls.length).toBe(1); // No new network call!
+      expect(hookResult.search).toBe("alph");
+      expect(hookResult.isFiltered).toBe(true);
+      expect(hookResult.data).toEqual(["alpha", "alphabet"]);
+      expect(hookResult.unfilteredData).toEqual(["alpha", "beta", "gamma", "alphabet"]);
+    });
+
+    it("should respect client-only searchMode override even when hasNext is true", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: ["one", "two", "three"],
+            hasMore: true,
+            nextCursor: 2,
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["client-only-override"],
+          search: {
+            mode: "client-only",
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+      expect(hookResult.hasNext).toBe(true);
+
+      await act(async () => {
+        hookResult.setSearch("tw");
+      });
+
+      expect(calls.length).toBe(1); // 0 additional server calls!
+      expect(hookResult.data).toEqual(["two"]);
+    });
+
+    it("should respect server-only search override even when hasNext is false and debounce", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: input?.search === "custom" ? ["custom-result"] : ["item-1"],
+            hasMore: false,
+            nextCursor: null,
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["server-only-override"],
+          search: {
+            mode: "server-only",
+            debounce: 20,
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+      expect(hookResult.hasNext).toBe(false);
+
+      await act(async () => {
+        hookResult.setSearch("custom");
+        await new Promise((r) => setTimeout(r, 60));
+      });
+
+      expect(calls.length).toBe(2);
+      expect(calls[1].search).toBe("custom");
+      expect(hookResult.data).toEqual(["custom-result"]);
+    });
+
+    it("should respect global search configured on QueryClient default options", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: ["one", "two", "three"],
+            hasMore: true,
+            nextCursor: "c2",
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient({
+        queries: {
+          search: {
+            mode: "client-only",
+          },
+        },
+      });
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["global-searchmode-test"],
+          search: (item: string, q: string) => item.includes(q),
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+      expect(hookResult.hasNext).toBe(true);
+
+      // Search locally despite hasNext being true because global searchMode is client-only
+      await act(async () => {
+        hookResult.setSearch("two");
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1); // No new network call
+      expect(hookResult.data).toEqual(["two"]);
+    });
+
+    it("onsite search should take precedence over global search from QueryClient", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: input?.search === "two" ? ["server-two"] : ["one", "two", "three"],
+            hasMore: true,
+            nextCursor: "c2",
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient({
+        queries: {
+          search: {
+            mode: "client-only",
+          },
+        },
+      });
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["onsite-override-global-test"],
+          search: {
+            mode: "server-only",
+            debounce: 20,
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1);
+
+      await act(async () => {
+        hookResult.setSearch("two");
+        await new Promise((r) => setTimeout(r, 60));
+      });
+
+      // Onsite server-only overrides global client-only
+      expect(calls.length).toBe(2);
+      expect(calls[1].search).toBe("two");
+      expect(hookResult.data).toEqual(["server-two"]);
+    });
+
+    it("should debounce rapid server searches and only fire the latest", async () => {
+      const calls: any[] = [];
+      const proc = vi.fn(async (input: any) => {
+        calls.push(input);
+        return [
+          {
+            data: [`result-${input?.search}`],
+            hasMore: true,
+            nextCursor: "c2",
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["debounce-rapid-test"],
+          search: { mode: "server-only", debounce: 50 },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(calls.length).toBe(1); // Initial fetch
+
+      // Rapidly type "a", "ab", "abc"
+      await act(async () => {
+        hookResult.setSearch("a");
+        hookResult.setSearch("ab");
+        hookResult.setSearch("abc");
+      });
+
+      // Still 1 call because debounce timer has not elapsed
+      expect(calls.length).toBe(1);
+
+      // Wait for debounce timer to fire
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 80));
+      });
+
+      // Exactly 1 additional call fired with "abc"
+      expect(calls.length).toBe(2);
+      expect(calls[1].search).toBe("abc");
+    });
+
+    it("should not filter partial data locally while server search is pending or in flight", async () => {
+      let resolveSearchPromise: ((val: any) => void) | null = null;
+      const proc = vi.fn(async (input: any) => {
+        if (input?.search === "zebra") {
+          return new Promise((resolve) => {
+            resolveSearchPromise = resolve;
+          });
+        }
+        return [
+          {
+            data: ["apple", "banana"],
+            hasMore: true,
+            nextCursor: "c2",
+          },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any;
+
+      function TestComp() {
+        hookResult = useInfiniteQuery(proc, {
+          queryKey: ["no-premature-filter-test"],
+          search: {
+            mode: "auto",
+            debounce: 20,
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComp)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+
+      expect(hookResult.data).toEqual(["apple", "banana"]);
+      expect(hookResult.hasNext).toBe(true);
+
+      // User searches for "zebra" which does NOT match "apple" or "banana"
+      await act(async () => {
+        hookResult.setSearch("zebra");
+      });
+
+      // Data is NOT wiped out locally while server search is debounced / pending!
+      expect(hookResult.data).toEqual(["apple", "banana"]);
+
+      // Wait for debounce to fire the server call
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 30));
+      });
+
+      // Server is in flight, data still not falsely filtered to empty
+      expect(hookResult.data).toEqual(["apple", "banana"]);
+
+      // Server search resolves
+      await act(async () => {
+        resolveSearchPromise!([
+          {
+            data: ["zebra-1"],
+            hasMore: false,
+            nextCursor: null,
+          },
+          null,
+        ]);
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(hookResult.data).toEqual(["zebra-1"]);
+    });
+
+    it("should reset search state to initialSearch when queryKey changes", async () => {
+      const proc = vi.fn(async () => [
+        { data: ["apple", "banana"], hasMore: false, nextCursor: null },
+        null,
+      ]);
+
+      const qc = new QueryClient();
+      let hookResult: any = null;
+
+      function TestComponent({ room }: { room: string }) {
+        hookResult = useInfiniteQuery(proc as any, {
+          queryKey: ["items", room],
+          getNextPageParam: (p: any) => p.nextCursor,
+          search: {
+            mode: "client-only",
+            initial: "",
+            filter: (item: string, q: string) => item.includes(q),
+          },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent, { room: "room-1" })));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      act(() => {
+        hookResult.setSearch("apple");
+      });
+      expect(hookResult.search).toBe("apple");
+      expect(hookResult.data).toEqual(["apple"]);
+
+      // Switch queryKey -> search should reset to initialSearch ("")
+      await act(async () => {
+        renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent, { room: "room-2" })));
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(hookResult.search).toBe("");
+      expect(hookResult.data).toEqual(["apple", "banana"]);
+    });
+
+    it("should ignore stale out-of-order server search responses", async () => {
+      let resolveSlow!: (v: any) => void;
+      let resolveFast!: (v: any) => void;
+
+      const proc = vi.fn(async (opts: any) => {
+        if (opts?.search === "ch") {
+          return new Promise((r) => {
+            resolveSlow = r;
+          });
+        }
+        if (opts?.search === "chris") {
+          return new Promise((r) => {
+            resolveFast = r;
+          });
+        }
+        return [
+          { data: ["init"], hasMore: true, nextCursor: "p2" },
+          null,
+        ];
+      });
+
+      const qc = new QueryClient();
+      let hookResult: any = null;
+
+      function TestComponent() {
+        hookResult = useInfiniteQuery(proc as any, {
+          queryKey: ["schools-race"],
+          getNextPageParam: (p: any) => p.nextCursor,
+          search: { mode: "server-only", debounce: 10 },
+        });
+        return null;
+      }
+
+      renderComponent(h(ActyxProvider, { client: qc }, h(TestComponent)));
+
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // Trigger first slow search ("ch")
+      act(() => {
+        hookResult.setSearch("ch");
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+      });
+
+      // Trigger second faster search ("chris")
+      act(() => {
+        hookResult.setSearch("chris");
+      });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 25));
+      });
+
+      // Fast search ("chris") resolves first
+      await act(async () => {
+        resolveFast([{ data: ["Christian School"], hasMore: false, nextCursor: null }, null]);
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(hookResult.data).toEqual(["Christian School"]);
+
+      // Slow stale search ("ch") resolves later -> MUST NOT overwrite "Christian School"
+      await act(async () => {
+        resolveSlow([{ data: ["Charter School"], hasMore: false, nextCursor: null }, null]);
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(hookResult.data).toEqual(["Christian School"]);
+    });
   });
 });
 

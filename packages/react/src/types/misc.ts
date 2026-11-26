@@ -15,10 +15,7 @@ export type QueryResult<
   T = unknown,
   TInput = undefined,
   TArgs extends unknown[] = unknown[],
-> = (
-  | [T, null]
-  | [null, ErrorResponse]
-) & {
+> = ([T, null] | [null, ErrorResponse]) & {
   readonly _type?: "query";
   readonly _input?: TInput;
   readonly _args?: TArgs;
@@ -39,10 +36,7 @@ export type MutationResult<
   T = unknown,
   TInput = undefined,
   TArgs extends unknown[] = unknown[],
-> = (
-  | [T, null]
-  | [null, ErrorResponse]
-) & {
+> = ([T, null] | [null, ErrorResponse]) & {
   readonly _type?: "mutation";
   readonly _input?: TInput;
   readonly _args?: TArgs;
@@ -61,13 +55,12 @@ export type Timeout = ReturnType<typeof setTimeout>;
  * @template TInput - The validated input type (phantom brand for inference).
  */
 export type SSEEvent<T = any, TInput = undefined> = {
-  /** Optional named event type (maps to SSE `event:` field). */
-  event?: string;
+  /** Event type (e.g. "message", "new-notification"). */
+  type: string;
   /** The parsed event data payload. */
   data: T;
   /** Optional event ID for resumption (maps to SSE `id:` field). */
   id?: string;
   /** Optional reconnection delay hint in milliseconds (maps to SSE `retry:` field). */
   retry?: number;
-  readonly _input?: TInput;
 };

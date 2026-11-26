@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import type { ErrorResponse, MutationResult } from "../types/main.js";
+import type {
+  DropActionContext,
+  ErrorResponse,
+  MutationResult,
+} from "../types/main.js";
 import type {
   MutationStatus,
   UseMutationOpts,
@@ -46,14 +50,20 @@ import { hasFile, objectToFormData } from "../lib/client-helpers.js";
  */
 export function useMutation<
   TAction extends (...args: any[]) => Promise<any>,
-  TOutput = Extract<Awaited<ReturnType<TAction>>, [any, null]>[0],
-  TArgs extends any[] = Parameters<TAction>,
   TContext = unknown,
+  TOutput = Extract<Awaited<ReturnType<TAction>>, [any, null]>[0],
+  TArgs extends any[] = DropActionContext<Parameters<TAction>, TContext>,
   TMutationKey extends unknown[] = unknown[],
 >(
   action: TAction,
-  opts?: UseMutationOpts<TOutput, Parameters<TAction>, TContext, TMutationKey>,
-): UseMutationResult<TOutput, Parameters<TAction>, TContext, TAction>;
+  opts?: UseMutationOpts<
+    TOutput,
+    Parameters<TAction>,
+    TContext,
+    TMutationKey,
+    TAction
+  >,
+): UseMutationResult<TOutput, TArgs, TContext, TAction>;
 
 /**
  * React hook for executing mutations against a raw URL endpoint (e.g. file upload or REST webhook).
@@ -119,11 +129,11 @@ export function useMutation<
     onBefore: opts?.onBefore,
     onSuccess: (result: any, mutationContext: any, ...args: any[]) => {
       opts?.onSuccess?.(result, mutationContext, ...args);
-      mutationDefaults?.onSuccess?.(result, ...args, mutationContext);
+      mutationDefaults?.onSuccess?.(result, mutationContext, ...args);
     },
     onError: (error: ErrorResponse, mutationContext: any, ...args: any[]) => {
       opts?.onError?.(error, mutationContext, ...args);
-      mutationDefaults?.onError?.(error, ...args, mutationContext);
+      mutationDefaults?.onError?.(error, mutationContext, ...args);
     },
     onMutate: async (...args: any[]) => {
       await mutationDefaults?.onMutate?.(...args);
@@ -136,11 +146,12 @@ export function useMutation<
       ...args: any[]
     ) => {
       opts?.onSettled?.(result, error, mutationContext, ...args);
-      mutationDefaults?.onSettled?.(result, error, ...args, mutationContext);
+      mutationDefaults?.onSettled?.(result, error, mutationContext, ...args);
     },
     optimisticUpdate: opts?.optimisticUpdate,
     onProgress: opts?.onProgress,
     onValidationErrors: opts?.onValidationErrors,
+    enabled: opts?.enabled,
   });
 
   if (typeof opts?.__setProgress === "function") {
@@ -177,6 +188,7 @@ export function useMutation<
       optimisticUpdate: opts?.optimisticUpdate,
       onProgress: opts?.onProgress,
       onValidationErrors: opts?.onValidationErrors,
+      enabled: opts?.enabled,
     };
   });
 
@@ -216,6 +228,25 @@ export function useMutation<
 
   const executeImmediately = useCallback(
     async (...args: TArgs): Promise<MutationResult<TOutput>> => {
+      if (callbacksRef.current.enabled !== undefined) {
+        const isEnabled =
+          typeof callbacksRef.current.enabled === "function"
+            ? await callbacksRef.current.enabled(...args)
+            : callbacksRef.current.enabled;
+
+        if (!isEnabled) {
+          return [
+            null,
+            {
+              success: false,
+              message: "Mutation is disabled",
+              reason: "DISABLED",
+              handlerName: "client",
+              statusCode: 400,
+            },
+          ];
+        }
+      }
       const generation = generationRef.current;
 
       if (mutationKey && queryClient.isMutating(mutationKey)) {
@@ -440,7 +471,10 @@ export function useMutation<
             };
           }
         } else {
-          const res = await action(...args);
+          const hasMutateHook = mutationContext !== undefined;
+          const res = hasMutateHook
+            ? await action(...args, mutationContext)
+            : await action(...args);
           result = res[0];
           err = res[1];
         }
@@ -472,7 +506,13 @@ export function useMutation<
           const error: ErrorResponse =
             typeof err === "object"
               ? ({ ...err, success: false, message } as ErrorResponse)
-              : { success: false, message, reason: "UNEXPECTED_ERROR", handlerName: "", statusCode: 500 };
+              : {
+                  success: false,
+                  message,
+                  reason: "UNEXPECTED_ERROR",
+                  handlerName: "",
+                  statusCode: 500,
+                };
           setError(error);
 
           if (err.reason === "VALIDATION_ERROR" && err.errors) {
@@ -556,12 +596,7 @@ export function useMutation<
         };
 
         setError(error);
-        queryClient.recordMutationEnd(
-          mutationLogId,
-          "error",
-          undefined,
-          error,
-        );
+        queryClient.recordMutationEnd(mutationLogId, "error", undefined, error);
         callbacksRef.current.onError?.(error, mutationContext, ...args);
         callbacksRef.current.onSettled?.(
           undefined,

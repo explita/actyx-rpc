@@ -2,10 +2,10 @@ import type {
   CacheAdapter,
   CacheConfig,
   CacheInvalidationConfig,
-  CacheInvalidationOptions,
+  CacheInvalidationOptionsInput,
   RateLimitConfig,
   RateLimitOptions,
-  WithCacheOptions,
+  WithCacheOptionsInput,
 } from "../core/cache/types.js";
 import type {
   CircuitBreakerConfig,
@@ -18,7 +18,12 @@ import type {
 } from "../core/compression/types.js";
 import type { RetryConfig, RetryOptions } from "../core/retry/types.js";
 import type { TimeoutConfig, TimeoutOptions } from "../core/timeout/types.js";
-import type { Middleware, Plugin } from "./middleware.js";
+import type {
+  Middleware,
+  Plugin,
+  RootMiddleware,
+  RootPlugin,
+} from "./middleware.js";
 import type {
   BaseContext,
   ContextResult,
@@ -38,6 +43,9 @@ import type {
   SchemaOrStandard,
   InferSchemaOutput,
   SSEEvent,
+  WSEvent,
+  ProcedureType,
+  ExtraInput,
 } from "./misc.js";
 
 export interface ProcedureDefinition<
@@ -60,14 +68,7 @@ export type ProcedureConfig<
   TMeta extends Record<string, any> = {},
 > = {
   name: string;
-  type?:
-    | "mutation"
-    | "query"
-    | "webRoute"
-    | "stream"
-    | "sse"
-    | "ws"
-    | "subscription";
+  type?: ProcedureType;
   resolver?: SchemaResolver<any>;
   outputResolver?: SchemaResolver<any>;
   middlewares?: Middleware<TCtx, TEnrich, any, any, TMeta>[];
@@ -298,15 +299,28 @@ export interface ProcedureInstance<
    *   .mutation(async () => { ... });
    * ```
    */
-  invalidate: (
-    options: CacheInvalidationOptions<
-      Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
-      [I] extends [void] ? TEnrich : Prettify<TEnrich & I>
-    >,
-  ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
-    "mutation" | "webRoute"
-  >;
+  invalidate: {
+    (
+      options: CacheInvalidationOptionsInput<
+        Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+        [I] extends [void] ? TEnrich : Prettify<TEnrich & I>,
+        any[]
+      >,
+    ): Pick<
+      ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+      "mutation" | "webRoute"
+    >;
+    <P extends unknown[]>(
+      options: CacheInvalidationOptionsInput<
+        Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+        [I] extends [void] ? TEnrich : Prettify<TEnrich & I>,
+        P
+      >,
+    ): Pick<
+      ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+      "mutation" | "webRoute"
+    >;
+  };
 
   // Authorization
 
@@ -371,7 +385,6 @@ export interface ProcedureInstance<
     | "telemetry"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -391,28 +404,52 @@ export interface ProcedureInstance<
    *   .query(async () => { ... });
    * ```
    */
-  cache: (
-    options: WithCacheOptions<
-      Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
-      [I] extends [void | undefined] ? TEnrich : Prettify<TEnrich & I>
-    >,
-  ) => Pick<
-    ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
-    | "query"
-    | "mutation"
-    | "webRoute"
-    | "invalidate"
-    | "retry"
-    | "timeout"
-    | "compress"
-    | "rateLimit"
-    | "circuitBreaker"
-    | "telemetry"
-    | "authorize"
-    | "mock"
-    | "stream"
-    | "output"
-  >;
+  cache: {
+    (
+      options: WithCacheOptionsInput<
+        Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+        [I] extends [void | undefined] ? TEnrich : Prettify<TEnrich & I>,
+        any[]
+      >,
+    ): Pick<
+      ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+      | "query"
+      | "mutation"
+      | "webRoute"
+      | "invalidate"
+      | "retry"
+      | "timeout"
+      | "compress"
+      | "rateLimit"
+      | "circuitBreaker"
+      | "telemetry"
+      | "authorize"
+      | "mock"
+      | "output"
+    >;
+    <P extends unknown[]>(
+      options: WithCacheOptionsInput<
+        Prettify<MergeMeta<Ctx, BaseContext<TMeta, TName>>>,
+        [I] extends [void | undefined] ? TEnrich : Prettify<TEnrich & I>,
+        P
+      >,
+    ): Pick<
+      ProcedureInstance<Ctx, TEnrich, TMeta, I, ICtx, GIM, TName, TMocked>,
+      | "query"
+      | "mutation"
+      | "webRoute"
+      | "invalidate"
+      | "retry"
+      | "timeout"
+      | "compress"
+      | "rateLimit"
+      | "circuitBreaker"
+      | "telemetry"
+      | "authorize"
+      | "mock"
+      | "output"
+    >;
+  };
 
   /**
    * Configures automatic retry behavior for transient failures.
@@ -446,7 +483,6 @@ export interface ProcedureInstance<
     | "telemetry"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -481,7 +517,6 @@ export interface ProcedureInstance<
     | "telemetry"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -517,7 +552,6 @@ export interface ProcedureInstance<
     | "telemetry"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -553,7 +587,6 @@ export interface ProcedureInstance<
     | "telemetry"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -579,7 +612,9 @@ export interface ProcedureInstance<
     handler: (
       opts: {
         ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
-        input: [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>;
+        input: [I] extends [void | undefined]
+          ? Prettify<TEnrich & ExtraInput>
+          : Prettify<I & TEnrich & ExtraInput>;
       },
       req: Request,
       context: any,
@@ -627,7 +662,6 @@ export interface ProcedureInstance<
     | "circuitBreaker"
     | "authorize"
     | "mock"
-    | "stream"
     | "output"
   >;
 
@@ -656,8 +690,8 @@ export interface ProcedureInstance<
       TEnrich,
       [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>,
       NextCtx,
-      TMeta,
-      TName
+      any,
+      any
     >,
   ) => Omit<
     ProcedureInstance<
@@ -679,7 +713,7 @@ export interface ProcedureInstance<
         [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>,
         NextCtx,
         TMeta,
-        TName
+        string
       >,
     ) => Omit<
       ProcedureInstance<
@@ -713,7 +747,7 @@ export interface ProcedureInstance<
         [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>,
         Prettify<NextCtx>,
         TMeta,
-        TName
+        string
       >,
     ): typeof mw;
     <ExpectedInput = unknown>(
@@ -727,7 +761,7 @@ export interface ProcedureInstance<
           : Prettify<I & TEnrich>,
         Prettify<NextCtx>,
         TMeta,
-        TName
+        string
       >,
     ) => typeof mw;
   };
@@ -747,7 +781,7 @@ export interface ProcedureInstance<
         [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>,
         NextCtx,
         TMeta,
-        TName
+        string
       >,
     ): typeof plugin;
     <ExpectedInput = unknown>(
@@ -761,7 +795,7 @@ export interface ProcedureInstance<
           : Prettify<I & TEnrich>,
         NextCtx,
         TMeta,
-        TName
+        string
       >,
     ) => typeof plugin;
   };
@@ -847,16 +881,19 @@ export interface ProcedureInstance<
           MergeMeta<Ctx, BaseContext<TMeta, TName>> &
             ExtraCtx<
               MergeMeta<Ctx, BaseContext<TMeta, TName>>,
-              [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>
+              [I] extends [void | undefined]
+                ? Prettify<TEnrich & ExtraInput>
+                : Prettify<I & TEnrich & ExtraInput>
             >
         >;
-        input: [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>;
+        input: [I] extends [void | undefined]
+          ? Prettify<TEnrich & ExtraInput>
+          : Prettify<I & TEnrich & ExtraInput>;
       },
       ...args: P
     ) => T,
   ) => [I] extends [void | undefined]
-    ? // No input - just pass through args
-      (...args: P) => Promise<QueryResult<Awaited<T>, undefined, P>>
+    ? (...args: P) => Promise<QueryResult<Awaited<T>, undefined, P>>
     : // Has input - first arg is input, then optional args
       [TMocked] extends [true]
       ? (
@@ -867,46 +904,6 @@ export interface ProcedureInstance<
           input: InputParams<I, ICtx, GIM>,
           ...args: P
         ) => Promise<QueryResult<Awaited<T>, InputParams<I, ICtx, GIM>, P>>;
-
-  /**
-   * Terminal method defining a chunked streaming procedure.
-   *
-   * Streams items incrementally over HTTP chunked transfer encoding as an `AsyncIterable<T>`.
-   *
-   * @template T - The chunk item type emitted by the stream.
-   * @template P - Additional arguments passed to the procedure call.
-   * @param handler - Generator or async generator yielding chunks to the client.
-   * @returns An async iterable yielding chunks.
-   *
-   * @example
-   * ```ts
-   * const streamLogs = procedure
-   *   .stream(async function* ({ ctx }) {
-   *     for await (const log of logSubscription()) {
-   *       yield log;
-   *     }
-   *   });
-   * ```
-   */
-  stream: <T, P extends unknown[]>(
-    handler: (
-      opts: {
-        ctx: Prettify<
-          MergeMeta<Ctx, BaseContext<TMeta, TName>> &
-            ExtraCtx<
-              MergeMeta<Ctx, BaseContext<TMeta, TName>>,
-              [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>
-            >
-        >;
-        input: [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>;
-      },
-      ...args: P
-    ) => AsyncIterable<T> | Iterable<T>,
-  ) => [I] extends [void | undefined]
-    ? (...args: P) => AsyncIterable<T>
-    : [TMocked] extends [true]
-      ? (input?: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>
-      : (input: InputParams<I, ICtx, GIM>, ...args: P) => AsyncIterable<T>;
 
   /**
    * Terminal method defining a Server-Sent Events (SSE) stream endpoint.
@@ -924,7 +921,7 @@ export interface ProcedureInstance<
    * const liveTicker = procedure
    *   .sse(async function* () {
    *     while (true) {
-   *       yield { event: "tick", data: { time: Date.now() } };
+   *       yield { type: "tick", data: { time: Date.now() } };
    *       await sleep(1000);
    *     }
    *   });
@@ -993,7 +990,9 @@ export interface ProcedureInstance<
               [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>
             >
         >;
-        input: [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>;
+        input: [I] extends [void | undefined]
+          ? Prettify<TEnrich & ExtraInput>
+          : Prettify<I & TEnrich & ExtraInput>;
       },
       req: Request,
       options: any,
@@ -1014,8 +1013,8 @@ export interface ProcedureInstance<
    * ```ts
    * const chatWs = procedure
    *   .ws(async ({ ctx, send, broadcast, onMessage }) => {
-   *     send({ message: "Welcome to chat!" });
-   *     onMessage((data) => broadcast(data));
+   *     send({ type: "message", data: { text: "Welcome to chat!" } });
+   *     onMessage((data) => broadcast({ type: "message", data }));
    *   });
    * ```
    */
@@ -1030,8 +1029,8 @@ export interface ProcedureInstance<
             >
         >;
         input: [I] extends [void | undefined] ? TEnrich : Prettify<I & TEnrich>;
-        send: <T = any>(data: T) => void;
-        broadcast: <T = any>(data: T) => void;
+        send: <TEvent extends WSEvent = WSEvent>(event: TEvent) => void;
+        broadcast: <TEvent extends WSEvent = WSEvent>(event: TEvent) => void;
         onMessage: <T = any>(cb: (data: T) => void) => void;
         onClose: (cb: (evt: CloseEvent) => void) => void;
         onError: (cb: (err: Event) => void) => void;
@@ -1079,7 +1078,7 @@ export interface ProcedureInstance<
       Partial<
         ProcedureProps<Ctx, TEnrich, GIM, NextMeta, MergeMeta<TMeta, NextMeta>>
       >,
-      "createContext" | "enrichInput"
+      "createContext" | "enrichInput" | "middlewares" | "plugins"
     > &
       ProcedureExtensionConfig<
         Ctx,
@@ -1134,7 +1133,7 @@ export type ProcedureExtensionConfig<
   TNextMeta = unknown,
 > = {
   createContext?: (
-    ctx: MergeMeta<TCtx, PlusMeta<MergeMeta<TMeta, TNextMeta>>>,
+    ctx: MergeMeta<TCtx, BaseContext<MergeMeta<TMeta, TNextMeta>>>,
     req: Request,
     context: any,
   ) => MaybePromise<ContextResult<TNextCtx>>;
@@ -1143,12 +1142,25 @@ export type ProcedureExtensionConfig<
       previous: TEnrich;
       ctx: MergeMeta<
         Prettify<TCtx & TNextCtx>,
-        PlusMeta<MergeMeta<TMeta, TNextMeta>>
+        BaseContext<MergeMeta<TMeta, TNextMeta>>
       >;
     },
     req: Request,
     context: any,
   ) => MaybePromise<TNextEnrich>;
+  middlewares?: RootMiddleware<
+    MergeMeta<
+      Prettify<TCtx & TNextCtx>,
+      BaseContext<MergeMeta<TMeta, TNextMeta>>
+    >,
+    NoInfer<TNextEnrich>,
+    MergeMeta<TMeta, TNextMeta>
+  >[];
+  plugins?: RootPlugin<
+    MergeMeta<Prettify<TCtx & TNextCtx>, PlusMeta<MergeMeta<TMeta, TNextMeta>>>,
+    NoInfer<TNextEnrich>,
+    MergeMeta<TMeta, TNextMeta>
+  >[];
 };
 
 /**
@@ -1169,6 +1181,8 @@ export type ProcedureProps<
   GIM extends InputMode = InputMode,
   TMeta = unknown,
   TTotalMeta = TMeta,
+  TMiddlewares = readonly RootMiddleware<TCtx, NoInfer<TEnrich>, TTotalMeta>[],
+  TPlugins = readonly RootPlugin<TCtx, NoInfer<TEnrich>, TTotalMeta>[],
 > = {
   /**
    * Factory function invoked on each incoming request to construct the base context (`TCtx`).
@@ -1191,7 +1205,7 @@ export type ProcedureProps<
    * ```
    */
   createContext: (
-    prevCtx: unknown,
+    prevCtx: Prettify<BaseContext<TMeta>>,
     req: Request,
     context: any,
   ) => MaybePromise<ContextResult<TCtx>>;
@@ -1317,12 +1331,12 @@ export type ProcedureProps<
    *
    * Executed sequentially in array order before any procedure-specific middlewares.
    */
-  middlewares?: Middleware<TCtx, NoInfer<TEnrich>, any, any, TTotalMeta>[];
+  middlewares?: TMiddlewares;
 
   /**
    * Array of default plugins applied to every procedure created from this builder.
    */
-  plugins?: Plugin<TCtx, NoInfer<TEnrich>, any, any, TTotalMeta>[];
+  plugins?: TPlugins;
 
   /**
    * Global default input mode (`strict`, `form`, `patch`, `partial`) applied to all procedures,

@@ -20,12 +20,14 @@ import type {
   ExtractProcInput,
   ExtractProcArgs,
   PaginationArgs,
+  QueryCacheMutationOpts,
 } from "../types/main.js";
 import { useQueryClient } from "../provider.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { parseWindow } from "../lib/utils.js";
 import { Timeout } from "../types/misc.js";
 import type { QueryState } from "../types/query-client.js";
+import { useClientFilter } from "./use-client-filter.js";
 
 type InfData<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
   pages: TFullPage[];
@@ -77,13 +79,25 @@ export function usePaginatedQuery<
   opts: [TInput] extends [void | undefined | never]
     ? never
     : HasRequiredKeys<WithoutCursor<TInput>> extends true
-      ? UseInfiniteQueryOpts<NoInfer<TInput>, TPage, TQueryKey, TFullPage, NoInfer<TArgs>> & {
+      ? UseInfiniteQueryOpts<
+          NoInfer<TInput>,
+          TPage,
+          TQueryKey,
+          TFullPage,
+          NoInfer<TArgs>
+        > & {
           input:
             | WithoutCursor<NoInfer<TInput>>
             | NoInfer<TInput>
             | ((pageParam: any) => NoInfer<TInput>);
         }
-      : UseInfiniteQueryOpts<NoInfer<TInput>, TPage, TQueryKey, TFullPage, NoInfer<TArgs>> & {
+      : UseInfiniteQueryOpts<
+          NoInfer<TInput>,
+          TPage,
+          TQueryKey,
+          TFullPage,
+          NoInfer<TArgs>
+        > & {
           input?:
             | WithoutCursor<NoInfer<TInput>>
             | NoInfer<TInput>
@@ -152,11 +166,7 @@ export function usePaginatedQuery<
   TQueryKey extends unknown[] = any[],
   TInput = any,
   TArgs extends unknown[] = any[],
->(
-  proc: any,
-  opts?: any,
-  ...extraArgs: any[]
-): any {
+>(proc: any, opts?: any, ...extraArgs: any[]): any {
   const [selectedItem, setSelectedItem] = useState<TPage | undefined>(
     undefined,
   );
@@ -181,7 +191,23 @@ export function usePaginatedQuery<
     onSuccess,
     onError,
     onSettled,
+    dedupKey,
+    search: searchInput,
   } = opts || {};
+
+  const isSearchFn = typeof searchInput === "function";
+  const searchOpts = isSearchFn ? undefined : searchInput;
+  const filter = isSearchFn ? searchInput : searchOpts?.filter;
+
+  const searchMode = searchOpts?.mode ?? queryDefaults?.search?.mode ?? "auto";
+  const searchDebounce =
+    searchOpts?.debounce ?? queryDefaults?.search?.debounce;
+  const searchDebounceMs = parseWindow(searchDebounce);
+  const resolvedInitialSearch = searchOpts?.initial ?? "";
+  const initialServerSearch =
+    resolvedInitialSearch !== "" && searchMode !== "client-only"
+      ? resolvedInitialSearch
+      : undefined;
 
   const resolvedArgs = extraArgs as unknown as TArgs;
 
@@ -209,7 +235,20 @@ export function usePaginatedQuery<
     baseInput,
     args: resolvedArgs,
     initialData,
+    filter,
+    initialSearch: resolvedInitialSearch,
+    searchMode,
+    searchDebounceMs,
   });
+  const resetSearchRef = useRef<() => void>(() => {});
+  const serverSearchRef = useRef<string | undefined>(initialServerSearch);
+  const fullDatasetLoadedRef = useRef<boolean>(false);
+  const searchGenerationRef = useRef<number>(0);
+
+  if (dedupKey) {
+    queryClient.setQueryOptions(queryKey, { dedupKey });
+  }
+
   useEffect(() => {
     callbacksRef.current = {
       onSuccess: (data: any) => {
@@ -228,6 +267,10 @@ export function usePaginatedQuery<
       baseInput,
       args: resolvedArgs,
       initialData,
+      filter,
+      initialSearch: resolvedInitialSearch,
+      searchMode,
+      searchDebounceMs,
     };
   });
 
@@ -375,16 +418,23 @@ export function usePaginatedQuery<
   const hasPrevious = adjustedIndex > 0 || !!(pages[0] as any)?.previousCursor;
 
   const fetchPage = useCallback(
-    async (cursor?: string | number): Promise<TFullPage> => {
+    async (
+      cursor?: string | number,
+      currentSearch?: string,
+    ): Promise<TFullPage> => {
       const hasBaseInput =
         callbacksRef.current.baseInput !== undefined &&
         callbacksRef.current.baseInput !== null;
-      const pageInput =
-        cursor !== undefined
-          ? hasBaseInput
-            ? { ...callbacksRef.current.baseInput, cursor }
-            : { cursor }
-          : callbacksRef.current.baseInput;
+      const pageInput = hasBaseInput
+        ? {
+            ...callbacksRef.current.baseInput,
+            cursor,
+            search: currentSearch,
+          }
+        : {
+            cursor,
+            search: currentSearch,
+          };
 
       const fetcher = async () => {
         const callArgs = (callbacksRef.current.args as any[]) || [];
@@ -395,18 +445,28 @@ export function usePaginatedQuery<
           );
         }
         if (callArgs.length > 0) {
-          const firstArg =
-            cursor !== undefined &&
-            typeof callArgs[0] === "object" &&
-            callArgs[0] !== null
-              ? { ...callArgs[0], cursor }
-              : callArgs[0];
-          return await callbacksRef.current.proc(firstArg, ...callArgs.slice(1));
+          if (typeof callArgs[0] === "object" && callArgs[0] !== null) {
+            const firstArg = {
+              ...callArgs[0],
+              cursor,
+              search: currentSearch,
+            };
+            return await callbacksRef.current.proc(
+              firstArg,
+              ...callArgs.slice(1),
+            );
+          }
+          return await callbacksRef.current.proc(
+            pageInput as TInput,
+            ...(callArgs as TArgs),
+          );
         }
         return await callbacksRef.current.proc(pageInput as TInput);
       };
 
-      const subKey = cursor !== undefined ? `${queryKey}|${cursor}` : queryKey;
+      const searchPart = currentSearch ? `|s:${currentSearch}` : "";
+      const cursorPart = cursor !== undefined ? `|${cursor}` : "";
+      const subKey = `${queryKey}${cursorPart}${searchPart}`;
       let resultTuple: [TFullPage, null] | [null, ErrorResponse];
 
       if (!queryKey.startsWith("__local__")) {
@@ -450,7 +510,7 @@ export function usePaginatedQuery<
     }
 
     try {
-      const newPage = await fetchPage(nextCursor);
+      const newPage = await fetchPage(nextCursor, serverSearchRef.current);
       fetchedCursorsRef.current.add(nextCursor);
 
       let newPages = [...pages, newPage];
@@ -535,7 +595,7 @@ export function usePaginatedQuery<
     }
 
     try {
-      const newPage = await fetchPage(previousCursor);
+      const newPage = await fetchPage(previousCursor, serverSearchRef.current);
       fetchedCursorsRef.current.add(previousCursor);
 
       let newPages = [newPage, ...pages];
@@ -597,7 +657,10 @@ export function usePaginatedQuery<
     fetchedCursorsRef.current.clear();
 
     try {
-      const firstPage = await fetchPage(initialPageParam);
+      const firstPage = await fetchPage(
+        initialPageParam,
+        serverSearchRef.current,
+      );
       if (initialPageParam !== undefined)
         fetchedCursorsRef.current.add(initialPageParam);
 
@@ -630,7 +693,62 @@ export function usePaginatedQuery<
     }
   }, [fetchPage, initialPageParam, queryClient, queryKey, setPageIndex]);
 
+  const fetchSearch = useCallback(
+    async (searchQuery: string) => {
+      const generation = ++searchGenerationRef.current;
+      serverSearchRef.current = searchQuery;
+      queryClient.setQueryState(queryKey, {
+        isFetching: true,
+        error: undefined,
+      });
+      fetchedCursorsRef.current.clear();
+
+      try {
+        const firstPage = await fetchPage(initialPageParam, searchQuery);
+        if (generation !== searchGenerationRef.current) return;
+
+        if (initialPageParam !== undefined)
+          fetchedCursorsRef.current.add(initialPageParam);
+
+        const newData = {
+          pages: [firstPage],
+          pageParams: [initialPageParam].filter(Boolean) as (string | number)[],
+        };
+
+        queryClient.setQueryState(queryKey, {
+          data: newData,
+          isFetching: false,
+          isError: false,
+          isSuccess: true,
+          updatedAt: Date.now(),
+          isFetched: true,
+        });
+        setPageIndex(0);
+        callbacksRef.current.onSuccess?.(newData);
+      } catch (err) {
+        if (generation !== searchGenerationRef.current) return;
+        const errorRes = err as ErrorResponse;
+        queryClient.setQueryState(queryKey, {
+          error: errorRes,
+          isError: true,
+          isFetching: false,
+          isFetched: true,
+        });
+        callbacksRef.current.onError?.(errorRes);
+      } finally {
+        if (generation === searchGenerationRef.current) {
+          callbacksRef.current.onSettled?.();
+        }
+      }
+    },
+    [fetchPage, initialPageParam, queryClient, queryKey, setPageIndex],
+  );
+
   const reset = useCallback(() => {
+    searchGenerationRef.current++;
+    resetSearchRef.current?.();
+    serverSearchRef.current = initialServerSearch;
+    fullDatasetLoadedRef.current = false;
     const initData = callbacksRef.current.initialData;
     const resolvedInitData =
       typeof initData === "function" ? initData() : initData;
@@ -673,23 +791,23 @@ export function usePaginatedQuery<
   );
 
   const prepend = useCallback(
-    (item: TPage | TPage[]) => {
-      return queryClient.prepend(queryKey, item);
-    },
+    (item: TPage | TPage[], overrideOpts?: QueryCacheMutationOpts) =>
+      queryClient.prepend(queryKey, item, overrideOpts),
     [queryClient, queryKey],
   );
 
   const append = useCallback(
-    (item: TPage | TPage[]) => {
-      return queryClient.append(queryKey, item);
-    },
+    (item: TPage | TPage[], overrideOpts?: QueryCacheMutationOpts) =>
+      queryClient.append(queryKey, item, overrideOpts),
     [queryClient, queryKey],
   );
 
   const insert = useCallback(
-    (index: number, item: TPage | TPage[]) => {
-      return queryClient.insert(queryKey, index, item);
-    },
+    (
+      index: number,
+      item: TPage | TPage[],
+      overrideOpts?: QueryCacheMutationOpts,
+    ) => queryClient.insert(queryKey, index, item, overrideOpts),
     [queryClient, queryKey],
   );
 
@@ -762,6 +880,8 @@ export function usePaginatedQuery<
   // Clear fetched cursors when queryKey changes
   useEffect(() => {
     fetchedCursorsRef.current.clear();
+    serverSearchRef.current = initialServerSearch;
+    fullDatasetLoadedRef.current = false;
   }, [queryKey]);
 
   // Refetch interval
@@ -814,18 +934,138 @@ export function usePaginatedQuery<
     page && Array.isArray((page as any).data) ? (page as any).data : [],
   );
 
+  useEffect(() => {
+    if (
+      !hasNext &&
+      (!serverSearchRef.current || serverSearchRef.current === "")
+    ) {
+      if (pages.length > 0) {
+        fullDatasetLoadedRef.current = true;
+      }
+    }
+  }, [hasNext, pages.length]);
+
+  const isDatasetFullyLoaded =
+    fullDatasetLoadedRef.current ||
+    (!hasNext &&
+      (!serverSearchRef.current || serverSearchRef.current === "") &&
+      pages.length > 0);
+
+  if (isDatasetFullyLoaded && !fullDatasetLoadedRef.current) {
+    fullDatasetLoadedRef.current = true;
+  }
+
+  const isServerSearch =
+    searchMode === "server-only" ||
+    (searchMode !== "client-only" &&
+      (!isDatasetFullyLoaded ||
+        typeof callbacksRef.current.filter !== "function"));
+
+  const isClientFilterActive = !isServerSearch;
+
+  const {
+    search,
+    setSearch: setClientSearch,
+    resetSearch: resetClientSearch,
+    isFiltered,
+    data: filteredData,
+    isSourceEmpty,
+    isEmpty,
+  } = useClientFilter(currentPageData, {
+    filter: isClientFilterActive ? callbacksRef.current.filter : undefined,
+    initialSearch: resolvedInitialSearch,
+    isFetched: state.isFetched,
+    resetKey: queryKey,
+  });
+
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const setSearch = useCallback(
+    (query: string) => {
+      setClientSearch(query);
+
+      const mode = callbacksRef.current.searchMode ?? "auto";
+      if (mode === "client-only") {
+        return;
+      }
+
+      const isServer =
+        mode === "server-only" ||
+        !fullDatasetLoadedRef.current ||
+        typeof callbacksRef.current.filter !== "function";
+
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+
+      if (isServer) {
+        if (query !== serverSearchRef.current) {
+          if (query === "") {
+            fetchSearch("");
+          } else {
+            const delay = callbacksRef.current.searchDebounceMs;
+            if (delay > 0) {
+              debounceTimerRef.current = setTimeout(() => {
+                fetchSearch(query);
+              }, delay);
+            } else {
+              fetchSearch(query);
+            }
+          }
+        }
+      } else {
+        if (serverSearchRef.current && query === "") {
+          fetchSearch("");
+        }
+      }
+    },
+    [fetchSearch, setClientSearch],
+  );
+
+  const resetSearch = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    resetClientSearch();
+    const initSearch = callbacksRef.current.initialSearch;
+    const mode = callbacksRef.current.searchMode ?? "auto";
+    if (
+      mode === "server-only" ||
+      (serverSearchRef.current !== undefined &&
+        serverSearchRef.current !== initSearch)
+    ) {
+      fetchSearch(initSearch ?? "");
+    }
+  }, [fetchSearch, resetClientSearch]);
+
+  resetSearchRef.current = resetSearch;
+
   // Whether ANY fetch is in flight (initial, refetch, or pagination)
   const isFetching = state.isFetching;
   // Whether subsequent pages or background refreshes are in flight
   const isRefetching = state.isFetching && flattenedData.length > 0;
   // Whether initial data is still loading
   const isLoading =
-    !state.isFetched || (state.isFetching && flattenedData.length === 0);
-  // Whether data has finished fetching and has 0 items
-  const isEmpty = state.isFetched && flattenedData.length === 0;
+    (!state.isFetched || (state.isFetching && isSourceEmpty)) &&
+    enabled !== false;
 
   return {
-    data: currentPageData,
+    data: filteredData as TPage[],
+    unfilteredData: currentPageData,
+    search,
+    setSearch,
+    resetSearch,
+    isFiltered,
     pages,
     pageParams,
     fetchNext,
@@ -841,8 +1081,7 @@ export function usePaginatedQuery<
     isFetched: state.isFetched,
     isEmpty,
     selectedItem,
-    selectItem: (item: TPage | undefined | null) =>
-      setSelectedItem(item ?? undefined),
+    selectItem: (item: any) => setSelectedItem(item ?? undefined),
     refetch,
     reset,
     remove,

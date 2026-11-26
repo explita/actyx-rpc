@@ -203,13 +203,15 @@ stock.close();
 
 For topic-based subscription feeds (like chat rooms) or complex, raw, bi-directional socket communications (like collaborative drawing boards), use `.ws()`.
 
-The handler receives raw socket controls to handle communications:
+Like queries and mutations, `.ws()` procedures participate in the full Actyx RPC lifecycle: they execute `createContext`, run middlewares, validate initial parameters via `.input()`, and map errors through `onError`.
 
-* **`send(data)`**: Sends a message to the connected client.
-* **`broadcast(data)`**: Sends a message to all other connected clients.
-* **`onMessage(cb)`**: Registers a callback for incoming client messages.
-* **`onClose(cb)`**: Registers a callback for socket disconnection.
-* **`onError(cb)`**: Registers a callback for errors.
+The handler receives raw socket controls alongside `{ ctx, input }`:
+
+* **`send(data)`**: Sends a JSON-serialized message directly to the connected client.
+* **`broadcast(data)`**: Broadcasts a message to all other connected clients (if `broadcast` option is provided).
+* **`onMessage(cb)`**: Registers a callback for incoming messages from this client.
+* **`onClose(cb)`**: Registers a callback for when this socket closes. Accepts sync or async cleanup functions (receives `CloseEvent`).
+* **`onError(cb)`**: Registers a callback for socket errors.
 
 ### Subscription & Publishing Example
 
@@ -266,8 +268,11 @@ export const chatProc = procedure.ws(
 
     onMessage((data: any) => {
       if (data && data.type === "typing") {
-        // Typing indicator — broadcast to other clients only
-        broadcast({ type: "typing" });
+        // Typing indicator — broadcast to other clients with user identity
+        broadcast({
+          type: "typing",
+          data: { user: { id: "u1", name: "Alice" }, ...data.data },
+        });
       } else {
         // Regular message — broadcast to others + send back to sender
         broadcast({ type: "event", data });

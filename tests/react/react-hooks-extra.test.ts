@@ -472,6 +472,475 @@ describe("useWS", () => {
 
     expect(container?.textContent).toContain("data:1");
   });
+
+  it("handles typing events natively without polluting data array", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      wsResult = useWS({
+        url: "ws://localhost:3000/ws",
+        typing: { currentUserId: "me" },
+      });
+      return h(
+        "div",
+        null,
+        `isTyping:${wsResult.isTyping},users:${wsResult.typingUsers.length},data:${wsResult.data.length}`,
+      );
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+    expect(container?.textContent).toContain("isTyping:false,users:0,data:0");
+
+    // Simulate incoming typing event
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: { userId: "user-1", name: "Alice" },
+      });
+    });
+
+    // isTyping is true, typingUsers has Alice, but data is NOT polluted!
+    expect(container?.textContent).toContain("isTyping:true,users:1,data:0");
+    expect(wsResult.typingUsers[0]).toEqual({
+      id: "user-1",
+      name: "Alice",
+      userId: "user-1",
+    });
+
+    // Simulate a real chat message from user-1
+    act(() => {
+      ws._emitMessage({
+        type: "message",
+        data: { userId: "user-1", text: "Hello!" },
+      });
+    });
+
+    // Typing cleared immediately by message, and message is in data!
+    expect(container?.textContent).toContain("isTyping:false,users:0,data:1");
+  });
+
+  it("ignores typing events from currentUserId (prevents self-reflection)", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      wsResult = useWS({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          currentUserId: "my-user-id",
+        },
+      });
+      return h("div", null, `isTyping:${wsResult.isTyping}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    // Simulate current user's own typing event
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: { userId: "my-user-id", name: "Me" },
+      });
+    });
+
+    // Ignored! isTyping remains false
+    expect(container?.textContent).toContain("isTyping:false");
+    expect(wsResult.typingUsers).toHaveLength(0);
+
+    // Simulate other user's typing event
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: { userId: "other-user-id", name: "Bob" },
+      });
+    });
+
+    expect(container?.textContent).toContain("isTyping:true");
+    expect(wsResult.typingUsers[0].name).toBe("Bob");
+  });
+
+  it("throttles sendTyping calls", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      wsResult = useWS({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          throttle: "1000ms",
+        },
+      });
+      return h("div", null, "test");
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+    ws.readyState = 1; // OPEN
+
+    act(() => {
+      wsResult.sendTyping();
+      wsResult.sendTyping();
+      wsResult.sendTyping();
+    });
+
+    // Only 1 event sent due to throttling
+    expect(ws.sent).toHaveLength(1);
+    expect(JSON.parse(ws.sent[0])).toEqual({ type: "typing" });
+  });
+
+  it("prioritizes standard data.user without mistaking message id for user id", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      wsResult = useWS({
+        url: "ws://localhost:3000/ws",
+        typing: { currentUserId: "me" },
+      });
+      return h("div", null, `users:${wsResult.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    // Typing with standard data.user: { id: "u-123", name: "Alice" }
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: { id: "u-123", name: "Alice" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0]).toEqual({
+      id: "u-123",
+      name: "Alice",
+    });
+
+    // Incoming message has root id="msg-999" (message ID) and user={ id: "u-123" }
+    // Must clear u-123 and NOT confuse msg-999 for user ID!
+    act(() => {
+      ws._emitMessage({
+        type: "message",
+        data: {
+          id: "msg-999", // message ID!
+          text: "Hi!",
+          user: { id: "u-123", name: "Alice" },
+        },
+      });
+    });
+
+    // Cleared correctly!
+    expect(wsResult.typingUsers).toHaveLength(0);
+    expect(wsResult.data[0].id).toBe("msg-999");
+  });
+
+  it("supports custom getUser callback for non-standard schemas", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      wsResult = useWS({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          getUser: (data) => ({
+            id: data.sender.uid,
+            name: data.sender.displayName,
+          }),
+        },
+      });
+      return h("div", null, `users:${wsResult.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          sender: { uid: "u-custom", displayName: "Custom User" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("u-custom");
+    expect(wsResult.typingUsers[0].name).toBe("Custom User");
+  });
+
+  it("automatically infers user type from output schema without requiring third type argument", () => {
+    type ChatMsg = {
+      id: string;
+      text: string;
+      user: { id: string; name: string; avatarUrl: string };
+    };
+
+    let wsResult: any;
+
+    function TestComponent() {
+      // Infers TypingUser<{ id: string; name: string; avatarUrl: string }> automatically!
+      const ws = useWS<ChatMsg>({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          getUser: (data) => data.user,
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `users:${ws.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: {
+            id: "u-99",
+            name: "Bob",
+            avatarUrl: "https://example.com/bob.png",
+          },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0]).toEqual({
+      id: "u-99",
+      name: "Bob",
+      avatarUrl: "https://example.com/bob.png",
+    });
+  });
+
+  it("infers typingUsers type from getUser return type when custom fields are returned", () => {
+    type ChatMsg = {
+      id: string;
+      text: string;
+      user: { id: string; name: string };
+    };
+
+    let wsResult: any;
+
+    function TestComponent() {
+      // getUser returns custom shape with customRole and customScore
+      const ws = useWS<ChatMsg>({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          getUser: (data) => ({
+            id: data.user.id,
+            customRole: "moderator" as const,
+            customScore: 100,
+          }),
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `users:${ws.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: { id: "u-mod", name: "ModUser" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("u-mod");
+    expect(wsResult.typingUsers[0].customRole).toBe("moderator");
+    expect(wsResult.typingUsers[0].customScore).toBe(100);
+  });
+
+  it("infers data type from initialData and typingUsers from getUser when generic is omitted", () => {
+    let wsResult: any;
+
+    function TestComponent() {
+      // No generic type arguments provided!
+      const ws = useWS({
+        url: "ws://localhost:3000/ws",
+        initialData: [
+          { msgId: "m1", text: "Hello", author: { id: "a1", name: "Alice" } },
+        ],
+        typing: {
+          getUser: (data) => ({
+            id: data.author.id,
+            badge: "verified" as const,
+          }),
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `data:${ws.data.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    expect(wsResult.data[0].msgId).toBe("m1");
+    expect(wsResult.data[0].text).toBe("Hello");
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          author: { id: "a1", name: "Alice" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("a1");
+    expect(wsResult.typingUsers[0].badge).toBe("verified");
+  });
+
+  it("infers typingUsers from ExtractTypingUserFromOutput when single generic with optional user is supplied", () => {
+    type WsMsg = {
+      message: string;
+      user?: { id: string; name: string };
+    };
+
+    let wsResult: any;
+
+    function TestComponent() {
+      const ws = useWS<WsMsg>({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          getUser: (data) => ({
+            id: data.user?.id ?? "unknown",
+            name: data.user?.name ?? "",
+          }),
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `users:${ws.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: { id: "u-42", name: "Bob" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("u-42");
+    expect(wsResult.typingUsers[0].name).toBe("Bob");
+  });
+
+  it("supports explicit useWS<TOutput, TUser> for custom typingUsers shape", () => {
+    type WsMsg = {
+      message: string;
+      user?: { id: string; name: string };
+    };
+    type CustomUser = { id: string; permissions: string[] };
+
+    let wsResult: any;
+
+    function TestComponent() {
+      const ws = useWS<WsMsg, CustomUser>({
+        url: "ws://localhost:3000/ws",
+        typing: {
+          getUser: (data) => ({
+            id: data.user?.id ?? "unknown",
+            permissions: ["read", "write"],
+          }),
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `users:${ws.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: { id: "u-perm", name: "PermUser" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("u-perm");
+    expect(wsResult.typingUsers[0].permissions).toEqual(["read", "write"]);
+  });
+
+  it("infers typingUsers and data from schema and getUser when generics are omitted", () => {
+    type WsMsg = {
+      message: string;
+      user?: { id: string; name: string };
+    };
+
+    let wsResult: any;
+
+    function TestComponent() {
+      const ws = useWS({
+        url: "ws://localhost:3000/ws",
+        schema: {} as WsMsg,
+        typing: {
+          getUser: (data) => ({
+            id: data.user?.id ?? "unknown",
+            tag: "vip" as const,
+          }),
+        },
+      });
+      wsResult = ws;
+      return h("div", null, `users:${ws.typingUsers.length}`);
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    const ws = mockWsInstances[0];
+
+    act(() => {
+      ws._emitMessage({
+        type: "typing",
+        data: {
+          user: { id: "u-vip", name: "VIP" },
+        },
+      });
+    });
+
+    expect(wsResult.typingUsers[0].id).toBe("u-vip");
+    expect(wsResult.typingUsers[0].tag).toBe("vip");
+  });
 });
 
 // ===========================================================================
@@ -515,6 +984,7 @@ describe("useSSEInfiniteQuery", () => {
         queryOpts: {
           input: { limit: 5 },
           queryKey: ["sse-inf-test"],
+          enabled: true,
         },
         url: "http://localhost:3000/sse",
         enabled: false, // disable SSE, only test the query part
@@ -546,6 +1016,7 @@ describe("useSSEInfiniteQuery", () => {
         queryOpts: {
           input: { limit: 5 },
           queryKey: ["sse-inf-arrange"],
+          enabled: true,
         },
         url: "http://localhost:3000/sse",
         enabled: false,
@@ -600,6 +1071,14 @@ describe("useWSInfiniteQuery", () => {
       this.readyState = MockWebSocket.CLOSED;
       this.onclose?.({ code: 1000, reason: "normal" });
     }
+
+    _emitMessage(data: any) {
+      this.readyState = MockWebSocket.OPEN;
+      this.onopen?.({});
+      this.onmessage?.({
+        data: typeof data === "string" ? data : JSON.stringify(data),
+      });
+    }
   }
 
   const getPosts = async (input: {
@@ -633,6 +1112,7 @@ describe("useWSInfiniteQuery", () => {
         queryOpts: {
           input: { limit: 5 },
           queryKey: ["ws-inf-test"],
+          enabled: true,
         },
         url: "ws://localhost:3000/ws",
         enabled: false, // disable WS, only test the query part
@@ -676,6 +1156,128 @@ describe("useWSInfiniteQuery", () => {
     // No WS should have been created since enabled is false
     // (the query still runs but WS doesn't connect)
     expect(mockWsInstances.length).toBe(0);
+  });
+
+  it("deduplicates and updates in-place via dedupKey with default onData handler", async () => {
+    let hookResult: any;
+
+    function TestComponent() {
+      hookResult = useWSInfiniteQuery(getPosts as any, {
+        queryOpts: {
+          input: { limit: 5 },
+          queryKey: ["ws-inf-dedup-default"],
+          enabled: true,
+          dedupKey: (post: any) => post.id,
+        },
+        url: "ws://localhost:3000/ws",
+        enabled: true,
+      });
+      return null;
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(hookResult.data).toEqual([
+      { id: "1", title: "Post 1" },
+      { id: "2", title: "Post 2" },
+    ]);
+
+    const ws = mockWsInstances[0];
+
+    // Emit message with existing id "1" -> updates in place
+    act(() => {
+      ws._emitMessage({
+        type: "post",
+        data: { id: "1", title: "Post 1 (Updated)" },
+      });
+    });
+
+    expect(hookResult.data).toEqual([
+      { id: "1", title: "Post 1 (Updated)" },
+      { id: "2", title: "Post 2" },
+    ]);
+
+    // Emit message with new id "3" -> appends to end
+    act(() => {
+      ws._emitMessage({
+        type: "post",
+        data: { id: "3", title: "Post 3" },
+      });
+    });
+
+    expect(hookResult.data).toEqual([
+      { id: "1", title: "Post 1 (Updated)" },
+      { id: "2", title: "Post 2" },
+      { id: "3", title: "Post 3" },
+    ]);
+  });
+
+  it("passes computed action ('updated' vs 'added') to custom onData handler when dedupKey is provided", async () => {
+    let hookResult: any;
+    const actionsReceived: string[] = [];
+
+    function TestComponent() {
+      hookResult = useWSInfiniteQuery(getPosts as any, {
+        queryOpts: {
+          input: { limit: 5 },
+          queryKey: ["ws-inf-dedup-custom"],
+          enabled: true,
+          dedupKey: (post: any) => post.id,
+        },
+        url: "ws://localhost:3000/ws",
+        enabled: true,
+        onData: (ctx) => {
+          actionsReceived.push(ctx.action);
+          ctx.append(ctx.event.data);
+        },
+      });
+      return null;
+    }
+
+    renderComponent(
+      h(ActyxProvider, { client: new QueryClient() }, h(TestComponent)),
+    );
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    const ws = mockWsInstances[0];
+
+    // Existing item: should pass action: "updated"
+    act(() => {
+      ws._emitMessage({
+        type: "post",
+        data: { id: "2", title: "Post 2 (Edited)" },
+      });
+    });
+
+    expect(actionsReceived).toEqual(["updated"]);
+    expect(hookResult.data).toEqual([
+      { id: "1", title: "Post 1" },
+      { id: "2", title: "Post 2 (Edited)" },
+    ]);
+
+    // New item: should pass action: "added"
+    act(() => {
+      ws._emitMessage({
+        type: "post",
+        data: { id: "4", title: "Post 4" },
+      });
+    });
+
+    expect(actionsReceived).toEqual(["updated", "added"]);
+    expect(hookResult.data).toEqual([
+      { id: "1", title: "Post 1" },
+      { id: "2", title: "Post 2 (Edited)" },
+      { id: "4", title: "Post 4" },
+    ]);
   });
 });
 

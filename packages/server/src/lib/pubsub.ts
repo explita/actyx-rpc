@@ -1,12 +1,30 @@
 import type { Redis } from "ioredis";
 import { EventEmitter } from "node:events";
+import { ErrorResponse, MaybePromise } from "../types/misc";
+
+export interface PubSubMessage<TData = any, TType extends string = string> {
+  type: TType;
+  data: TData;
+}
+
+export interface PubSubError {
+  type: "error";
+  data: ErrorResponse;
+}
+
+/** Discriminated union of all possible PubSub payloads */
+export type PubSubEvent<TData = any> = PubSubMessage<TData> | PubSubError;
 
 export interface PubSubAdapter {
-  publish<TData = any>(topic: string, data: TData): Promise<void> | void;
-  subscribe<TData = any>(
+  publish<TEvent extends PubSubEvent = PubSubEvent>(
     topic: string,
-    callback: (data: TData) => void,
-  ): (() => void) | Promise<() => void>;
+    event: TEvent,
+  ): MaybePromise<void>;
+
+  subscribe<TEvent extends PubSubEvent = PubSubEvent>(
+    topic: string,
+    callback: (event: TEvent) => void,
+  ): MaybePromise<() => void>;
 }
 
 /**

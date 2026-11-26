@@ -31,7 +31,7 @@ export function getContext<T = any>(): T {
   if (ctx === undefined) {
     throw new Error(
       "[Actyx RPC] No active procedure context found. " +
-        "getContext() and procedure.context can only be used inside a handler (query, mutation, stream, or sse).",
+        "getContext() and procedure.context can only be used inside a handler (query, mutation, or sse).",
     );
   }
   return ctx;

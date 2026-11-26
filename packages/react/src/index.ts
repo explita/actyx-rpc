@@ -10,6 +10,7 @@ export * from "./hooks/use-sse.js";
 export * from "./hooks/use-ws.js";
 export * from "./hooks/use-ws-infinite-query.js";
 export * from "./hooks/use-sse-infinite-query.js";
+export * from "./hooks/use-client-filter.js";
 export * from "./provider.js";
 export * from "./lib/query-client.js";
 export * from "./hydration/hydration-boundary.js";
@@ -33,6 +34,9 @@ export type {
   UseMutationOpts,
   UseMutationResult,
   MutationStatus,
+  MutationCtx,
+  DropActionContext,
+  DropMutationCtx,
   QueryResult,
   MutationResult,
   ErrorResponse,
@@ -49,9 +53,15 @@ export type {
   UseSSEResult,
   UseWSOpts,
   UseWSResult,
+  TypingUser,
+  WSTypingOptions,
+  ExtractTypingUserFromOutput,
+  NormalizeTypingUser,
+  ExtractTypingUserFromOpts,
   WSAdapterOptions,
   WSEventContext,
   SSEAdapterOptions,
+  SSEEventContext,
   UseSSEInfiniteQueryResult,
   UseWSInfiniteQueryResult,
 } from "./types/main.js";

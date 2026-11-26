@@ -89,7 +89,12 @@ For details on configuration options (e.g. `input`, `staleTime`, `queryKey`), se
 
 | Property | Type | Description |
 | :--- | :--- | :--- |
-| `data` | `TPage[]` | Flattened array containing the combined items from all fetched pages. |
+| `data` | `TPage[]` | Flattened array containing the combined (and optionally filtered) items from all fetched pages. |
+| `unfilteredData` | `TPage[]` | The full, unfiltered flattened array of items across all fetched pages. |
+| `search` | `string` | The current search query string. |
+| `setSearch` | `(query: string) => void` | Updates search query (filters locally or debounces server fetch based on `search.mode`). |
+| `resetSearch` | `() => void` | Resets the search query back to `""` (or `search.initial`). |
+| `isFiltered` | `boolean` | `true` when a search query is actively filtering results. |
 | `pages` | `TFullPage[]` | The raw array of fetched page structures. |
 | `pageParams` | `(string \| number)[]` | The array of cursors/page parameters fetched so far. |
 | **`hasPrevious`** | `boolean` | True if a previous page is available to fetch backward. |

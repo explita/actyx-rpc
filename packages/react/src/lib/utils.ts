@@ -5,10 +5,13 @@ export function parseWindow(window?: WindowTime): number {
   if (typeof window === "number") return window;
 
   try {
-    const value = parseInt(window.slice(0, -1));
-    const unit = window.slice(-1);
+    const offset = window.endsWith("ms") ? 2 : 1;
+    const value = parseInt(window.slice(0, -offset));
+    const unit = window.slice(-offset);
 
     switch (unit) {
+      case "ms": // miliseconds
+        return value;
       case "s": // seconds
         return value * 1000;
       case "m": // minutes

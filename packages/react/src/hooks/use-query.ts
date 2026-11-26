@@ -10,6 +10,7 @@ import type {
   QueryResult,
   Unwrap,
   UseQueryOpts,
+  QueryCacheMutationOpts,
 } from "../types/main.js";
 import {
   useCallback,
@@ -19,6 +20,7 @@ import {
   useId,
   useMemo,
 } from "react";
+import { useClientFilter } from "./use-client-filter.js";
 import { globalRequestManager } from "../lib/request-manager.js";
 import { useQueryClient } from "../provider.js";
 import { parseWindow } from "../lib/utils.js";
@@ -71,10 +73,22 @@ export function useQuery<
   opts: [TInput] extends [void | undefined | never]
     ? never
     : (HasRequiredKeys<TInput> extends true
-        ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+        ? UseQueryOpts<
+            TOutput,
+            TQueryKey,
+            TUnwrap,
+            TSelectData,
+            NoInfer<TInput>
+          > & {
             input: NoInfer<TInput>;
           }
-        : UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+        : UseQueryOpts<
+            TOutput,
+            TQueryKey,
+            TUnwrap,
+            TSelectData,
+            NoInfer<TInput>
+          > & {
             input?: NoInfer<TInput>;
           }) & {
         initialData: TInitialData;
@@ -125,10 +139,22 @@ export function useQuery<
   opts: [TInput] extends [void | undefined | never]
     ? never
     : (HasRequiredKeys<TInput> extends true
-        ? UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+        ? UseQueryOpts<
+            TOutput,
+            TQueryKey,
+            TUnwrap,
+            TSelectData,
+            NoInfer<TInput>
+          > & {
             input: NoInfer<TInput>;
           }
-        : UseQueryOpts<TOutput, TQueryKey, TUnwrap, TSelectData, NoInfer<TInput>> & {
+        : UseQueryOpts<
+            TOutput,
+            TQueryKey,
+            TUnwrap,
+            TSelectData,
+            NoInfer<TInput>
+          > & {
             input?: NoInfer<TInput>;
           }) & {
         initialData?: undefined;
@@ -307,6 +333,12 @@ export function useQuery<
   const keepPreviousData =
     resolvedOpts?.keepPreviousData ?? queryDefaults?.keepPreviousData ?? true;
 
+  const searchInput = resolvedOpts?.search;
+  const isSearchFn = typeof searchInput === "function";
+  const searchOpts = isSearchFn ? undefined : searchInput;
+  const searchFilter = isSearchFn ? searchInput : searchOpts?.filter;
+  const resolvedInitialSearch = searchOpts?.initial ?? "";
+
   // Store callbacks in a ref to avoid re-creating fetchData when they change
   const callbacksRef = useRef({
     onSuccess: (data: any) => {
@@ -328,6 +360,8 @@ export function useQuery<
     extraArgs,
     keepPreviousData,
     unwrap: resolvedOpts.unwrap,
+    filter: searchFilter,
+    initialSearch: resolvedInitialSearch,
   });
 
   useEffect(() => {
@@ -351,12 +385,21 @@ export function useQuery<
       extraArgs,
       keepPreviousData,
       unwrap: resolvedOpts.unwrap,
+      filter: searchFilter,
+      initialSearch: resolvedInitialSearch,
     };
   });
+
+  if (resolvedOpts?.dedupKey) {
+    queryClient.setQueryOptions(queryKey, {
+      dedupKey: resolvedOpts.dedupKey,
+    });
+  }
 
   // Guard against stale fetches overwriting reset or newer calls
   const fetchingRef = useRef(false);
   const generationRef = useRef(0);
+  const resetSearchRef = useRef<() => void>(() => {});
 
   // Ensure initial state exists in cache before subscribing
   if (!queryClient.getQueryState(queryKey)) {
@@ -389,10 +432,9 @@ export function useQuery<
   // QueryClient.getQueryState returns the cached object reference. QueryClient.setQueryState
   // always creates a new object via spread. So reference equality tells us whether the
   // state actually changed — no need for field-by-field comparison.
-  const defaultEmptyState = useRef<QueryState<
-    Unwrap<TOutput, TUnwrap>,
-    ErrorResponse
-  >>({
+  const defaultEmptyState = useRef<
+    QueryState<Unwrap<TOutput, TUnwrap>, ErrorResponse>
+  >({
     data: undefined,
     error: undefined,
     isFetching: false,
@@ -521,6 +563,7 @@ export function useQuery<
   const reset = useCallback(() => {
     ++generationRef.current; // invalidate any in-flight fetch
     fetchingRef.current = false;
+    resetSearchRef.current?.();
     const initData = callbacksRef.current.initialData;
     const resolvedInitData =
       typeof initData === "function" ? initData() : initData;
@@ -547,6 +590,7 @@ export function useQuery<
         return queryClient.update(queryKey, arg, itemUpdater);
       }
 
+      const snapshot = queryClient.snapshot(queryKey);
       const [valueOrUpdater] = args;
       const currentState = queryClient.getQueryState(queryKey);
       const prev = currentState?.data;
@@ -564,7 +608,8 @@ export function useQuery<
         updatedAt: Date.now(),
         isFetched: true,
       });
-      return next;
+
+      return snapshot;
     },
     [queryClient, queryKey],
   );
@@ -653,7 +698,7 @@ export function useQuery<
   const isRefetching = state.isFetching && state.data !== undefined;
 
   const data = state.data;
-  const selectedData = useMemo(() => {
+  const unfilteredData = useMemo(() => {
     if (data === undefined) return undefined;
     const resolved =
       callbacksRef.current.unwrap === true &&
@@ -662,28 +707,47 @@ export function useQuery<
       "data" in data
         ? (data as any).data
         : data;
-    if (callbacksRef.current.select) return callbacksRef.current.select(resolved);
+    if (callbacksRef.current.select) {
+      return callbacksRef.current.select(resolved);
+    }
     return resolved;
   }, [data]);
 
-  const isEmpty =
-    state.isFetched &&
-    (selectedData === null ||
-      selectedData === undefined ||
-      (Array.isArray(selectedData) && selectedData.length === 0));
-  const isLoading = !state.isFetched || (state.isFetching && isEmpty);
+  const {
+    search,
+    setSearch,
+    resetSearch,
+    isFiltered,
+    data: filteredData,
+    isSourceEmpty,
+    isEmpty,
+  } = useClientFilter(unfilteredData, {
+    filter: callbacksRef.current.filter,
+    initialSearch: resolvedInitialSearch,
+    isFetched: state.isFetched,
+    resetKey: queryKey,
+  });
+
+  resetSearchRef.current = resetSearch;
+
+  const isLoading =
+    (!state.isFetched || (state.isFetching && isSourceEmpty)) &&
+    enabled !== false;
   const prepend = useCallback(
-    (item: any) => queryClient.prepend(queryKey, item),
+    (item: any, overrideOpts?: QueryCacheMutationOpts) =>
+      queryClient.prepend(queryKey, item, overrideOpts),
     [queryClient, queryKey],
   );
 
   const append = useCallback(
-    (item: any) => queryClient.append(queryKey, item),
+    (item: any, overrideOpts?: QueryCacheMutationOpts) =>
+      queryClient.append(queryKey, item, overrideOpts),
     [queryClient, queryKey],
   );
 
   const insert = useCallback(
-    (index: number, item: any) => queryClient.insert(queryKey, index, item),
+    (index: number, item: any, overrideOpts?: QueryCacheMutationOpts) =>
+      queryClient.insert(queryKey, index, item, overrideOpts),
     [queryClient, queryKey],
   );
 
@@ -709,6 +773,11 @@ export function useQuery<
     append,
     insert,
     remove,
-    data: selectedData,
+    data: filteredData,
+    unfilteredData,
+    search,
+    setSearch,
+    resetSearch,
+    isFiltered,
   } as unknown as QueryResult<TOutput, TInitialData, TUnwrap, TSelectData>;
 }

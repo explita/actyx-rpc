@@ -16,57 +16,45 @@ import {
   Globe,
 } from "lucide-react";
 
-type WsMessage = { message: string; type?: never };
-type WsTyping = { type: "typing" };
-type WsData = WsMessage | WsTyping;
+type WsMessage = {
+  message: string;
+  user: { id: string; name: string };
+};
 
 // ==========================================
 // 1. Global Chat Demo Component
 // ==========================================
 function GlobalChatDemo() {
   const [input, setInput] = useState("");
-  const [isSomeoneTyping, setIsSomeoneTyping] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTypingSentRef = useRef<number>(0);
-
-  const { data, status, unsubscribe, send } = useWS<WsData>({
-    url: "/api/ws",
+  const [currentUserId] = useState(() => {
+    return `user_${Date.now()}`;
   });
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const messages = data.filter(
-    (item): item is WsMessage =>
-      item !== null && typeof item === "object" && "message" in item,
-  );
-
-  useEffect(() => {
-    const lastItem = data[data.length - 1];
-    if (
-      lastItem &&
-      typeof lastItem === "object" &&
-      "type" in lastItem &&
-      (lastItem as any).type === "typing"
-    ) {
-      setIsSomeoneTyping(true);
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-      typingTimerRef.current = setTimeout(() => {
-        setIsSomeoneTyping(false);
-      }, 2000);
-    } else if (
-      lastItem &&
-      typeof lastItem === "object" &&
-      "message" in lastItem
-    ) {
-      setIsSomeoneTyping(false);
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    }
-  }, [data]);
-
-  useEffect(() => {
-    return () => {
-      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    };
-  }, []);
+  const {
+    data: messages,
+    status,
+    connect,
+    disconnect,
+    send,
+    isTyping,
+    sendTyping,
+    typingUsers,
+  } = useWS({
+    url: "/api/ws",
+    reconnect: { maxAttempts: Infinity },
+    typing: {
+      timeout: "2s",
+      throttle: "1.5s",
+      currentUserId,
+      getUser(data) {
+        return {
+          id: data.user.id,
+        };
+      },
+    },
+    schema: {} as WsMessage,
+  });
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -81,21 +69,16 @@ function GlobalChatDemo() {
       setInput(value);
 
       if (value.trim()) {
-        const now = Date.now();
-        if (now - lastTypingSentRef.current > 1500) {
-          send({ type: "typing" });
-          lastTypingSentRef.current = now;
-        }
+        sendTyping();
       }
     },
-    [send],
+    [sendTyping],
   );
 
   const sendMessage = () => {
     if (!input.trim()) return;
     send({ message: input.trim() });
     setInput("");
-    lastTypingSentRef.current = 0;
   };
 
   const isConnected = status === "connected";
@@ -128,13 +111,22 @@ function GlobalChatDemo() {
               : "Disconnected"}
         </span>
 
-        <button
-          onClick={unsubscribe}
-          disabled={!isConnected}
-          className="text-xs text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:no-underline disabled:cursor-not-allowed cursor-pointer"
-        >
-          Disconnect
-        </button>
+        {isConnected ? (
+          <button
+            onClick={disconnect}
+            className="text-xs text-rose-500 hover:text-rose-600 underline cursor-pointer"
+          >
+            Disconnect
+          </button>
+        ) : (
+          <button
+            onClick={connect}
+            disabled={isConnecting}
+            className="text-xs text-blue-500 hover:text-blue-600 underline cursor-pointer disabled:opacity-50"
+          >
+            Connect
+          </button>
+        )}
       </div>
 
       {/* Chat-like message log */}
@@ -169,7 +161,7 @@ function GlobalChatDemo() {
           })}
 
           {/* Typing indicator */}
-          {isSomeoneTyping && (
+          {isTyping && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 text-slate-400 dark:text-slate-500 text-xs animate-pulse">
               <Pencil size={12} />
               <span>Someone is typing...</span>
@@ -212,7 +204,8 @@ function PubSubRoomsDemo() {
   const {
     data: roomData,
     status: roomStatus,
-    unsubscribe: unsubscribeRoom,
+    connect: connectRoom,
+    disconnect: disconnectRoom,
   } = useWS<{ message: string }>({
     url: `/api/ws/room?roomId=${roomId}`,
     enabled: !!roomId,
@@ -272,13 +265,22 @@ function PubSubRoomsDemo() {
                 : "Disconnected"}
           </span>
 
-          <button
-            onClick={unsubscribeRoom}
-            disabled={!isRoomConnected && !isRoomConnecting}
-            className="text-xs text-slate-500 dark:text-slate-400 underline hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:no-underline disabled:cursor-not-allowed cursor-pointer"
-          >
-            Disconnect
-          </button>
+          {isRoomConnected ? (
+            <button
+              onClick={disconnectRoom}
+              className="text-xs text-rose-500 hover:text-rose-600 underline cursor-pointer"
+            >
+              Disconnect
+            </button>
+          ) : (
+            <button
+              onClick={connectRoom}
+              disabled={isRoomConnecting}
+              className="text-xs text-blue-500 hover:text-blue-600 underline cursor-pointer disabled:opacity-50"
+            >
+              Connect
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

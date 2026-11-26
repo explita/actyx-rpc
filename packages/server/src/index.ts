@@ -35,7 +35,7 @@ export type {
   InferOutput,
 } from "./types/procedure.js";
 
-export type { Middleware, Plugin } from "./types/middleware.js";
+export type { Middleware, Plugin, RootMiddleware, RootPlugin } from "./types/middleware.js";
 export type {
   Prettify,
   ResolverResult,
@@ -54,7 +54,14 @@ export type {
   CustomFailureReason,
   FailureReason,
   SSEEvent,
+  WSEvent,
+  WSServerHandler,
   ErrorResponse,
+  ProcedureType,
+  UnionToIntersection,
+  InferMiddlewareNextCtx,
+  InferPluginNextCtx,
+  MergedRootCtx,
 } from "./types/misc.js";
 export type {
   CacheAdapter,
@@ -76,4 +83,11 @@ export type {
   WithRetryOptions,
 } from "./core/retry/types.js";
 export type { TimeoutConfig, TimeoutOptions } from "./core/timeout/types.js";
-export { type PubSubAdapter, MemoryPubSub, RedisPubSub } from "./lib/pubsub.js";
+export {
+  type PubSubAdapter,
+  type PubSubEvent,
+  type PubSubMessage,
+  type PubSubError,
+  MemoryPubSub,
+  RedisPubSub,
+} from "./lib/pubsub.js";

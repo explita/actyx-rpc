@@ -26,9 +26,9 @@ describe("Router & SDK Integration", () => {
       .mutation(async ({ input }) => {
         return { id: 2, title: input.title };
       }),
-    streamEvents: procedure
+    rawSseEvents: procedure
       .input(zodResolver(z.object({ count: z.number() })))
-      .stream(async function* ({ input }) {
+      .sse(async function* ({ input }) {
         for (let i = 0; i < input.count; i++) {
           yield { eventId: i, message: `Event ${i}` };
         }
@@ -111,12 +111,12 @@ describe("Router & SDK Integration", () => {
     expect(text).toContain('data: {"eventId":1,"message":"Event 1"}');
   });
 
-  it("should handle stream procedures mapped to sse through route handler", async () => {
+  it("should handle raw chunks in sse procedures through route handler", async () => {
     const handler = createHandler(appRouter);
 
-    // Stream Procedure
+    // Raw SSE Procedure
     const req = new Request(
-      "http://localhost/api/rpc?procedure=posts.streamEvents&input=" +
+      "http://localhost/api/rpc?procedure=posts.rawSseEvents&input=" +
         encodeURIComponent(JSON.stringify({ count: 2 })),
       {
         method: "GET",
@@ -335,5 +335,14 @@ describe("Router & SDK Integration", () => {
     const [res4, err4] = await client.noInputMutateWithArgs.mutate("reset");
     expect(err4).toBeNull();
     expect(res4).toEqual({ executed: "reset" });
+
+    // 5. Direct query without input schema receiving injected extra inputs ({ cursor, search }) alongside positional args
+    const [res5, err5] = await (extraArgsRouter.noInputWithArgs as any)(
+      { cursor: 3, search: "ai" },
+      "electronics",
+      99,
+    );
+    expect(err5).toBeNull();
+    expect(res5).toEqual({ category: "electronics", count: 99 });
   });
 });

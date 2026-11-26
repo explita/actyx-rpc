@@ -198,31 +198,53 @@ export function useSSEInfiniteQuery<
     optsRef.current = { arrange, onData };
   });
 
+  const queryEnabled = queryOpts?.enabled ?? sseOpts.enabled ?? true;
+  const sseEnabled = sseOpts.enabled ?? queryOpts?.enabled ?? true;
+
   // 1. Instantiate the paginated query, forwarding extraArgs
   const queryResult = (useInfiniteQuery as any)(
     queryProcedure,
-    queryOpts,
+    {
+      ...queryOpts,
+      search: queryOpts?.search ?? (opts as any)?.search,
+      dedupKey: queryOpts?.dedupKey ?? (opts as any)?.dedupKey,
+      enabled: queryEnabled,
+    },
     ...extraArgs,
   );
 
   // 2. Attach SSE listener spreading all sseOpts
   const sseResult = useSSE<TData>({
     ...sseOpts,
-    enabled: sseOpts.enabled ?? true,
-    onData: (data, event) => {
+    enabled: sseEnabled,
+    onData: (event, action = "added") => {
+      const data =
+        event && typeof event === "object" && "data" in event
+          ? event.data
+          : event;
+      const dedupKeyFn =
+        (opts as any)?.dedupKey ?? (opts as any)?.queryOpts?.dedupKey;
+      let computedAction = action;
+      if (dedupKeyFn && data !== undefined) {
+        const key = dedupKeyFn(data);
+        const exists = queryResult.data.some(
+          (item: any) => dedupKeyFn(item) === key,
+        );
+        computedAction = exists ? "updated" : "added";
+      }
+
       if (optsRef.current.onData) {
         optsRef.current.onData({
-          data,
-          allData: queryResult.data as unknown as TData[],
-          action: "added",
-          append: queryResult.append as any,
-          prepend: queryResult.prepend as any,
-          update: queryResult.update as any,
-          insert: queryResult.insert as any,
+          action: computedAction,
           event,
+          items: queryResult.data,
+          append: queryResult.append,
+          prepend: queryResult.prepend,
+          update: queryResult.update,
+          insert: queryResult.insert,
         });
       } else {
-        queryResult.append(data as any);
+        queryResult.append(data);
       }
     },
   });

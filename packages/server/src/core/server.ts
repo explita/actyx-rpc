@@ -6,9 +6,9 @@ import {
   type PubSubAdapter,
 } from "../lib/pubsub.js";
 import type {
-  CacheInvalidationOptions,
+  CacheInvalidationOptionsInput,
   RateLimitOptions,
-  WithCacheOptions,
+  WithCacheOptionsInput,
 } from "./cache/types.js";
 import { withCache } from "./cache/with-cache.js";
 import type { RetryOptions } from "./retry/types.js";
@@ -24,14 +24,24 @@ import type { CircuitBreakerOptions } from "./circuit-breaker/types.js";
 import type { CompressionOptions } from "./compression/types.js";
 import { Compressor } from "./compression/compressor.js";
 import { withCompression } from "./compression/with-compression.js";
-import type { Middleware, Plugin } from "../types/middleware.js";
+import type {
+  Middleware,
+  Plugin,
+  RootMiddleware,
+  RootPlugin,
+} from "../types/middleware.js";
 import type {
   ProcedureConfig,
   ProcedureInstance,
   ProcedureProps,
 } from "../types/procedure.js";
 import { withInvalidation } from "./cache/with-invalidation.js";
-import type { InputMode, InputCtx, Prettify } from "../types/misc.js";
+import type {
+  InputMode,
+  InputCtx,
+  Prettify,
+  MergedRootCtx,
+} from "../types/misc.js";
 import { RedisCache } from "./cache/redis-cache.js";
 import { getContext } from "./helpers/get-context.js";
 import { webRouter } from "./helpers/web-router.js";
@@ -75,14 +85,46 @@ import { parseFrameworkError } from "../lib/parse-framework-error.js";
  * ```
  */
 export function createProcedure<
-  TCtx extends Record<string, unknown>,
+  TCtx extends Record<string, unknown> = {},
   TEnrich extends Record<string, unknown> = {},
   TMeta extends Record<string, any> = {},
   GIM extends InputMode = InputMode,
->(opts: ProcedureProps<TCtx, TEnrich, GIM, TMeta>) {
-  opts = opts ?? {};
-  const globalCache = opts.cache ?? new MemoryCache();
-  const globalCompressor = opts.compression ?? new Compressor();
+  const TMiddlewares extends readonly RootMiddleware<
+    NoInfer<TCtx>,
+    NoInfer<TEnrich>,
+    NoInfer<TMeta>
+  >[] = readonly RootMiddleware<
+    NoInfer<TCtx>,
+    NoInfer<TEnrich>,
+    NoInfer<TMeta>
+  >[],
+  const TPlugins extends readonly RootPlugin<
+    NoInfer<TCtx>,
+    NoInfer<TEnrich>,
+    NoInfer<TMeta>
+  >[] = readonly RootPlugin<NoInfer<TCtx>, NoInfer<TEnrich>, NoInfer<TMeta>>[],
+>(
+  opts: ProcedureProps<
+    TCtx,
+    TEnrich,
+    GIM,
+    TMeta,
+    TMeta,
+    TMiddlewares,
+    TPlugins
+  >,
+): ProcedureInstance<
+  MergedRootCtx<TCtx, TMiddlewares, TPlugins>,
+  TEnrich,
+  TMeta,
+  void,
+  any,
+  GIM,
+  "unnamed"
+> {
+  const resolvedOpts = opts ?? {};
+  const globalCache = resolvedOpts.cache ?? new MemoryCache();
+  const globalCompressor = resolvedOpts.compression ?? new Compressor();
 
   // Reuse Redis instance from cache if available for PubSub
   const redisInstance = (globalCache as RedisCache).redis;
@@ -98,7 +140,10 @@ export function createProcedure<
   }
 
   // Default implementations
-  opts.createContext ??= (async () => ({ ok: true, ctx: {} as any })) as any;
+  resolvedOpts.createContext ??= (async () => ({
+    ok: true,
+    ctx: {} as any,
+  })) as any;
 
   function procedureBuilder<
     I = void,
@@ -148,12 +193,16 @@ export function createProcedure<
       },
       //@ts-ignore
       extend(override) {
-        //@ts-ignore
-        return createProcedure(mergeConfigs<TCtx, TEnrich>(opts, override));
+        return createProcedure(
+          //@ts-ignore
+          mergeConfigs<TCtx, TEnrich>(resolvedOpts, override),
+        );
       },
 
       //@ts-ignore
-      cache: (options?: WithCacheOptions<Prettify<Ctx & TEnrich>, I>) => {
+      cache: <P extends unknown[] = any[]>(
+        options?: WithCacheOptionsInput<Prettify<Ctx & TEnrich>, I, P>,
+      ) => {
         return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           cache: {
@@ -165,7 +214,9 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      invalidate: (options: CacheInvalidationOptions<Ctx, I>) => {
+      invalidate: <P extends unknown[] = any[]>(
+        options: CacheInvalidationOptionsInput<Ctx, I, P>,
+      ) => {
         return procedureBuilder<I, Ctx, TLocalMeta, TICtx, TName>({
           ...nextConfig,
           invalidate: {
@@ -295,12 +346,13 @@ export function createProcedure<
 
       resolve<O, P = any>(
         handler: (opts: { ctx: Ctx; input: any }, ...args: P[]) => Promise<O>,
+        overrideConfig?: Partial<ProcedureConfig<Ctx, TEnrich, TLocalMeta>>,
       ) {
         return handlerResolver(
           handler,
           //@ts-ignore
-          opts,
-          nextConfig,
+          resolvedOpts,
+          overrideConfig ? { ...nextConfig, ...overrideConfig } : nextConfig,
           globalCache,
           globalPubSub,
         );
@@ -308,7 +360,10 @@ export function createProcedure<
 
       //@ts-ignore
       mutation(handler) {
-        const nextConfig = { ...config, type: "mutation" };
+        const nextConfig: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
+          ...config,
+          type: "mutation",
+        };
         let exec = handler;
 
         if (nextConfig.timeout?.enabled) {
@@ -336,7 +391,7 @@ export function createProcedure<
         }
 
         //@ts-ignore
-        const resolvedFn = this.resolve(exec);
+        const resolvedFn = this.resolve(exec, nextConfig);
 
         const terminal = async function (this: any, ...args: any[]) {
           // Call the resolved function to get the tuple with this context
@@ -360,7 +415,10 @@ export function createProcedure<
 
       //@ts-ignore
       query(handler) {
-        const nextConfig = { ...config, type: "query" };
+        const nextConfig: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
+          ...config,
+          type: "query",
+        };
         let exec = handler;
 
         if (nextConfig.compression?.enabled) {
@@ -397,7 +455,7 @@ export function createProcedure<
         }
 
         //@ts-ignore
-        const resolvedFn = this.resolve(exec);
+        const resolvedFn = this.resolve(exec, nextConfig);
 
         const terminal = async function (this: any, ...args: any[]) {
           // Call the resolved function to get the tuple with this context
@@ -422,7 +480,7 @@ export function createProcedure<
       webRoute(handler) {
         return webRouter(
           handler,
-          opts,
+          resolvedOpts,
           config,
           globalCache,
           globalPubSub,
@@ -431,43 +489,13 @@ export function createProcedure<
       },
 
       //@ts-ignore
-      stream(handler) {
-        //@ts-ignore
-        const resolvedFn = this.resolve(handler);
-
-        const terminal = async function* (...args: any[]) {
-          const [result, error] = await resolvedFn(...args);
-
-          if (error) {
-            parseFrameworkError(error);
-            if ("_redirect" in error && typeof error._redirect === "function") {
-              error._redirect();
-            }
-            delete error._redirect;
-
-            yield { error };
-            return;
-          }
-
-          if (
-            result &&
-            typeof result === "object" &&
-            (Symbol.asyncIterator in result || Symbol.iterator in result)
-          ) {
-            yield* result;
-          } else {
-            yield result;
-          }
-        };
-
-        (terminal as any)._def = { ...config, type: "stream" };
-        return terminal;
-      },
-
-      //@ts-ignore
       sse(handler) {
+        const nextConfig: ProcedureConfig<Ctx, TEnrich, TLocalMeta> = {
+          ...config,
+          type: "sse",
+        };
         //@ts-ignore
-        const resolvedFn = this.resolve(handler);
+        const resolvedFn = this.resolve(handler, nextConfig);
 
         const terminal = async function* (...args: any[]) {
           const [result, error] = await resolvedFn(...args);
@@ -503,8 +531,8 @@ export function createProcedure<
 
         const terminal = function (payload?: any, ...args: any[]) {
           return async (wsContext: {
-            send: (data: any) => void;
-            broadcast: (data: any) => void;
+            send: (event: any) => void;
+            broadcast: (event: any) => void;
             onMessage: (cb: (data: any) => void) => void;
             onClose: (cb: (evt: CloseEvent) => void) => void;
             onError: (cb: (err: Event) => void) => void;
@@ -516,14 +544,14 @@ export function createProcedure<
                   ctx,
                   input,
                   send: wsContext.send,
-                  broadcast: wsContext.broadcast,
+                  broadcast: wsContext.broadcast ?? (() => {}),
                   onMessage: wsContext.onMessage,
                   onClose: wsContext.onClose,
                   onError: wsContext.onError,
                 });
               },
               //@ts-ignore
-              opts,
+              resolvedOpts,
               nextConfig,
               globalCache,
               globalPubSub,
@@ -546,10 +574,10 @@ export function createProcedure<
   }
 
   return procedureBuilder({
-    meta: opts.meta,
-    middlewares: opts.middlewares,
-    plugins: opts.plugins,
+    meta: resolvedOpts.meta,
+    middlewares: resolvedOpts.middlewares as any,
+    plugins: resolvedOpts.plugins as any,
     name: "unnamed",
-    validationHint: opts.validationHint ?? "Invalid data provided",
+    validationHint: resolvedOpts.validationHint ?? "Invalid data provided",
   });
 }

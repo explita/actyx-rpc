@@ -20,6 +20,7 @@ const proc = createProcedure({
       ok: true,
       ctx: {
         id: "me",
+        fromProc: true,
       },
     };
   },
@@ -43,7 +44,10 @@ const proc = createProcedure({
   meta: {
     globalName: "value",
   },
-  middlewares: [({ next }) => next({ fromRoot: "yes" })],
+  middlewares: [
+    ({ next, ctx }) => next({ fromRoot: "yes" }),
+    ({ next, ctx }) => next({ fromRoot2: "yes" }),
+  ],
   plugins: [
     {
       onBefore({ next, ctx, input }) {
@@ -54,15 +58,18 @@ const proc = createProcedure({
       },
     },
   ],
+  enrichInput({ id }) {
+    return {
+      id,
+    };
+  },
 });
 
 const p2 = proc.extend({
   createContext(ctx) {
     return {
       ok: true,
-      ctx: {
-        id: "me",
-      },
+      ctx: { ...ctx, id: "me" },
     };
   },
   // enrichInput({ ctx, previous }) {
@@ -84,7 +91,18 @@ const p3 = p2.extend({
   enrichInput({ ctx, previous }) {
     return { ...previous, st: 3 };
   },
+  middlewares: [
+    async ({ ctx, next }) => {
+      const testLg: number = ctx.lg;
+      return { mw: 2 };
+    },
+    async ({ ctx }) => {
+      const testLg: number = ctx.lg;
+    },
+  ],
 });
+
+p3.input(z.object({ name: z.string() })).mutation(async ({ ctx, input }) => {});
 
 const p4 = p3.extend({
   createContext(ctx) {
@@ -99,7 +117,7 @@ const p4 = p3.extend({
 });
 
 const md = proc.middleware<{ id: string }>()(async ({ ctx, input, next }) => {
-  return next({ aa: "" });
+  return next({ fromExternalMw: "" });
 });
 
 const getData = proc
@@ -202,7 +220,7 @@ const getData = proc
   )
   .query(async ({ ctx, input }, id: string, name: string) => {
     return {
-      id: 1,
+      id: input.id,
       name: "1",
       date: new Date().toISOString(),
     };
@@ -228,9 +246,12 @@ const streamData = proc
     "Yields a series of chunks with timestamps for testing purposes.",
   )
   .input(zodResolver(z.object({ count: z.number() })))
-  .stream(async function* ({ input }) {
+  .sse(async function* ({ input }) {
     for (let i = 0; i < input.count; i++) {
-      yield { index: i, time: new Date().toISOString() };
+      yield {
+        type: "tick",
+        data: { index: i, time: new Date().toISOString() },
+      };
       await new Promise((r) => setTimeout(r, 100));
     }
   });

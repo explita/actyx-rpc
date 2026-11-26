@@ -163,4 +163,152 @@ describe("Logic: Middleware & Plugins", () => {
     const [result] = await proc({ name: "alice" });
     expect(result).toBe("ALICE");
   });
+
+  it("should expose terminal type to middleware in both opts.type and ctx.type", async () => {
+    let capturedQueryType: string | undefined;
+    let capturedQueryCtxType: string | undefined;
+    let capturedMutationType: string | undefined;
+    let capturedMutationCtxType: string | undefined;
+
+    const mw = procedure.middleware(({ ctx, type, next }) => {
+      if (type === "query") {
+        capturedQueryType = type;
+        capturedQueryCtxType = ctx.type;
+      } else if (type === "mutation") {
+        capturedMutationType = type;
+        capturedMutationCtxType = ctx.type;
+      }
+      return next();
+    });
+
+    const queryProc = procedure.use(mw).query(async () => "query result");
+    const mutationProc = procedure.use(mw).mutation(async () => "mutation result");
+
+    await queryProc();
+    await mutationProc();
+
+    expect(capturedQueryType).toBe("query");
+    expect(capturedQueryCtxType).toBe("query");
+    expect(capturedMutationType).toBe("mutation");
+    expect(capturedMutationCtxType).toBe("mutation");
+  });
+
+  it("supports tenant checking and auto-injection on mutations while bypassing queries", async () => {
+    const availableTenants = [{ id: "tenant-1", name: "Main Organization" }];
+
+    const tenantMw = procedure.middleware(async ({ ctx, input, type, next }) => {
+      // Queries don't require tenant selection
+      if (type === "query") {
+        return next();
+      }
+
+      // For form submissions / mutations:
+      if (availableTenants.length === 1) {
+        if (input && typeof input === "object") {
+          input.tenantId = availableTenants[0].id;
+        }
+        return next({ tenantId: availableTenants[0].id });
+      }
+
+      if (!input?.tenantId) {
+        return {
+          success: false,
+          message: "Please select a tenant to proceed.",
+          reason: "TENANT_REQUIRED",
+          statusCode: 400,
+        };
+      }
+
+      return next({ tenantId: input.tenantId });
+    });
+
+    const queryEndpoint = procedure.use(tenantMw).query(async () => ({ status: "ok" }));
+    const passthrough = { parse: (data: any) => ({ success: true, data }) };
+    const formMutation = procedure
+      .input(passthrough)
+      .use(tenantMw)
+      .mutation(async ({ input, ctx }) => ({
+        submittedTenantId: (input as any).tenantId,
+        ctxTenantId: (ctx as any).tenantId,
+      }));
+
+    // Query succeeds without tenantId
+    const [qRes, qErr] = await queryEndpoint();
+    expect(qErr).toBeNull();
+    expect(qRes).toEqual({ status: "ok" });
+
+    // Mutation auto-injects single tenant
+    const [mRes, mErr] = await formMutation({ title: "New Resource" });
+    expect(mErr).toBeNull();
+    expect(mRes?.submittedTenantId).toBe("tenant-1");
+    expect(mRes?.ctxTenantId).toBe("tenant-1");
+
+    // When multiple tenants exist:
+    availableTenants.push({ id: "tenant-2", name: "Secondary Organization" });
+
+    // Mutation without tenantId fails
+    const [errRes, err] = await formMutation({ title: "New Resource" });
+    expect(errRes).toBeNull();
+    expect(err?.reason).toBe("TENANT_REQUIRED");
+    expect(err?.statusCode).toBe(400);
+
+    // Mutation with explicit tenantId succeeds
+    const [succRes, succErr] = await formMutation({ title: "New Resource", tenantId: "tenant-2" });
+    expect(succErr).toBeNull();
+    expect(succRes?.submittedTenantId).toBe("tenant-2");
+  });
+
+  it("propagates root middlewares and plugins context types to terminals", async () => {
+    const rootProc = createProcedure({
+      createContext: () => ({ ok: true, ctx: { tenantId: "tenant-123" } }),
+      middlewares: [
+        ({ next, ctx }) => next({ fromRootMw: "mw-ok" }),
+      ],
+      plugins: [
+        {
+          onBefore({ next, ctx }) {
+            return next({ fromRootPlugin: "plugin-ok" });
+          },
+        },
+      ],
+    });
+
+    const endpoint = rootProc.query(async ({ ctx }) => {
+      return {
+        tenant: ctx.tenantId,
+        mw: ctx.fromRootMw,
+        plugin: ctx.fromRootPlugin,
+      };
+    });
+
+    const [res, err] = await endpoint();
+    expect(err).toBeNull();
+    expect(res).toEqual({
+      tenant: "tenant-123",
+      mw: "mw-ok",
+      plugin: "plugin-ok",
+    });
+
+    const extendedProc = rootProc.extend({
+      createContext: (ctx: any) => ({ ok: true, ctx: { ...ctx, regionId: "us-east" } }),
+    });
+
+    const extendedEndpoint = extendedProc.query(async ({ ctx }) => {
+      return {
+        tenant: ctx.tenantId,
+        mw: ctx.fromRootMw,
+        plugin: ctx.fromRootPlugin,
+        region: ctx.regionId,
+      };
+    });
+
+    const [extRes, extErr] = await extendedEndpoint();
+    expect(extErr).toBeNull();
+    expect(extRes).toEqual({
+      tenant: "tenant-123",
+      mw: "mw-ok",
+      plugin: "plugin-ok",
+      region: "us-east",
+    });
+  });
 });

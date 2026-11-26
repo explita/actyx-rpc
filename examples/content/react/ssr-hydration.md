@@ -244,6 +244,22 @@ When `unwrap: true` is provided, `prefetchQuery` automatically extracts the inne
 | **Standard** (`unwrap: false`) | `() => appRouter.todos.list()` | `{ data: Todo[] }` | `todos?.data.map(...)` |
 | **Unwrapped** (`unwrap: true`) | `async () => (await appRouter.todos.list())[0]?.data ?? []`<br/>*or* `{ unwrap: true }` | `Todo[]` or `[]` | `todos?.map(...)` |
 
+### Handling Errors on the Server (`[data, err]` Return Tuple)
+
+Both `prefetchQuery` and `prefetchInfiniteQuery` return a `[data, null] | [null, err]` tuple matching your fetcher result (including on fresh cache hits), so Server Components can inspect failures immediately instead of dehydrating an error state:
+
+```tsx
+const [post, err] = await queryClient.prefetchQuery(
+  ["post", id],
+  () => appRouter.posts.getById({ id }),
+);
+
+if (err) {
+  if (err.statusCode === 404) notFound();
+  return <ErrorBanner message={err.message} />;
+}
+```
+
 ---
 
 ## 5. Offline State Persistence (LocalStorage / IndexedDB)

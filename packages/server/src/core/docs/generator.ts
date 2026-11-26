@@ -134,7 +134,7 @@ export function generateOpenApi(
     const defaultMethod =
       config.type === "mutation"
         ? "post"
-        : config.type === "stream" || config.type === "sse"
+        : config.type === "sse"
           ? "get"
           : "get";
 
@@ -150,7 +150,7 @@ export function generateOpenApi(
         ]
       : undefined;
 
-    const isStream = config.type === "stream" || config.type === "sse";
+    const isStream = config.type === "sse";
 
     const responseContent = isStream
       ? {

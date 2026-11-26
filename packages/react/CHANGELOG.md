@@ -3,6 +3,44 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-26
+
+### Added
+
+- **Native `dedupKey` Automatic Upsert in `QueryClient` & Hooks**:
+  - `QueryClient.append`, `QueryClient.prepend`, and `QueryClient.insert` now accept an optional `{ dedupKey?: (item) => any }` options argument (and fall back to global per-query options registered via `queryClient.setQueryOptions` / `getQueryOptions`).
+  - When a matching item is found across cached arrays or `pages`, it is updated **in-place** with surgical rollback support instead of creating duplicates; non-matching items append/prepend/insert as usual.
+  - `useQuery`, `useInfiniteQuery`, and `usePaginatedQuery` automatically register `dedupKey` and forward override options directly to `QueryClient` without wrapper boilerplate.
+  - `useWSInfiniteQuery` and `useSSEInfiniteQuery` compute dynamic `"added"` vs `"updated"` actions in `onData` using `dedupKey`.
+- **Real-Time Typing Indicators (`useWS` & `useWSInfiniteQuery`)**:
+  - Added automated typing indicator management via `typing: false | WSTypingOptions` (`currentUserId` required, plus optional `event`, `timeout`, `throttle`, `getUser`, `clearOnMessage`).
+  - Exposes `isTyping`, `typingUsers`, and `sendTyping` directly on `UseWSResult` and `UseWSInfiniteQueryResult`.
+  - Automatically intercepts typing events before they enter `data`, throttles outgoing `sendTyping()` calls (default `"1.5s"`), expires inactive users per-user (default `"2s"`), and clears typing users when a regular message arrives (`clearOnMessage: true`).
+  - `currentUserId` automatically stamps outgoing `sendTyping()` payloads (`{ user: { id: currentUserId } }`) and excludes local keystrokes from `isTyping` / `typingUsers` — making 1-on-1 chats work with `currentUserId` alone.
+  - Built-in `defaultExtractTypingUser` normalizes `user`, `sender`, `author`, and flat `userId`/`senderId`/`authorId` payloads, with `getUser` for custom shapes and full TypeScript inference (`TypingUser`, `ExtractTypingUserFromOutput`, `NormalizeTypingUser`, `ExtractTypingUserFromOpts`).
+- **Hybrid Client & Server Search (`useClientFilter` & Query Hooks)**:
+  - Added `useClientFilter` hook and `search` configuration (`mode: "auto" | "client-only" | "server-only"`, `debounce`, `initial`, `filter`) across `useQuery`, `useInfiniteQuery`, and `usePaginatedQuery`, plus global defaults on `QueryClient`.
+  - Exposes `search`, `setSearch`, `resetSearch`, `isFiltered`, and `unfilteredData`.
+  - In `"auto"` mode, searches run against the server when more pages remain (`hasNext`) and seamlessly switch to zero-latency in-memory filtering once the full dataset is loaded.
+  - Defers local filtering while a server search is debounced or in-flight so partial data does not flash empty.
+- **`useMutation` & `SSEEventContext` Type Helpers**:
+  - Exported `MutationCtx`, `DropActionContext`, `DropMutationCtx`, and `SSEEventContext`.
+
+### Changed
+
+- **`QueryResult.update` Returns Rollback Function**:
+  - Single-argument whole-state `query.update(valueOrUpdater)` on `useQuery` now captures a `QueryClient.snapshot(queryKey)` prior to updating and returns the `() => void` rollback function, matching `append`, `prepend`, `insert`, `remove`, and 2-arg `update`.
+  - Updated `QueryResult.update` TypeScript overloads to return `() => void` across both whole-state and array-item forms.
+- **`prefetchQuery` & `prefetchInfiniteQuery` Return `[data, err]` Tuple**:
+  - `QueryClient.prefetchQuery` and `QueryClient.prefetchInfiniteQuery` now return `Promise<[TOutput, null] | [null, TError]>` (including `[existing.data, null]` / `[existing.data.pages[0], null]` on fresh cache hits) so Server Components can handle errors directly without dehydrating error states.
+
+### Fixed
+
+- **Disabled Query `isLoading` Guard**:
+  - Updated `isLoading` in `useQuery`, `useInfiniteQuery`, and `usePaginatedQuery` to include `&& enabled !== false`, preventing disabled queries from reporting `isLoading: true`.
+- **WebSocket Strict-Mode & Handshake Cleanup**:
+  - Added `closeSocketSafely` to defer closing `CONNECTING` WebSockets until `onopen`, preventing premature handshake warnings during React Strict Mode mount/unmount cycles.
+
 ## [0.3.1] - 2026-09-30
 
 ### Added

@@ -18,15 +18,25 @@ Combines `useInfiniteQuery` with `useWS` for bi-directional WebSocket-powered in
 ```tsx
 import { useWSInfiniteQuery } from "@explita/actyx-rpc-react";
 import { getFeedPosts } from "@/backend/procedures";
+import { useState, useCallback } from "react";
 
 function LiveFeed() {
+  const [input, setInput] = useState("");
+
   const {
     data: posts,
     fetchNext,
     hasNext,
     isFetching,
-    isConnected,
+    status,
+    connect,
+    disconnect,
+    send,
+    isTyping,
+    typingUsers,
+    sendTyping,
     error,
+    queryError,
   } = useWSInfiniteQuery(getFeedPosts, {
     // Infinite query options
     queryOpts: {
@@ -36,21 +46,59 @@ function LiveFeed() {
     },
     // WebSocket options
     url: "/api/ws/feed",
+    typing: {
+      timeout: "2s",
+      throttle: "1.5s",
+      currentUserId: "user-123", // Filters out self and stamps outgoing typing events
+      getUser: (data) => data.user,
+    },
     // Called on each incoming WS message
-    onData({ data: newPost, prepend }) {
+    onData({ event, prepend }) {
       // Prepend incoming live posts to the cache
-      prepend(newPost);
+      const post = event?.data ?? event;
+      prepend(post);
+    },
+    onConnected() {
+      console.log("WebSocket connected to feed!");
+    },
+    onDisconnected(evt) {
+      console.log("WebSocket disconnected from feed, code:", evt.code);
     },
   });
 
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setInput(e.target.value);
+      if (e.target.value.trim()) {
+        sendTyping();
+      }
+    },
+    [sendTyping],
+  );
+
   return (
     <div>
-      <p>Status: {isConnected ? "🟢 Live" : "🔴 Disconnected"}</p>
+      <div className="status-bar">
+        <p>Status: {status === "connected" ? "🟢 Live" : `🔴 ${status}`}</p>
+        {status === "connected" ? (
+          <button onClick={disconnect}>Disconnect Stream</button>
+        ) : (
+          <button onClick={connect}>Connect Stream</button>
+        )}
+      </div>
+
       <ul>
         {posts.map((post) => (
           <li key={post.id}>{post.title}</li>
         ))}
       </ul>
+
+      {isTyping && (
+        <p className="typing">
+          {typingUsers.map((u) => u.name ?? u.id).join(", ")} is typing...
+        </p>
+      )}
+
       {hasNext && (
         <button onClick={() => fetchNext()} disabled={isFetching}>
           {isFetching ? "Loading..." : "Load More"}
@@ -67,47 +115,57 @@ function LiveFeed() {
 
 **Infinite Query Options** (`queryOpts`):
 
-| Option                 | Type                             | Default     | Description                                                              |
-| :--------------------- | :------------------------------- | :---------- | :----------------------------------------------------------------------- |
-| `input`                | `WithoutCursor<TInput>`          | —           | Base input parameters for the first page fetch.                          |
-| `initialPageParam`     | `string \| number`               | `undefined` | Cursor for the first page.                                               |
-| `getNextPageParam`     | `(lastPage, allPages) => cursor` | —           | Determines the next cursor.                                              |
-| `queryKey`             | `unknown[]`                      | —           | Cache identification key.                                                |
-| `maxPages`             | `number`                         | —           | Maximum pages to keep in cache.                                          |
-| `enabled`              | `boolean`                        | `true`      | Enable/disable fetching on mount.                                        |
-| `staleTime`            | `number \| string`               | `0`         | Time before data is considered stale.                                    |
-| `gcTime`               | `number \| string`               | `5min`      | Time before unused cache is garbage collected.                           |
-| `refetchInterval`      | `number`                         | `0`         | Polling interval in ms.                                                  |
-| `refetchOnWindowFocus` | `boolean`                        | `false`     | Refetch on window focus.                                                 |
-| `refetchOnReconnect`   | `boolean \| "always"`            | `true`      | Refetch on network restore.                                              |
-| `keepPreviousData`     | `boolean`                        | `true`      | Keep old data visible during refetch instead of flashing an empty state. |
-| `initialData`          | `data \| (() => data)`           | —           | Pre-populate cache on mount.                                             |
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `input` | `WithoutCursor<TInput>` | — | Base input parameters for the first page fetch. |
+| `initialPageParam` | `string \| number` | `undefined` | Cursor for the first page. |
+| `getNextPageParam` | `(lastPage, allPages) => cursor` | — | Determines the next cursor. |
+| `queryKey` | `unknown[]` | — | Cache identification key. |
+| `maxPages` | `number` | — | Maximum pages to keep in cache. |
+| `enabled` | `boolean` | `true` | Enable/disable fetching on mount. |
+| `staleTime` | `number \| string` | `0` | Time before data is considered stale. |
+| `gcTime` | `number \| string` | `5min` | Time before unused cache is garbage collected. |
+| `refetchInterval` | `number` | `0` | Polling interval in ms. |
+| `refetchOnWindowFocus` | `boolean` | `false` | Refetch on window focus. |
+| `refetchOnReconnect` | `boolean \| "always"` | `true` | Refetch on network restore. |
+| `keepPreviousData` | `boolean` | `true` | Keep old data visible during refetch instead of flashing an empty state. |
+| `dedupKey` | `(item: TPage) => any` | — | Key selector function for automatic in-place upsert deduplication when appending or prepending incoming messages. |
+| `initialData` | `data \| (() => data)` | — | Pre-populate cache on mount. |
 
-**WebSocket Options** (all `useWS` options except `onData`):
+**WebSocket Options** (all `useWS` options except raw `initialData`):
 
-| Option           | Type                                           | Default | Description                                                                                                                                              |
-| :--------------- | :--------------------------------------------- | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`            | `string`                                       | —       | WebSocket server URL.                                                                                                                                    |
-| `initialData`    | `TOutput[] \| (() => MaybePromise<TOutput[]>)` | —       | Pre-populate the data array.                                                                                                                             |
-| `enabled`        | `boolean`                                      | `true`  | Set to `false` to prevent connecting.                                                                                                                    |
-| `onData`         | `(opts: WSEventContext) => void`               | —       | Callback receiving `{ data, action, allData, append, prepend, insert, update }` for custom cache mutations.                                              |
-| `onError`        | `(err) => void`                                | —       | Connection error callback.                                                                                                                               |
-| `onSubscribed`   | `() => void`                                   | —       | Connection established callback.                                                                                                                         |
-| `onUnsubscribed` | `(evt: CloseEvent) => void`                    | —       | Connection closed callback. Receives the `CloseEvent`.                                                                                                   |
-| `onWindowFocus`  | `(opts: InfiniteQueryContext) => void`         | —       | Callback when window regains focus. Receives `{ data, pages, pageParams, refetch, reset, prepend, append, insert, update, remove, setPages, snapshot }`. |
-| `onReconnect`    | `(opts: InfiniteQueryContext) => void`         | —       | Callback when network reconnects. Receives the same extended infinite query context as `onWindowFocus`.                                                  |
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `url` | `string` | — | WebSocket server URL. |
+| `enabled` | `boolean` | `true` | Set to `false` to prevent connecting automatically. |
+| `typing` | `false \| WSTypingOptions` | `false` | Enables built-in typing indicator management (`isTyping`, `typingUsers`, `sendTyping`). Requires `currentUserId`. |
+| `events` | `TEvent` | — | Type marker for discriminating incoming event union shapes. |
+| `schema` | `TData` | — | Type witness used to infer the WebSocket live item shape without explicit generics. |
+| `onData` | `(opts: WSEventContext) => void` | — | Callback receiving `{ event, action, items, append, prepend, insert, update }` for custom cache mutations. |
+| `onError` | `(err: ErrorResponse) => void` | — | WebSocket connection error callback. |
+| `onConnected` | `() => void` | — | Connection established callback. *(Also supports `onSubscribed` for backwards compatibility).* |
+| `onDisconnected` | `(evt: CloseEvent) => void` | — | Connection closed callback. Receives the `CloseEvent`. *(Also supports `onUnsubscribed` for backwards compatibility).* |
+| `onWindowFocus` | `(opts: InfiniteQueryContext) => void` | — | Callback when window regains focus. Receives extended context `{ data, pages, pageParams, refetch, reset, prepend, append, insert, update, remove, setPages, snapshot }`. |
+| `onReconnect` | `(opts: InfiniteQueryContext) => void` | — | Callback when network reconnects. Receives the same extended infinite query context as `onWindowFocus`. |
 
 ### Returned Properties
 
-Returns all properties from `useInfiniteQuery` **plus** the following from `useWS`:
+Returns all properties from `useInfiniteQuery` **plus** WebSocket controls and typing indicators:
 
-| Property      | Type                                               | Description                              |
-| :------------ | :------------------------------------------------- | :--------------------------------------- |
-| `send`        | `(data) => void`                                   | Send a message over the WebSocket.       |
-| `unsubscribe` | `() => void`                                       | Manually close the WebSocket connection. |
-| `status`      | `"idle" \| "connecting" \| "connected" \| "error"` | Connection state.                        |
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `data` | `TData[]` | Flattened collection of items across all pages, reactively merged with incoming WebSocket events. |
+| `send` | `(data) => void` | Send a message over the WebSocket connection. |
+| `connect` | `() => void` | Initiates or re-establishes the WebSocket connection. |
+| `disconnect` | `() => void` | Cleanly closes the WebSocket connection. |
+| `status` | `WsStatus` | Current socket connection state: `"idle" \| "connecting" \| "reconnecting" \| "connected" \| "error"`. |
+| `error` | `ErrorResponse \| undefined` | Active WebSocket connection error. |
+| `queryError` | `ErrorResponse \| null` | Error from the underlying infinite query HTTP fetch, if any. |
+| `isTyping` | `boolean` | Whether any other user is currently typing. |
+| `typingUsers` | `TTypingUser[]` | List of other users actively typing. |
+| `sendTyping` | `(payload?) => void` | Sends a throttled typing indicator event over the active socket. |
 
-All cache mutation helpers (`remove`, `update`, `prepend`, `append`, `insert`, `setPages`, `snapshot`) from the underlying infinite query are also available.
+All cache mutation helpers (`remove`, `update`, `prepend`, `append`, `insert`, `setPages`, `snapshot`) from the underlying infinite query are also directly available on the returned object.
 
 ---
 

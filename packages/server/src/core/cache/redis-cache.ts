@@ -2,6 +2,7 @@ import type { Redis } from "ioredis";
 import type {
   CacheAdapter,
   CacheEntry,
+  CacheSetOpts,
   RedisCacheOptions,
   RedisInstance,
   WindowTime,
@@ -20,7 +21,7 @@ export class RedisCache implements CacheAdapter {
 
   constructor(redis: RedisInstance, options: RedisCacheOptions) {
     this.redis = typeof redis === "function" ? redis() : redis;
-    this.prefix = options.prefix ?? "actyx:cache:";
+    this.prefix = options.prefix ?? "_actyx:cache:";
     this.defaultTTL = parseWindow(options.defaultTTL ?? "1m"); // milliseconds
     this.defaultStaleTime = parseWindow(options.defaultStaleTime ?? "0m");
     this.serializer = options.serializer ?? {
@@ -64,11 +65,7 @@ export class RedisCache implements CacheAdapter {
     await pipeline.exec();
   }
 
-  async set<T>(
-    key: string,
-    data: T,
-    options?: { ttl?: WindowTime; staleTime?: WindowTime },
-  ): Promise<void> {
+  async set<T>(key: string, data: T, options?: CacheSetOpts): Promise<void> {
     if (data === undefined || data === null) return;
     const ttl = parseWindow(options?.ttl ?? this.defaultTTL);
     const staleTime = parseWindow(options?.staleTime ?? this.defaultStaleTime);
@@ -87,11 +84,47 @@ export class RedisCache implements CacheAdapter {
 
     const ttlSeconds = Math.ceil(ttl / 1000);
 
+    if (options?.tags) {
+      this.addTag(key, options.tags, options.ttl);
+    }
+
     if (ttlSeconds > 0) {
       await this.redis.set(redisKey, serialized, "EX", ttlSeconds);
     } else {
       await this.redis.set(redisKey, serialized);
     }
+  }
+
+  async remember<T>(
+    key: string,
+    fn: () => Promise<T>,
+    options?: CacheSetOpts,
+  ): Promise<T> {
+    const cached = await this.get<T>(key);
+    if (cached !== undefined) {
+      if (cached.isStale) {
+        Promise.resolve(fn())
+          .then((val) => this.set(key, val, options))
+          .catch(() => {});
+      }
+
+      if (options?.tags) {
+        this.addTag(key, options.tags, options.ttl);
+      }
+
+      return cached.data;
+    }
+
+    const result = await fn();
+    if (result !== undefined && result !== null) {
+      await this.set(key, result, options);
+
+      if (options?.tags) {
+        this.addTag(key, options.tags, options.ttl);
+      }
+    }
+
+    return result;
   }
 
   async get<T>(key: string): Promise<CacheEntry<T> | undefined> {
@@ -138,14 +171,19 @@ export class RedisCache implements CacheAdapter {
     return result > 0;
   }
 
-  async addTag(key: string, tags: string | string[]): Promise<void> {
+  async addTag(
+    key: string,
+    tags: string | string[],
+    ttl?: WindowTime,
+  ): Promise<void> {
     const tagList = Array.isArray(tags) ? tags : [tags];
     const pipeline = this.redis.pipeline();
+    const parsedTTL = parseWindow(ttl ?? this.defaultStaleTime);
 
     for (const tag of tagList) {
       const tagKey = `${this.prefix}:tag:${tag}`;
       pipeline.sadd(tagKey, key);
-      pipeline.expire(tagKey, 3600); // TTL for tag index
+      pipeline.expire(tagKey, parsedTTL); // TTL for tag index
     }
 
     await pipeline.exec();

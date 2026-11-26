@@ -28,7 +28,8 @@ export type BuiltinFailureReason =
   | "HTTP_ERROR"
   | "MAX_RETRIES_EXCEEDED"
   | "BATCH_RESULT_MISSING"
-  | "INVALID_BATCH_RESPONSE";
+  | "INVALID_BATCH_RESPONSE"
+  | "DISABLED";
 
 declare global {
   namespace ActyxRPC {
@@ -46,8 +47,41 @@ declare global {
      * }
      */
     interface RegisterCustomErrors {}
+
+    /**
+     * Ambient namespace to register the global cursor type for infinite and paginated queries.
+     * Defaults to `unknown` if omitted.
+     *
+     * @example
+     * declare global {
+     *   namespace ActyxRPC {
+     *     interface RegisterCursor {
+     *       cursor: number; // or string, or { id: string; createdAt: Date }
+     *     }
+     *   }
+     * }
+     */
+    interface RegisterCursor {}
   }
 }
+
+/**
+ * Register global cursor type via declaration merging.
+ *
+ * @example
+ * ```ts
+ * declare module "@explita/actyx-rpc-react" {
+ *   interface RegisterCursor {
+ *     cursor: number;
+ *   }
+ * }
+ * ```
+ */
+export interface RegisterCursor extends ActyxRPC.RegisterCursor {}
+
+export type RegisteredCursor = RegisterCursor extends { cursor: infer TCursor }
+  ? TCursor
+  : unknown;
 
 /**
  * Register custom error reasons globally via declaration merging.
@@ -101,7 +135,7 @@ export type MaybePromise<T> = Promise<T> | T;
  * human-readable string with a unit suffix (`"5s"`, `"30m"`, `"2h"`, `"1d"`, `"1w"`, `"1M"`).
  */
 export type WindowTime =
-  | `${number}${"s" | "m" | "h" | "d" | "w" | "M"}`
+  | `${number}${"ms" | "s" | "m" | "h" | "d" | "w" | "M"}`
   | number;
 
 /**
@@ -165,10 +199,39 @@ export type ErrorResponse = {
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
 /**
+ * Context type accepted by mutation action handlers or returned by `onMutate`.
+ * Handlers can also accept plain context objects naturally without using this type helper.
+ */
+export type MutationCtx<T = unknown> = T;
+
+/**
+ * Strips a trailing context parameter from an argument tuple if it matches `TContext`.
+ */
+export type DropActionContext<
+  TParams extends any[],
+  TContext,
+> = unknown extends TContext
+  ? TParams
+  : [TContext] extends [Record<string, any>]
+    ? TParams extends [...infer TUserArgs, infer TLast]
+      ? 0 extends 1 & TLast
+        ? TParams
+        : [TContext] extends [NonNullable<TLast>]
+          ? TUserArgs
+          : TParams
+      : TParams
+    : TParams;
+
+export type DropMutationCtx<
+  TParams extends any[],
+  TContext = any,
+> = DropActionContext<TParams, TContext>;
+
+/**
  * Configuration options for the `useMutation` hook.
  *
  * @template TOutput - Data type returned by the procedure on success.
- * @template TArgs - Tuple of arguments accepted by `mutate` / `mutateAsync`.
+ * @template TArgs - Tuple of arguments accepted by the action procedure.
  * @template TContext - Value returned by `onMutate` and forwarded to callbacks.
  * @template TMutationKey - Shape of the mutation key array used for tracking/invalidation.
  * @template TAction - The action passed to the hook (a procedure function or a URL string).
@@ -178,24 +241,22 @@ export type UseMutationOpts<
   TArgs extends any[] = any[],
   TContext = unknown,
   TMutationKey extends unknown[] = unknown[],
-  TAction extends
-    | ((...args: TArgs) => Promise<MutationResult<TOutput>>)
-    | string = (...args: TArgs) => Promise<MutationResult<TOutput>>,
+  TAction extends ((...args: any[]) => Promise<any>) | string = any,
 > = {
+  /**
+   * Whether the procedure should be executed.
+   */
+  enabled?: boolean | ((...args: TArgs) => MaybePromise<boolean>);
   /**
    * Callback function to be executed when the procedure is successful.
    * @param data The data returned by the procedure.
    */
-  onSuccess?: (
-    data: TOutput,
-    context: TContext | undefined,
-    ...args: TArgs
-  ) => void;
+  onSuccess?: (data: TOutput, context: TContext, ...args: TArgs) => void;
   /**
    * Callback function to be executed when the procedure fails.
    * @param error The error message.
    */
-  onError?: (error: ErrorResponse, context: TContext | undefined) => void;
+  onError?: (error: ErrorResponse, context: TContext, ...args: TArgs) => void;
   /**
    * Callback function to be executed when the procedure fails due to validation errors.
    * @param errors The validation errors.
@@ -214,7 +275,8 @@ export type UseMutationOpts<
   onSettled?: (
     data: TOutput | undefined,
     error: ErrorResponse | undefined,
-    context: TContext | undefined,
+    context: TContext,
+    ...args: TArgs
   ) => void;
   /**
    * Callback function to be executed before the procedure is mutated.
@@ -226,7 +288,7 @@ export type UseMutationOpts<
    * @param args The arguments for the procedure.
    * @returns The context for the procedure.
    */
-  onMutate?: (...args: TArgs) => Promise<TContext> | TContext;
+  onMutate?: (...args: TArgs) => MaybePromise<TContext>;
 
   /**
    * Optimistic update function.
@@ -292,9 +354,7 @@ export interface UseMutationResult<
   TOutput,
   TArgs extends any[] = any[],
   TContext = unknown,
-  TAction extends
-    | ((...args: TArgs) => Promise<MutationResult<TOutput, any, any>>)
-    | string = string,
+  TAction extends ((...args: any[]) => Promise<any>) | string = string,
   TInput = TArgs extends [infer First, ...any[]] ? First : undefined,
 > {
   /**
@@ -336,7 +396,7 @@ export interface UseMutationResult<
    */
   abort: TAction extends string ? () => void : undefined;
   /** The context value returned by `onMutate`, if any. */
-  context: TContext | undefined;
+  context: TContext;
 }
 
 /**
@@ -385,12 +445,56 @@ export type PaginationArgs<TArgs extends unknown[]> = TArgs extends [
 export type InfiniteQueryPage<TData> = Omit<
   {
     data: TData[];
-    nextCursor?: string | number | null;
-    previousCursor?: string | number;
+    nextCursor?: RegisteredCursor | null;
+    previousCursor?: RegisteredCursor;
     hasMore: boolean;
   },
   "success"
 >;
+
+export type SearchFilterFn<TItem> = (
+  item: TItem,
+  query: string,
+  index: number,
+  array: TItem[],
+) => boolean;
+
+export type SearchOpts<TItem = any> = {
+  /**
+   * Client-side filter predicate applied against the dataset when searching.
+   *
+   * @param item - The item being evaluated.
+   * @param query - The current search query string from `search` / `setSearch`.
+   * @param index - The index of the item in the unfiltered array.
+   * @param array - The full unfiltered array.
+   */
+  filter?: SearchFilterFn<TItem>;
+
+  /**
+   * Initial search query on mount.
+   * @default ""
+   */
+  initial?: string;
+
+  /**
+   * - `"auto"` (default): Searches on the server when more pages exist (`hasNext === true`),
+   *   and seamlessly switches to instant zero-latency client filtering once the entire dataset is loaded (`hasNext === false`).
+   * - `"client-only"`: Never calls the server for search queries; filters cached items in memory via `filter`.
+   * - `"server-only"`: Always executes search queries against the server, resetting pagination to page 1.
+   * @default "auto"
+   */
+  mode?: "auto" | "client-only" | "server-only";
+
+  /**
+   * Debounce time in milliseconds (or WindowTime e.g. "300ms") for server search queries.
+   * @default 300
+   */
+  debounce?: number | WindowTime;
+};
+
+export type QueryCacheMutationOpts<TItem = any> = {
+  dedupKey?: (item: TItem) => unknown;
+};
 
 /**
  * Configuration options for infinite query hooks
@@ -501,6 +605,26 @@ export type UseInfiniteQueryOpts<
   arrange?: (data: TPage[]) => TPage[];
 
   /**
+   * Search evaluation mode, debounce settings, and client filtering predicate for hybrid pagination search.
+   * Accepts either a filter predicate function shorthand or a configuration object.
+   *
+   * @example
+   * ```tsx
+   * // Function shorthand:
+   * search: (user, query) => user.name.includes(query)
+   *
+   * // Object configuration:
+   * search: {
+   *   filter: (user, query) => user.name.includes(query),
+   *   initial: "ade",
+   *   mode: "auto",
+   *   debounce: "300ms",
+   * }
+   * ```
+   */
+  search?: SearchFilterFn<TPage> | SearchOpts<TPage>;
+
+  /**
    * Whether to keep the previous data while fetching new data.
    * If `true`, the UI will continue showing the old data during refetch
    * instead of flashing an empty state. Only applies to refetches, not initial fetch.
@@ -569,6 +693,13 @@ export type UseInfiniteQueryOpts<
    * @default false
    */
   syncSelection?: boolean | ((a: TPage, b: TPage) => boolean);
+
+  /**
+   * Key selector for deduplication during append/prepend operations.
+   * If an item with the same dedupKey already exists in the cache, it is updated in-place
+   * instead of being appended/prepended again.
+   */
+  dedupKey?: (item: TPage) => unknown;
 };
 
 /**
@@ -685,21 +816,31 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    *
    * Returns a rollback function to revert this update.
    */
-  prepend: (item: TPage | TPage[]) => () => void;
+  prepend: (
+    item: TPage | TPage[],
+    options?: QueryCacheMutationOpts<TPage>,
+  ) => () => void;
 
   /**
    * Manually appends an item to the last page.
    *
    * Returns a rollback function to revert this update.
    */
-  append: (item: TPage | TPage[]) => () => void;
+  append: (
+    item: TPage | TPage[],
+    options?: QueryCacheMutationOpts<TPage>,
+  ) => () => void;
 
   /**
    * Manually inserts an item at a specific flattened index.
    *
    * Returns a rollback function to revert this update.
    */
-  insert: (index: number, item: TPage | TPage[]) => () => void;
+  insert: (
+    index: number,
+    item: TPage | TPage[],
+    options?: QueryCacheMutationOpts<TPage>,
+  ) => () => void;
 
   /**
    * Manually updates the cached pages structure using an updater function.
@@ -714,6 +855,33 @@ export type InfiniteQueryResult<TPage, TFullPage = InfiniteQueryPage<TPage>> = {
    * Returns a rollback function to restore the cache to this snapshot state.
    */
   snapshot: () => () => void;
+
+  /**
+   * The current client-side search query string.
+   * Can be bound directly to controlled inputs: `<input value={search} onChange={e => setSearch(e.target.value)} />`.
+   */
+  search: string;
+
+  /**
+   * Updates the client-side search query and re-filters `data`.
+   */
+  setSearch: (query: string) => void;
+
+  /**
+   * Resets the client-side search query back to `""` (or `initialSearch`).
+   */
+  resetSearch: () => void;
+
+  /**
+   * Whether client-side filtering is currently active (`search.trim().length > 0`).
+   */
+  isFiltered: boolean;
+
+  /**
+   * The full, unfiltered dataset before client-side `filter` was applied.
+   * Useful for displaying total counts (e.g. "Showing {data.length} of {unfilteredData.length}").
+   */
+  unfilteredData: TPage[];
 };
 
 /**
@@ -816,6 +984,48 @@ export type UseQueryOpts<
    * Transform the data before it is returned to the component.
    */
   select?: (data: NoInfer<Unwrap<TOutput, TUnwrap>>) => TSelectData;
+
+  /**
+   * Search evaluation and client filtering predicate.
+   * Accepts either a filter predicate function shorthand or a configuration object.
+   *
+   * @example
+   * ```tsx
+   * // Function shorthand:
+   * search: (item, query) => item.name.includes(query)
+   *
+   * // Object configuration:
+   * search: {
+   *   filter: (item, query) => item.name.includes(query),
+   *   initial: "active",
+   * }
+   * ```
+   */
+  search?:
+    | SearchFilterFn<
+        [NonNullable<NoInfer<TSelectData>>] extends [readonly (infer Item)[]]
+          ? Item
+          : any
+      >
+    | {
+        filter?: SearchFilterFn<
+          [NonNullable<NoInfer<TSelectData>>] extends [readonly (infer Item)[]]
+            ? Item
+            : any
+        >;
+        initial?: string;
+      };
+
+  /**
+   * Key selector for deduplication during append/prepend operations.
+   * If an item with the same dedupKey already exists in the cache, it is updated in-place
+   * instead of being appended/prepended again.
+   */
+  dedupKey?: (
+    item: [NonNullable<NoInfer<TSelectData>>] extends [readonly (infer Item)[]]
+      ? Item
+      : any,
+  ) => unknown;
 };
 
 export type ExtractTupleData<R> = Extract<R, [any, null]>[0];
@@ -1080,9 +1290,7 @@ export type QueryResult<
       Unwrap<TOutput, TUnwrap>,
       TInitialData extends undefined ? false : true
     >,
-  ) => TInitialData extends undefined
-    ? Unwrap<TOutput, TUnwrap> | undefined
-    : Unwrap<TOutput, TUnwrap>;
+  ) => () => void;
 } & ([NonNullable<TSelectData>] extends [readonly (infer Item)[]]
   ? {
       /**
@@ -1090,21 +1298,31 @@ export type QueryResult<
        *
        * Returns a rollback function to revert this update.
        */
-      prepend: (item: Item | Item[]) => () => void;
+      prepend: (
+        item: Item | Item[],
+        options?: QueryCacheMutationOpts<Item>,
+      ) => () => void;
 
       /**
        * Appends an item or array of items to the end of the cached array.
        *
        * Returns a rollback function to revert this update.
        */
-      append: (item: Item | Item[]) => () => void;
+      append: (
+        item: Item | Item[],
+        options?: QueryCacheMutationOpts<Item>,
+      ) => () => void;
 
       /**
        * Inserts an item or array of items at a specific index in the cached array.
        *
        * Returns a rollback function to revert this update.
        */
-      insert: (index: number, item: Item | Item[]) => () => void;
+      insert: (
+        index: number,
+        item: Item | Item[],
+        options?: QueryCacheMutationOpts<Item>,
+      ) => () => void;
 
       /**
        * Removes an item from the cached array by index or predicate function.
@@ -1139,23 +1357,181 @@ export type QueryResult<
             Unwrap<TOutput, TUnwrap>,
             TInitialData extends undefined ? false : true
           >,
-        ): TInitialData extends undefined
-          ? Unwrap<TOutput, TUnwrap> | undefined
-          : Unwrap<TOutput, TUnwrap>;
+        ): () => void;
       };
+
+      /**
+       * The current client-side search query string.
+       * Can be bound directly to controlled inputs: `<input value={search} onChange={e => setSearch(e.target.value)} />`.
+       */
+      search: string;
+
+      /**
+       * Updates the client-side search query and re-filters `data`.
+       */
+      setSearch: (query: string) => void;
+
+      /**
+       * Resets the client-side search query back to `""` (or `initialSearch`).
+       */
+      resetSearch: () => void;
+
+      /**
+       * Whether client-side filtering is currently active (`search.trim().length > 0`).
+       */
+      isFiltered: boolean;
+
+      /**
+       * The full, unfiltered dataset before client-side `filter` was applied.
+       * Useful for displaying total counts (e.g. "Showing {data.length} of {unfilteredData.length}").
+       */
+      unfilteredData: TInitialData extends undefined
+        ? TSelectData | undefined
+        : TSelectData;
     }
   : {});
+
+/**
+ * A user currently typing in a real-time WebSocket channel.
+ */
+export type TypingUser<T = Record<string, any>> = Prettify<
+  {
+    id: string | number;
+    name?: string;
+  } & T
+>;
+
+/**
+ * Utility type to automatically extract a user/author structure from a message or output payload.
+ * Inspects standard properties: `data.user`, `data.sender`, `data.author`.
+ * Supports both required and optional properties (e.g. `user?: { id, name }`).
+ */
+export type ExtractTypingUserFromOutput<T> = 0 extends 1 & T
+  ? any
+  : T extends object
+    ? "user" extends keyof T
+      ? NonNullable<T["user"]> extends object
+        ? NonNullable<T["user"]>
+        : any
+      : "sender" extends keyof T
+        ? NonNullable<T["sender"]> extends object
+          ? NonNullable<T["sender"]>
+          : any
+        : "author" extends keyof T
+          ? NonNullable<T["author"]> extends object
+            ? NonNullable<T["author"]>
+            : any
+          : any
+    : any;
+
+/**
+ * Normalizes any returned user shape from `getUser` into a valid object type for `TypingUser`.
+ */
+export type NormalizeTypingUser<T> = T extends object
+  ? T extends { id: any }
+    ? T
+    : { id: string | number } & T
+  : Record<string, any>;
+
+/**
+ * Extracts typing user shape from hook options:
+ * - If `opts.typing.getUser` is provided: infers directly from its return type.
+ * - Otherwise: infers from message payload `ExtractTypingUserFromOutput<TOutput>`.
+ */
+export type ExtractTypingUserFromOpts<TOpts, TOutput> = TOpts extends {
+  typing: { getUser: (data: any) => infer R };
+}
+  ? NormalizeTypingUser<R>
+  : ExtractTypingUserFromOutput<TOutput>;
+
+/**
+ * Configuration options for automated typing indicator management in `useWS`.
+ */
+export type WSTypingOptions<TTypingUser = any, TOutput = any> = {
+  /**
+   * Event type name that represents typing signals.
+   * @default "typing"
+   */
+  event?: string;
+
+  /**
+   * Duration before a typing indicator automatically expires if no new typing event is received.
+   * Can be a number in milliseconds or a WindowTime string (e.g. "2s", 2000).
+   * @default "2s"
+   */
+  timeout?: WindowTime;
+
+  /**
+   * Current user's identifier used to exclude their own typing events from `typingUsers` and `isTyping`.
+   *
+   * In 1-on-1 chats between two users, specifying `currentUserId` is all you need:
+   * - Automatically stamps outgoing `sendTyping()` calls with `{ user: { id: currentUserId } }`.
+   * - Excludes local typing events so `isTyping` cleanly indicates whether the other person is typing.
+   *
+   * In group chats where you display who is typing by name or avatar, pass standard user payloads
+   * (`user`, `author`, `sender`) or use `getUser`.
+   */
+  currentUserId: string | number;
+  // | ((user: TypingUser<TTypingUser>) => boolean);
+
+  /**
+   * Function to extract user identity from typing or message event payloads.
+   *
+   * By default, checks standard `data.user` ({ id, name }) or flat `data.userId`.
+   * Root `data.id` is intentionally ignored to prevent message/entity IDs from being mistaken for user IDs.
+   * Provide this callback if your application uses a custom user property (e.g. `data.sender` or `data.author`).
+   *
+   * Parameter `data` autocompletes known fields from `TOutput` while allowing arbitrary keys.
+   * The return type is automatically inferred as the item type in `typingUsers`.
+   */
+  getUser?: (
+    data: (TOutput extends object ? TOutput : Record<string, any>) &
+      Record<string, any>,
+  ) =>
+    | TTypingUser
+    | TypingUser<TTypingUser>
+    | string
+    | number
+    | Record<string, any>;
+
+  /**
+   * Whether to automatically remove a user from `typingUsers` when an actual message/data event arrives.
+   * @default true
+   */
+  clearOnMessage?: boolean;
+
+  /**
+   * Minimum interval between outgoing typing signals when calling `sendTyping()`.
+   * Avoids flooding the WebSocket on every keystroke.
+   * @default "1.5s"
+   */
+  throttle?: WindowTime;
+};
 
 /**
  * Options for the `useWS` hook.
  *
  * @template TOutput - The type of data received over the WebSocket.
  */
-export type UseWSOpts<TOutput> = {
+export type UseWSOpts<
+  TOutput = any,
+  TEvent extends { type: string; data?: any } = { type: string; data: TOutput },
+  TTypingUser = ExtractTypingUserFromOutput<TOutput>,
+> = {
   /**
    * The WebSocket server URL to connect to.
    */
   url: string;
+
+  /**
+   * Optional schema or type witness used to infer `TOutput` when generic parameters are omitted.
+   */
+  schema?: TOutput;
+
+  /**
+   * Optional event type marker used to specify or infer the discriminated union of incoming WebSocket events (`TEvent`).
+   */
+  events?: TEvent;
 
   /**
    * Initial data to prepopulate the data array with.
@@ -1170,11 +1546,11 @@ export type UseWSOpts<TOutput> = {
   enabled?: boolean;
 
   /**
-   * Callback triggered whenever new data is received over the ws.
-   * @param data - The received data payload.
+   * Callback triggered whenever new data or event is received over the ws.
+   * @param event - The incoming event object with `{ type, data }`.
    * @param action - Whether the item was `"added"` (new) or `"updated"` (dedup key matched an existing item). Only meaningful if `dedupKey` is provided; otherwise always `"added"`.
    */
-  onData?: (data: TOutput, action: "added" | "updated") => void;
+  onData?: (event: TEvent, action: "added" | "updated") => void;
 
   /**
    * Callback triggered when a connection or ws error occurs.
@@ -1184,13 +1560,13 @@ export type UseWSOpts<TOutput> = {
   /**
    * Callback triggered when the ws connection is successfully established.
    */
-  onSubscribed?: () => void;
+  onConnected?: () => void;
 
   /**
    * Callback triggered when the ws connection is closed.
-   * @param CloseEvent - Info about the close event, including code, reason, and whether the close was clean.
+   * @param evt - Info about the close event, including code, reason, and whether the close was clean.
    */
-  onUnsubscribed?: (evt: CloseEvent) => void;
+  onDisconnected?: (evt: CloseEvent) => void;
 
   /**
    * Callback triggered when the browser window regains focus.
@@ -1233,7 +1609,7 @@ export type UseWSOpts<TOutput> = {
    * @param item - The data item.
    * @returns A unique key for the item.
    */
-  dedupKey?: (item: TOutput) => string | number;
+  dedupKey?: (item: TOutput) => unknown;
 
   /**
    * Optional callback to arrange the data array.
@@ -1258,14 +1634,28 @@ export type UseWSOpts<TOutput> = {
      */
     delay?: WindowTime | ((attempt: number) => WindowTime);
   };
+
+  /**
+   * Built-in typing indicator management for real-time chat and collaboration.
+   * When configured with `{ currentUserId, ... }` (or `false` to disable), incoming typing events are
+   * intercepted and managed automatically, keeping `data` clean of transient typing signals.
+   */
+  typing?: false | WSTypingOptions<TTypingUser, TOutput>;
 };
+
+export type WsStatus =
+  | "idle"
+  | "connecting"
+  | "reconnecting"
+  | "connected"
+  | "error";
 
 /**
  * Return shape of the `useWS` hook.
  *
  * @template TOutput - The type of data received over the WebSocket.
  */
-export type UseWSResult<TOutput> = {
+export type UseWSResult<TOutput, TTypingUser = any> = {
   /**
    * All data payloads received since the connection was established.
    * Accumulated in order of arrival.
@@ -1275,7 +1665,7 @@ export type UseWSResult<TOutput> = {
   /**
    * The current state of the ws connection.
    */
-  status: "idle" | "connecting" | "connected" | "error";
+  status: WsStatus;
 
   /**
    * The connection error if the status is "error", otherwise undefined.
@@ -1283,21 +1673,43 @@ export type UseWSResult<TOutput> = {
   error: ErrorResponse | undefined;
 
   /**
-   * Cleanly closes the WebSocket ws connection.
+   * Initiates or re-establishes the WebSocket connection.
    */
-  unsubscribe: () => void;
+  connect: () => void;
+
+  /**
+   * Cleanly closes the WebSocket connection.
+   */
+  disconnect: () => void;
 
   /**
    * Sends a message over the WebSocket connection.
    * Safe to call before the connection is established (message will be queued and sent on open).
    * @param data - The data to send. Will be JSON-stringified.
    */
-  send: (data: TOutput) => void;
+  send: <TData = any>(data: TData) => void;
 
   /**
    * Whether the initial data is being fetched (only applies if `initialData` is a function that returns a Promise).
    */
   isFetchingInitialData: boolean;
+
+  /**
+   * Whether any other user is currently typing.
+   */
+  isTyping: boolean;
+
+  /**
+   * List of other users currently typing (excluding `currentUserId` if configured).
+   */
+  typingUsers: TTypingUser[];
+
+  /**
+   * Sends a throttled typing indicator event over the WebSocket.
+   * Automatically respects `typing.throttle` (default: 1.5s).
+   * @param payload - Optional data to attach to the typing event.
+   */
+  sendTyping: <TPayload = any>(payload?: TPayload) => void;
 };
 
 /**
@@ -1393,7 +1805,10 @@ export type QueriesResults<T extends readonly any[]> = T extends readonly []
  *
  * @template T - The type of data received from the SSE events.
  */
-export type UseSSEOpts<T = any> = {
+export type UseSSEOpts<
+  T = any,
+  TEvent extends { type: string; data?: any } = { type: string; data: T },
+> = {
   /**
    * The Server-Sent Events endpoint URL to connect to.
    */
@@ -1428,11 +1843,27 @@ export type UseSSEOpts<T = any> = {
   maxHistory?: number;
 
   /**
-   * Callback triggered when a new event message is received.
-   * @param data - The parsed event data.
-   * @param event - The name of the event type, if specified.
+   * Optional initial data to prepopulate the data array with.
    */
-  onData?: (data: T, event: string | undefined) => void;
+  initialData?: T[] | (() => MaybePromise<T[]>);
+
+  /**
+   * Optional filter function to decide whether to include incoming data in the state.
+   */
+  filter?: (data: T) => boolean;
+
+  /**
+   * Function to extract a deduplication key from a data item.
+   */
+  dedupKey?: (item: T) => unknown;
+
+  /**
+   * Callback triggered when a new event message is received.
+   * Aligned with WebSocket signature: receives `(event, action)` where event has `{ type, data }`.
+   * @param event - The incoming event object with `{ type, data }`.
+   * @param action - Whether the item was `"added"` or `"updated"`.
+   */
+  onData?: (event: TEvent, action: "added" | "updated") => void;
 
   /**
    * Callback triggered when a connection or event source error occurs.
@@ -1445,6 +1876,13 @@ export type UseSSEOpts<T = any> = {
    * @returns The arranged data array.
    */
   arrange?: (data: T[]) => T[];
+
+  /**
+   * Retry delay in milliseconds when the connection is lost or the server returns an error.
+   * Set to 0 to disable automatic reconnection.
+   * @default 3000
+   */
+  retryDelay?: WindowTime;
 };
 
 /**
@@ -1513,22 +1951,74 @@ export type UseSuspenseQueryResult<
 };
 
 /**
- * Context passed to the `onData` callback of the WS/SSE infinite query adapters.
+ * Context passed to the `onData` callback of the WS infinite query adapters.
  * Provides the received item, the full dataset, the dedup `action`, and cache
  * mutation helpers backed by the underlying infinite query.
  *
- * @template TData - The type of items flowing over the socket/stream.
+ * @template TEvent - Incoming event structure.
+ * @template TItem - The type of items flowing over the socket/stream.
  */
-export interface WSEventContext<TData = any> {
-  data: TData;
-  allData: TData[];
+export interface WSEventContext<
+  TEvent extends { type: string; data?: any } = any,
+  TItem = any,
+> {
+  /** The full incoming event over the socket (e.g. { type: "message", data: ... }) */
+  event: TEvent;
+  /** The cached infinite query items: ALWAYS typed as TItem[] (inferred from procedure) */
+  items: TItem[];
+  /** Cache mutation helpers: ALWAYS typed to accept TItem (inferred from procedure) */
   action: "updated" | "added";
-  append: (item: TData | TData[]) => void;
-  prepend: (item: TData | TData[]) => void;
-  insert: (index: number, item: TData | TData[]) => void;
+  append: (
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
+  prepend: (
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
+  insert: (
+    index: number,
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
   update: (
-    predicate: number | ((item: TData) => boolean),
-    updater: (item: TData) => TData,
+    predicate: number | ((item: TItem) => boolean),
+    updater: TItem | ((item: TItem) => TItem),
+  ) => void;
+}
+
+/**
+ * Context passed to the `onData` callback of the SSE infinite query adapter.
+ * Provides the received item, the full dataset, and cache mutation helpers.
+ *
+ * @template TData - The item type flowing over the SSE stream.
+ */
+export interface SSEEventContext<
+  TEvent extends { type: string; data?: any } = any,
+  TItem = any,
+> {
+  /** The full incoming SSE event with signature { type, data } */
+  event: TEvent;
+  /** The cached infinite query items: ALWAYS typed as TItem[] (inferred from procedure) */
+  items: TItem[];
+  /** Action description ("added" or "updated"). */
+  action: "updated" | "added";
+  append: (
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
+  prepend: (
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
+  insert: (
+    index: number,
+    item: TItem | TItem[],
+    options?: QueryCacheMutationOpts<TItem>,
+  ) => void;
+  update: (
+    predicate: number | ((item: TItem) => boolean),
+    updater: TItem | ((item: TItem) => TItem),
   ) => void;
 }
 
@@ -1550,19 +2040,49 @@ export interface WSAdapterOptions<
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
   TArgs extends unknown[] = [],
-> extends Omit<UseWSOpts<TData>, "onData" | "onWindowFocus" | "onReconnect"> {
-  // Infinite Query options
+  TEvent extends { type: string; data?: any } = any,
+  TTypingUser = ExtractTypingUserFromOutput<TData>,
+> extends Omit<
+  UseWSOpts<TData, TEvent, TTypingUser>,
+  "onData" | "onWindowFocus" | "onReconnect"
+> {
+  /**
+   * Configuration options forwarded to the underlying `useInfiniteQuery` instance.
+   *
+   * Used to specify procedure input, cursor pagination callbacks (`getNextPageParam`,
+   * `getPreviousPageParam`), query keys, and caching/refetching behaviors.
+   */
   queryOpts?: Omit<
     UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
     "arrange"
   >;
 
   /**
+   * Type marker used to specify or infer the discriminated union of incoming WebSocket events (`TEvent`).
+   *
+   * Providing this field (e.g. `events: {} as MyChatEvent`) enables automatic type inference
+   * and event-type narrowing for `event` in `onData` without explicit hook type arguments.
+   */
+  events?: TEvent;
+
+  /**
+   * Optional schema or type witness used to infer the WebSocket live data payload (`TData`).
+   */
+  schema?: TData;
+
+  /**
+   * Built-in typing indicator management for real-time chat and collaboration.
+   * When configured with `{ currentUserId, ... }` (or `false` to disable), incoming typing events are
+   * intercepted and managed automatically, keeping `data` clean of transient typing signals.
+   */
+  typing?: false | WSTypingOptions<TTypingUser, TData>;
+
+  /**
    * Callback triggered whenever new data is received over the ws.
    * Receives a context object with the data, the dedup action, the full dataset,
    * and cache manipulation helpers.
    */
-  onData?: (opts: WSEventContext<TData>) => void;
+  onData?: (opts: WSEventContext<TEvent, TData>) => void;
 
   /**
    * Callback triggered when the browser window regains focus.
@@ -1626,21 +2146,26 @@ export interface SSEAdapterOptions<
   TQueryKey extends unknown[] = unknown[],
   TFullPage = InfiniteQueryPage<TData>,
   TArgs extends unknown[] = [],
+  TEvent extends { type: string; data?: any } = any,
 > extends Omit<UseSSEOpts<TData>, "onData"> {
-  // Infinite Query options
+  /**
+   * Configuration options forwarded to the underlying `useInfiniteQuery` instance.
+   *
+   * Used to specify procedure input, cursor pagination callbacks (`getNextPageParam`,
+   * `getPreviousPageParam`), query keys, and caching/refetching behaviors.
+   */
   queryOpts?: Omit<
     UseInfiniteQueryOpts<TInput, TPage, TQueryKey, TFullPage, TArgs>,
     "arrange"
   >;
 
+  /**
+   * Type marker used to specify or infer the discriminated union of incoming SSE events (`TEvent`).
+   */
+  events?: TEvent;
+
   // Custom onData with query cache actions
-  onData?: (
-    opts: Prettify<
-      WSEventContext<TData> & {
-        event: string | undefined;
-      }
-    >,
-  ) => void;
+  onData?: (opts: SSEEventContext<TEvent, TData>) => void;
 }
 
 /**
@@ -1693,6 +2218,7 @@ export type UseWSInfiniteQueryResult<
   TPage,
   TFullPage = InfiniteQueryPage<TPage>,
   TData = TPage,
+  TTypingUser = TypingUser<ExtractTypingUserFromOutput<TData>>,
 > = Prettify<
   Omit<
     InfiniteQueryResult<TPage, TFullPage>,
@@ -1701,13 +2227,22 @@ export type UseWSInfiniteQueryResult<
     /** Flattened live data items received from the WebSocket. */
     data: TData[];
     /** Sends a message over the WebSocket connection. */
-    send: (data: any) => void;
-    /** Closes the WebSocket connection. */
-    unsubscribe: () => void;
+    send: <TMsg = any>(data: TMsg) => void;
+    /** Initiates or re-establishes the WebSocket connection. */
+    connect: () => void;
+    /** Cleanly closes the WebSocket connection. */
+    disconnect: () => void;
     /** Current WebSocket connection state. */
-    status: "idle" | "connecting" | "connected" | "error";
+    status: WsStatus;
+    /** WebSocket connection error, if any. */
+    error: ErrorResponse | undefined;
     /** Error from the underlying infinite query fetch, if any. */
     queryError: ErrorResponse | null;
+    /** Whether any other user is currently typing. */
+    isTyping: boolean;
+    /** List of other users currently typing. */
+    typingUsers: TTypingUser[];
+    /** Sends a throttled typing indicator event over the WebSocket. */
+    sendTyping: <TPayload = any>(payload?: TPayload) => void;
   }
 >;
-

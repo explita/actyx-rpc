@@ -3,6 +3,32 @@
 All notable changes to this package will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-11-26
+
+### Added
+
+- **Dynamic Cache & Invalidation Options with Positional `...args` Support (`proc.cache`, `proc.invalidate`, `withCache`, `withInvalidation`)**:
+  - `CacheOptions.key`, `CacheOptions.tags`, and `CacheInvalidationOptions` (`keys`, `patterns`, `tags`) now receive `(opts: { ctx, input }, ...args)` so procedures with positional arguments can include them in cache keys and invalidation targets.
+  - `proc.cache(...)` and `proc.invalidate(...)` now accept either static options or a factory function `(opts, ...args) => MaybePromise<Options | null | undefined>` (`WithCacheOptionsInput` / `CacheInvalidationOptionsInput`) for dynamic per-request policies or bypassing/skipping when returning `null` or `undefined`.
+  - Added two overloads on `ProcedureInstance.cache` and `ProcedureInstance.invalidate` — a default no-generic overload (`any[]`) and an optional tuple generic (`.cache<[...]>()` / `.invalidate<[...]>()`), backed by bivariant `CacheCallback` typing so unannotated callbacks, subset-arg callbacks, and manual inline annotations all work under `strictFunctionTypes: true`.
+- **Root Middleware & Plugin Typing (`RootMiddleware`, `RootPlugin`)**:
+  - Exported `RootMiddleware`, `RootPlugin`, `InferMiddlewareNextCtx`, `InferPluginNextCtx`, `MergedRootCtx`, and `UnionToIntersection` for strongly typed root-level `createProcedure({ middlewares, plugins })` context composition.
+- **Typed `WSEvent` & `PubSub` Contracts**:
+  - Exported `WSEvent`, `WSServerHandler`, `ProcedureType`, `PubSubEvent`, `PubSubMessage`, and `PubSubError`.
+  - Updated `WSProcedureContext` and `applyWSHandler` to enforce the `WSEvent` (`{ type, data? }`) contract across `send()` and `broadcast()`, supporting both signal events and payload events.
+- **Global Type Augmentation (`ActyxRPC` Namespace)**:
+  - Added `ExtraInput` (`RegisteredCursor`) and `ActyxRPC` global type registration support for custom error reasons (`RegisterCustomErrors`) and pagination cursors shared across server procedures and React clients.
+
+### Changed
+
+- **Unified SSE Event Helpers**:
+  - Streamlined SSE formatting and event typing across `core/helpers/sse.ts`, `core/docs/generator.ts`, and `adapters/next/route-handler.ts`.
+
+### Fixed
+
+- **`CacheOptions.tags` Union Precedence**:
+  - Fixed `tags` type precedence from `(...) => MaybePromise<string[]> | string[]` to `string[] | ((...) => MaybePromise<string[]>)` so static `string[]` tag arrays type-check properly.
+
 ## [0.11.1] - 2026-09-30
 
 ### Added

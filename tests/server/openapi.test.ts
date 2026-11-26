@@ -44,8 +44,8 @@ describe("Automated OpenAPI 3.1 Generation", () => {
 
   const streamLiveEvents = procedure
     .summary("Live SSE stream")
-    .stream(async function* () {
-      yield { event: "ping" };
+    .sse(async function* () {
+      yield { type: "ping", data: "" };
     });
 
   const appRouter = createRouter({
@@ -113,7 +113,9 @@ describe("Automated OpenAPI 3.1 Generation", () => {
 
     const liveOperation = (spec.paths["/live/events"] as any).get;
     expect(liveOperation).toBeDefined();
-    expect(liveOperation.responses[200].content["text/event-stream"]).toBeDefined();
+    expect(
+      liveOperation.responses[200].content["text/event-stream"],
+    ).toBeDefined();
   });
 
   it("should support procedure overrides (custom method, tags, summary)", () => {
@@ -147,7 +149,9 @@ describe("Automated OpenAPI 3.1 Generation", () => {
       version: "1.0.0",
     });
 
-    const response = handler(new Request("https://api.example.com/openapi.json"));
+    const response = handler(
+      new Request("https://api.example.com/openapi.json"),
+    );
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toContain("application/json");
 
@@ -224,4 +228,3 @@ describe("Automated OpenAPI 3.1 Generation", () => {
     expect((spec.paths["/site/page/public/preview"] as any).get).toBeDefined();
   });
 });
-

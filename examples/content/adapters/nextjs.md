@@ -169,23 +169,38 @@ Procedures configured with `.sse()` or `.stream()` are automatically detected an
 - Generates standard `text/event-stream` responses with automatic chunk framing.
 - Flushes data chunks or event payloads to the client in real-time.
 
-### Accessing the Request in Procedures
+### Accessing the Ambient Request in Procedures
 
-You can access the ambient `Request` object in procedure context:
+`createHandler` runs all procedure executions inside `httpStorage`. You can access the incoming `Request` object in three convenient ways:
 
+1. **Via `createContext` parameter**:
 ```ts
-import { createProcedure } from "@explita/actyx-rpc";
-
-export const procedure = createProcedure({
+const procedure = createProcedure({
   createContext: async (baseCtx, req) => {
     return {
       ok: true,
-      ctx: {
-        token: req?.headers.get("authorization"),
-      },
+      ctx: { token: req?.headers.get("authorization") },
     };
   },
 });
+```
+
+2. **Directly via `ctx.req` inside any handler**:
+```ts
+export const getClientInfo = procedure.query(async ({ ctx }) => {
+  const userAgent = ctx.req?.headers.get("user-agent");
+  return { userAgent };
+});
+```
+
+3. **Anywhere in your backend stack via `getRequest()`**:
+```ts
+import { getRequest } from "@explita/actyx-rpc";
+
+export function getClientIp() {
+  const req = getRequest();
+  return req?.headers.get("x-forwarded-for") ?? "127.0.0.1";
+}
 ```
 
 ---

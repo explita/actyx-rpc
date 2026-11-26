@@ -2,16 +2,15 @@ import { rpcStorage, httpStorage } from "./rpc-storage.js";
 import {
   getFinalStatusCode,
   isErrorResponse,
+  isOnlyExtraInputs,
+  isValidObj,
   normalizeInput,
+  parseInput,
 } from "../../lib/utils.js";
 import { type Middleware } from "../../types/middleware.js";
 import type { ProcedureConfig, ProcedureProps } from "../../types/procedure.js";
 import { checkRateLimit } from "../cache/rate-limit.js";
-import type {
-  CacheAdapter,
-  CacheInvalidationOptions,
-  WindowTime,
-} from "../cache/types.js";
+import type { CacheAdapter } from "../cache/types.js";
 import { invalidateCache } from "../cache/invalidate.js";
 import { startSpan, recordError } from "../telemetry/tracer.js";
 import { runMiddlewares } from "./run-middlewares.js";
@@ -19,11 +18,16 @@ import { PubSubAdapter } from "../../lib/pubsub.js";
 
 export function handlerResolver<O, P = any>(
   handler: (opts: { ctx: any; input: any }, ...args: P[]) => Promise<O>,
+  /**
+   * Base procedure options
+   */
   opts: ProcedureProps<any, any, any>,
   config: ProcedureConfig<any, any>,
   cache: CacheAdapter,
   pubsub: PubSubAdapter,
 ) {
+  const procedureOpts: ProcedureProps<any, any, any> = opts ?? {};
+
   return async function (
     this: any,
     payload?: Record<string, unknown> | FormData,
@@ -31,7 +35,7 @@ export function handlerResolver<O, P = any>(
   ) {
     const originalArgs = args;
 
-    const caller = (config as any).caller || (this as any)?._def?.caller;
+    const caller = (config as any).caller || this?._def?.caller;
     if (caller) {
       return caller(payload, ...args);
     }
@@ -69,7 +73,9 @@ export function handlerResolver<O, P = any>(
 
     const baseCtx: Record<string, any> = {
       handlerName: config.name,
-      meta: { ...(opts.meta ?? {}), ...(config.meta ?? {}) },
+      type: config.type,
+      meta: { ...(procedureOpts.meta ?? {}), ...(config.meta ?? {}) },
+      pubsub,
       ...(req ? { req } : {}),
       ...(context !== undefined ? { context } : {}),
     };
@@ -77,6 +83,30 @@ export function handlerResolver<O, P = any>(
     let currentCtx: any = baseCtx;
 
     try {
+      // Attach cache helper to ctx for full manual cache access & invalidation
+      currentCtx.cache = {
+        get: <T>(key: string) => cache.get<T>(key),
+        set: <T>(key: string, data: T, opts?: any) =>
+          cache.set(key, data, opts),
+        has: (key: string) => cache.has(key),
+        delete: (key: string) => cache.delete(key),
+        clear: () => cache.clear(),
+        remember: <T>(key: string, fn: () => Promise<T>, opts?: any) =>
+          cache.remember(key, fn, opts),
+
+        clearByPattern: cache.clearByPattern
+          ? (pattern: string) => cache.clearByPattern!(pattern)
+          : undefined,
+        invalidateByTag: cache.invalidateByTag
+          ? (tag: string) => cache.invalidateByTag!(tag)
+          : undefined,
+        invalidate: (options: any) =>
+          invalidateCache(cache, options, {
+            ctx: currentCtx,
+            input: enrichedData ?? payload ?? {},
+          }),
+      };
+
       // 1. Context Creation Bypass
       // We reuse existing context from AsyncLocalStorage if available
       const existingCtx = (this as any)?.ctx || rpcStorage.getStore();
@@ -85,9 +115,11 @@ export function handlerResolver<O, P = any>(
         rootCtx = { ok: true, ctx: existingCtx };
       } else {
         rootCtx =
-          req !== undefined || context !== undefined
-            ? await (opts.createContext as any)(baseCtx, req, context)
-            : await (opts.createContext as any)(baseCtx, ...originalArgs);
+          typeof opts.createContext === "function"
+            ? req !== undefined || context !== undefined
+              ? await (opts.createContext as any)(baseCtx, req, context)
+              : await (opts.createContext as any)(baseCtx, ...originalArgs)
+            : { ok: true, ctx: {} };
       }
 
       if (!rootCtx.ok) {
@@ -199,12 +231,29 @@ export function handlerResolver<O, P = any>(
           return [null, error];
         }
 
-        input = result.data;
+        input =
+          config.type === "query" && isValidObj(result.data)
+            ? parseInput(result.data, rawData)
+            : result.data;
       } else {
         if (config.type === "webRoute") {
           input = payload ?? {};
+        } else if (
+          config.type === "query" &&
+          isOnlyExtraInputs(payload) &&
+          args.length > 0
+        ) {
+          input = payload;
+        } else if (
+          config.type === "query" &&
+          (payload === undefined || isValidObj(payload))
+        ) {
+          input = payload ?? {};
+          if (payload !== undefined && payload !== null) {
+            args = [payload as any, ...args];
+          }
         } else {
-          input = {};
+          input = payload;
           if (payload !== undefined && payload !== null) {
             args = [payload as any, ...args];
           }
@@ -216,28 +265,20 @@ export function handlerResolver<O, P = any>(
           {
             ...rootCtx.ctx,
             meta: baseCtx.meta,
+            type: config.type,
           },
           req ?? originalArgs[0],
           context ?? originalArgs[1],
         )) ?? {};
 
-      const isBinary =
-        (typeof Blob !== "undefined" && input instanceof Blob) ||
-        (typeof File !== "undefined" && input instanceof File) ||
-        (typeof FormData !== "undefined" && input instanceof FormData);
-
-      let enrichedData =
-        !isBinary &&
-        typeof input === "object" &&
-        input !== null &&
-        !Array.isArray(input)
-          ? {
-              ...enrichment,
-              ...input,
-            }
-          : input !== undefined
-            ? input
-            : enrichment;
+      let enrichedData = isValidObj(input)
+        ? {
+            ...enrichment,
+            ...(input as any),
+          }
+        : input !== undefined
+          ? input
+          : enrichment;
 
       // Run plugin.validate() hooks
       for (const plugin of config.plugins ?? []) {
@@ -267,30 +308,6 @@ export function handlerResolver<O, P = any>(
           }
         }
       }
-
-      // Attach cache helper to ctx for full manual cache access & invalidation
-      currentCtx.cache = {
-        get: <T>(key: string) => cache.get<T>(key),
-        set: <T>(
-          key: string,
-          data: T,
-          opts?: { ttl?: WindowTime; staleTime?: WindowTime },
-        ) => cache.set(key, data, opts),
-        has: (key: string) => cache.has(key),
-        delete: (key: string) => cache.delete(key),
-        clear: () => cache.clear(),
-        clearByPattern: cache.clearByPattern
-          ? (pattern: string) => cache.clearByPattern!(pattern)
-          : undefined,
-        invalidateByTag: cache.invalidateByTag
-          ? (tag: string) => cache.invalidateByTag!(tag)
-          : undefined,
-        invalidate: (options: CacheInvalidationOptions) =>
-          invalidateCache(cache, options, {
-            ctx: currentCtx,
-            input: enrichedData,
-          }),
-      };
 
       const next = (newCtx?: any) => ({
         _isNext: true,

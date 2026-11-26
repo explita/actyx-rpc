@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import type { ErrorResponse } from "../types/main.js";
+import type { ErrorResponse, FailureReason } from "../types/main.js";
 import type { UseSSEOpts, UseSSEResult } from "../types/main.js";
 import { SSEClient } from "../client/index.js";
 import { actyxStreamTracker } from "../devtools/stream-tracker.js";
@@ -35,19 +35,44 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
     onData,
     onError,
     arrange,
+    retryDelay,
   } = options;
 
-  const [data, setData] = useState<T[]>([]);
+  const [data, setData] = useState<T[]>(() => {
+    if (!options.initialData) return [];
+    if (typeof options.initialData !== "function") {
+      return options.initialData;
+    }
+    const result = options.initialData();
+    if (!(result instanceof Promise)) {
+      return result;
+    }
+    return [];
+  });
   const [lastData, setLastData] = useState<T | undefined>();
   const [event, setEvent] = useState<string | undefined>();
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<ErrorResponse | undefined>();
 
   const activeClientRef = useRef<{ close: () => void } | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
-  const callbacksRef = useRef({ onData, onError, arrange });
+  const callbacksRef = useRef({
+    onData,
+    onError,
+    arrange,
+    filter: options.filter,
+    dedupKey: options.dedupKey,
+  });
   useEffect(() => {
-    callbacksRef.current = { onData, onError, arrange };
+    callbacksRef.current = {
+      onData,
+      onError,
+      arrange,
+      filter: options.filter,
+      dedupKey: options.dedupKey,
+    };
   });
 
   const paramsStr = JSON.stringify(params);
@@ -115,6 +140,7 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
           headers: parsedHeaders,
           signal: localAbortController.signal,
           track: false,
+          retryDelay,
         });
 
         if (isAborted) {
@@ -132,40 +158,107 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
         for await (const sseEvent of client) {
           if (isAborted) break;
 
-          setLastData(sseEvent.data);
-          setEvent(sseEvent.event);
+          const raw: any = sseEvent.data;
+          const isEnvelope =
+            raw !== null &&
+            typeof raw === "object" &&
+            "type" in raw &&
+            "data" in raw;
 
-          if (streamId) {
-            actyxStreamTracker.recordEvent(streamId, sseEvent.event, sseEvent.data);
+          const type: string =
+            sseEvent.type || (isEnvelope ? raw.type : "message");
+          const data: T = isEnvelope ? raw.data : raw;
+
+          const event = {
+            type,
+            data,
+            id: sseEvent.id,
+            retry: sseEvent.retry,
+          };
+
+          if (type === "error") {
+            const errPayload: any = data;
+            const errResponse: ErrorResponse = {
+              success: false,
+              handlerName: "useSSE",
+              statusCode: 500,
+              message:
+                typeof errPayload === "string"
+                  ? errPayload
+                  : errPayload?.message || "SSE Error",
+              reason: errPayload?.reason || "UNEXPECTED_ERROR",
+            };
+            setError(errResponse);
+            callbacksRef.current.onError?.(errResponse);
+            continue;
           }
 
-          setData((prev) => {
-            const next = [...prev, sseEvent.data];
-            if (next.length > maxHistory) {
-              return next.slice(-maxHistory);
-            }
-            return next;
-          });
+          setLastData(data);
+          setEvent(type);
 
-          callbacksRef.current.onData?.(sseEvent.data, sseEvent.event);
+          if (streamId) {
+            actyxStreamTracker.recordEvent(streamId, type, data);
+          }
+
+          const dedupKeyFn = callbacksRef.current.dedupKey;
+          const filterFn = callbacksRef.current.filter;
+          const prevData = dataRef.current;
+          const existing = dedupKeyFn
+            ? prevData.findIndex((i: any) => dedupKeyFn(i) === dedupKeyFn(data))
+            : -1;
+          const action = existing >= 0 ? "updated" : "added";
+
+          if (filterFn ? filterFn(data) : true) {
+            setData((prev) => {
+              let next: T[];
+              if (dedupKeyFn) {
+                const key = dedupKeyFn(data);
+                const idx = prev.findIndex(
+                  (existing) => dedupKeyFn(existing) === key,
+                );
+                if (idx >= 0) {
+                  next = [...prev];
+                  next[idx] = data;
+                } else {
+                  next = [...prev, data];
+                }
+              } else {
+                next = [...prev, data];
+              }
+              if (next.length > maxHistory) {
+                return next.slice(-maxHistory);
+              }
+              return next;
+            });
+          }
+
+          callbacksRef.current.onData?.(event, action);
         }
       } catch (err: any) {
         if (!isAborted && err.name !== "AbortError") {
+          const statusCode = err.statusCode || 500;
+          let reason: FailureReason = "UNEXPECTED_ERROR";
+          if (statusCode === 401) reason = "UNAUTHORIZED";
+          else if (statusCode === 403) reason = "FORBIDDEN";
+          else if (statusCode === 404) reason = "NOT_FOUND";
+
           const errResponse: ErrorResponse = {
             success: false,
             handlerName: "useSSE",
-            statusCode: 500,
+            statusCode,
             message: err.message || "SSE connection error",
-            reason: "UNEXPECTED_ERROR",
+            reason,
           };
           setError(errResponse);
-          if (streamId) actyxStreamTracker.updateStatus(streamId, "error", err.message);
+          if (streamId)
+            actyxStreamTracker.updateStatus(streamId, "error", err.message);
           callbacksRef.current.onError?.(errResponse);
         }
       } finally {
         if (!isAborted) {
           setIsConnected(false);
-          if (streamId) actyxStreamTracker.updateStatus(streamId, "disconnected");
+          if (streamId)
+            actyxStreamTracker.updateStatus(streamId, "disconnected");
         }
       }
     };
@@ -190,7 +283,16 @@ export function useSSE<T = any>(options: UseSSEOpts<T>): UseSSEResult<T> {
       }
       setIsConnected(false);
     };
-  }, [url, paramsStr, headersStr, enabled, signal, maxHistory, close]);
+  }, [
+    url,
+    paramsStr,
+    headersStr,
+    enabled,
+    signal,
+    maxHistory,
+    retryDelay,
+    close,
+  ]);
 
   const arrangedData = useMemo(() => {
     if (!callbacksRef.current.arrange) return data;

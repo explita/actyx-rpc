@@ -3,6 +3,7 @@ import {
   ExtractPaginatedItem,
   ExtractProcInput,
   ExtractProcOutput,
+  HasRequiredKeys,
   InfiniteQueryPage,
   InfiniteQueryResult,
   IsPaginated,
@@ -22,6 +23,7 @@ import {
   UseSuspenseQueryResult,
   UseWSOpts,
   UseWSResult,
+  TypingUser,
   WindowTime,
   WithoutCursor,
   WSAdapterOptions,
@@ -68,9 +70,7 @@ export interface ClientInterceptors {
    * Hook called before a request is dispatched.
    * Return modified headers or options to override for this request.
    */
-  onRequest?: (
-    ctx: InterceptorRequestContext,
-  ) => MaybePromise<void | {
+  onRequest?: (ctx: InterceptorRequestContext) => MaybePromise<void | {
     headers?: Record<string, string>;
     [key: string]: any;
   }>;
@@ -306,12 +306,16 @@ export type ClientUseWSResult<
   TPage,
   TFullPage = InfiniteQueryPage<TPage>,
   TData = TPage,
+  TTypingUser = any,
 > = Prettify<
   InfiniteQueryResult<TPage, TFullPage> & {
     send: (data: any) => void;
     unsubscribe: () => void;
     status: "idle" | "connecting" | "connected" | "error";
     queryError: ErrorResponse | null;
+    isTyping: boolean;
+    typingUsers: TypingUser<TTypingUser>[];
+    sendTyping: <TPayload = any>(payload?: TPayload) => void;
   }
 >;
 
@@ -546,51 +550,95 @@ export type ClientQueryCall<I, O, P extends unknown[] = []> = [I] extends
     } & (IsPaginated<O> extends true
       ? {
           useInfiniteQuery: (
-            opts: ClientUseInfiniteQueryOpts<
-              I,
-              ExtractPaginatedItem<O>,
-              unknown[],
-              O,
-              P
-            > & {
-              input: WithoutCursor<I> | I | ((pageParam: any) => I);
-            },
+            opts: HasRequiredKeys<WithoutCursor<I>> extends true
+              ? ClientUseInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input: WithoutCursor<I> | I | ((pageParam: any) => I);
+                }
+              :
+                  | (ClientUseInfiniteQueryOpts<
+                      I,
+                      ExtractPaginatedItem<O>,
+                      unknown[],
+                      O,
+                      P
+                    > & {
+                      input?: WithoutCursor<I> | I | ((pageParam: any) => I);
+                    })
+                  | undefined,
             ...args: P
           ) => InfiniteQueryResult<ExtractPaginatedItem<O>, O>;
           usePaginatedQuery: (
-            opts: ClientUseInfiniteQueryOpts<
-              I,
-              ExtractPaginatedItem<O>,
-              unknown[],
-              O,
-              P
-            > & {
-              input: WithoutCursor<I> | I | ((pageParam: any) => I);
-            },
+            opts: HasRequiredKeys<WithoutCursor<I>> extends true
+              ? ClientUseInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input: WithoutCursor<I> | I | ((pageParam: any) => I);
+                }
+              :
+                  | (ClientUseInfiniteQueryOpts<
+                      I,
+                      ExtractPaginatedItem<O>,
+                      unknown[],
+                      O,
+                      P
+                    > & {
+                      input?: WithoutCursor<I> | I | ((pageParam: any) => I);
+                    })
+                  | undefined,
             ...args: P
           ) => InfiniteQueryResult<ExtractPaginatedItem<O>, O>;
           useSSEInfiniteQuery: (
-            opts: ClientUseSSEInfiniteQueryOpts<
-              I,
-              ExtractPaginatedItem<O>,
-              unknown[],
-              O,
-              P
-            > & {
-              input: WithoutCursor<I> | I | ((pageParam: any) => I);
-            },
+            opts: HasRequiredKeys<WithoutCursor<I>> extends true
+              ? ClientUseSSEInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input: WithoutCursor<I> | I | ((pageParam: any) => I);
+                }
+              : ClientUseSSEInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input?: WithoutCursor<I> | I | ((pageParam: any) => I);
+                },
             ...args: P
           ) => ClientUseSSEResult<ExtractPaginatedItem<O>, O>;
           useWSInfiniteQuery: (
-            opts: ClientUseWSInfiniteQueryOpts<
-              I,
-              ExtractPaginatedItem<O>,
-              unknown[],
-              O,
-              P
-            > & {
-              input: WithoutCursor<I> | I | ((pageParam: any) => I);
-            },
+            opts: HasRequiredKeys<WithoutCursor<I>> extends true
+              ? ClientUseWSInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input: WithoutCursor<I> | I | ((pageParam: any) => I);
+                }
+              : ClientUseWSInfiniteQueryOpts<
+                  I,
+                  ExtractPaginatedItem<O>,
+                  unknown[],
+                  O,
+                  P
+                > & {
+                  input?: WithoutCursor<I> | I | ((pageParam: any) => I);
+                },
             ...args: P
           ) => ClientUseWSResult<ExtractPaginatedItem<O>, O>;
         }
@@ -728,7 +776,7 @@ export type ClientRouterMethods<T> = {
       ? MutationCall<I, O, P extends unknown[] ? P : []>
       : T[K] extends {
             _def: {
-              type: "stream" | "sse";
+              type: "sse";
               input: infer I;
               output: infer O;
               args?: infer P;

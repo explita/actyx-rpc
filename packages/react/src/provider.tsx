@@ -75,7 +75,8 @@ export const getCachedQueryClient = (): QueryClient =>
  */
 export const useQueryClient = (explicitClient?: QueryClient): QueryClient => {
   const client = useContext(ActyxContext);
-  const resolved = explicitClient ?? client ?? _cachedClient ?? defaultQueryClient;
+  const resolved =
+    explicitClient ?? client ?? _cachedClient ?? defaultQueryClient;
   if (resolved !== defaultQueryClient) {
     _cachedClient = resolved;
   }

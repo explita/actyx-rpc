@@ -50,6 +50,25 @@ export type DefaultQueryOptions = {
   onSuccess?: (data: any) => void;
   /** Default settled callback for all queries. */
   onSettled?: (data: any, error: ErrorResponse | null) => void;
+  /**
+   * Settings for search evaluation in infinite and paginated queries.
+   * @default {
+   *  mode: "auto",
+   *  debounce: 500,
+   * }
+   */
+  search?: {
+    /**
+     * Default search evaluation mode for infinite and paginated queries.
+     * @default "auto"
+     */
+    mode?: "auto" | "client-only" | "server-only";
+    /**
+     * Default debounce time in milliseconds (or WindowTime e.g. "500ms") for search queries - server only.
+     * @default 500
+     */
+    debounce?: WindowTime;
+  };
 };
 
 /**

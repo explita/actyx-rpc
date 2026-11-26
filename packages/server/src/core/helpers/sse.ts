@@ -14,13 +14,19 @@ export function createSSEResponse<TEventData = any>(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const event of iterator) {
+        for await (const raw of iterator) {
           if (isClosed) break;
+
+          const event =
+            typeof raw === "object" && raw !== null && "data" in raw
+              ? (raw as any)
+              : { data: raw, type: "message" };
 
           let chunk = "";
 
           if (event.id) chunk += `id: ${event.id}\n`;
-          if (event.event) chunk += `event: ${event.event}\n`;
+          const eventType = event.type ?? event.event;
+          if (eventType) chunk += `event: ${eventType}\n`;
           if (event.retry) chunk += `retry: ${event.retry}\n`;
 
           // Handle multi-line data or objects

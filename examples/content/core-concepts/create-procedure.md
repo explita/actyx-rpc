@@ -57,13 +57,100 @@ const procedure = createProcedure({
 | `enrichInput` | `(ctx) => Promise<TEnrich> \| TEnrich` | Runs after context creation to attach global context keys (e.g., `userId`) into all procedure input objects. |
 | `onSuccess` | `(props) => void` | Runs when a procedure finishes successfully. Receives context, input, output, and execution duration. |
 | `onError` | `(props) => any` | Runs when a procedure throws or returns an error. Returns mapped error format. |
-| `inputMode` | `InputMode` | The default caller input mode for procedures (`strict`, `form`, `partial`). |
+| `inputMode` | `InputMode` | `"strict"` | The default caller input mode for procedures (`"strict"`, `"patch"`, `"form"`, `"partial"`). |
 | `middlewares` | `Middleware[]` | Array of global middlewares applied to all procedures generated from this builder. |
 | `plugins` | `Plugin[]` | Array of global plugins applied to all procedures. |
 | `cache` | `CacheAdapter` | The global cache adapter used for caching queries and rate-limit tracking (defaults to `MemoryCache`). |
 | `compression` | `Compressor` | The global compressor instance used for response compression (defaults to `Compressor`). |
 | `meta` | `TMeta` | Default global metadata attached to all child procedures. |
 | `validationHint` | `string` | Custom error message used when input schema validation fails (defaults to `"Invalid data provided"`). |
+
+---
+
+## Input Modes (`inputMode`)
+
+The `inputMode` option controls the caller-side TypeScript input contract. It allows you to tailor whether callers must supply strict types or can pass looser partial/form values while the resolver validates and parses them at runtime.
+
+| Mode | Caller-Side Type Shape | Best For |
+| :--- | :--- | :--- |
+| `"strict"` (default) | Exact inferred input type from your schema. | Standard API calls, JSON RPC clients, strict type verification. |
+| `"patch"` | `Partial<TInput>` with strict types for provided keys. | Update mutations, partial resource patching, delta syncs. |
+| `"form"` | Object with declared keys typed as `unknown`. | Direct HTML form bindings or `FormData` where inputs start as strings before parser coercion. |
+| `"partial"` | Loose partial object where all keys are optional and `unknown`. | Highly dynamic or multi-step form wizards. |
+
+```ts
+// Set default mode on builder
+const formProcedure = createProcedure({
+  inputMode: "form",
+});
+
+// Or override per-procedure at the .input() level
+export const updateProfile = procedure
+  .input(zodResolver(profileSchema), { mode: "patch" })
+  .mutation(async ({ input }) => {
+    // Caller only needs to pass partial fields!
+  });
+```
+
+---
+
+## Input Enrichment (`enrichInput`)
+
+Use `enrichInput` to automatically merge server-side context fields (such as authenticated user IDs, organization IDs, or tenancy scopes) into the procedure's `input` object:
+
+```ts
+const procedure = createProcedure({
+  async createContext() {
+    const session = await getSession();
+    return {
+      ok: true,
+      ctx: { userId: session.user.id, orgId: session.org.id },
+    };
+  },
+  enrichInput(ctx) {
+    // Automatically injects userId into all procedure inputs
+    return {
+      userId: ctx.userId,
+      orgId: ctx.orgId,
+    };
+  },
+});
+
+export const createPost = procedure
+  .input(z.object({ title: z.string(), content: z.string() }))
+  .mutation(async ({ input }) => {
+    // input.userId and input.orgId are automatically available and typed!
+    return await db.posts.create({
+      data: {
+        title: input.title,
+        content: input.content,
+        authorId: input.userId,
+        orgId: input.orgId,
+      },
+    });
+  });
+```
+
+---
+
+## Ambient Cursor Registration (`RegisterCursor`)
+
+When building infinite queries or cursor-paginated procedures, procedures automatically accept a `cursor?: RegisteredCursor` property in their input.
+
+By declaring `RegisterCursor` in a `.d.ts` file, your cursor type is registered globally across all backend procedures and client hooks:
+
+```ts
+// types/actyx-rpc.d.ts
+declare global {
+  namespace ActyxRPC {
+    interface RegisterCursor {
+      cursor: number; // or string, or { id: string; createdAt: Date }
+    }
+  }
+}
+```
+
+See [Global Type Augmentation](../advanced/type-registration.md) for full details on registering custom error reasons and compound cursors.
 
 ---
 

@@ -7,6 +7,12 @@ import {
 } from "../../types/misc.js";
 export type { WindowTime };
 
+export type CacheSetOpts = {
+  ttl?: WindowTime;
+  staleTime?: WindowTime;
+  tags?: string[];
+};
+
 /**
  * Adapter interface for caching implementations (e.g., In-Memory, Redis).
  *
@@ -47,11 +53,24 @@ export type CacheAdapter = {
    * });
    * ```
    */
-  set<T>(
+  set<T>(key: string, data: T, options?: CacheSetOpts): Promise<void> | void;
+
+  /**
+   * Checks cache and returns the entry if found and not expired.
+   * If stale, sets a background timer to refresh the value without blocking.
+   * If expired, blocks until the provided function returns and updates the cache.
+   *
+   * @template T
+   * @param key - The cache key
+   * @param fn - The function to execute if the value needs to be computed
+   * @param options - Optional TTL and stale time settings
+   * @returns The cached or computed value
+   */
+  remember: <T>(
     key: string,
-    data: T,
-    options?: { ttl?: WindowTime; staleTime?: WindowTime },
-  ): Promise<void> | void;
+    fn: () => Promise<T>,
+    options?: CacheSetOpts,
+  ) => Promise<T>;
 
   /**
    * Checks whether a cached entry is considered stale based on its `staleTime`.
@@ -96,7 +115,11 @@ export type CacheAdapter = {
    * @param key - Cache key to tag
    * @param tags - A single tag string or array of tags
    */
-  addTag?(key: string, tags: string | string[]): Promise<void>;
+  addTag?(
+    key: string,
+    tags: string | string[],
+    ttlSeconds?: number,
+  ): Promise<void>;
 
   /**
    * Invalidates all cache entries associated with a specific tag.
@@ -145,7 +168,7 @@ export type RedisCacheOptions = {
    * Prefix for all cache keys in Redis.
    * Helps organize keys and avoid collisions with other applications.
    *
-   * @default 'actyx:cache:'
+   * @default '_actyx:cache:'
    *
    * @example
    * ```typescript
@@ -262,11 +285,24 @@ export type CacheEntry<T = unknown> = {
 };
 
 /**
+ * Bivariant callback helper so cache callbacks accept any subset of positional `...args`
+ * under `strictFunctionTypes: true` while preserving positional tuple expansion when `P` is a tuple.
+ */
+type CacheCallback<Opts, P extends unknown[], R> = {
+  bivarianceHack(opts: Opts, ...args: P): R;
+}["bivarianceHack"];
+
+/**
  * Configuration options for caching behavior.
  * @template Ctx - The context type (includes enriched input)
  * @template I - The input type
+ * @template P - Optional tuple type for additional positional arguments
  */
-export type CacheOptions<Ctx = unknown, I = unknown> = {
+export type CacheOptions<
+  Ctx = unknown,
+  I = unknown,
+  P extends unknown[] = any[],
+> = {
   /**
    * Time to live in milliseconds.
    * After this time, the cached entry will be removed.
@@ -296,7 +332,9 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * @example
    * tags: ['users', 'active-users']
    */
-  tags?: (opts: { ctx: Ctx; input: I }) => MaybePromise<string[]> | string[];
+  tags?:
+    | string[]
+    | CacheCallback<{ ctx: Ctx; input: I }, P, MaybePromise<string[]>>;
 
   /**
    * Whether to decompress cached data.
@@ -309,11 +347,12 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
    * Custom cache key generator function.
    * Use this to create predictable, human-readable cache keys.
    * @param opts - Object containing context and input
+   * @param args - Additional positional arguments passed to the procedure
    * @returns A string key for the cache entry
    * @example
    * key: ({ ctx, input }) => `user:${ctx.tenantId}:${input.id}`
    */
-  key: (opts: { ctx: Ctx; input: I }) => MaybePromise<string>;
+  key: CacheCallback<{ ctx: Ctx; input: I }, P, MaybePromise<string>>;
 
   /**
    * Callback triggered when an entry is evicted from cache.
@@ -340,53 +379,85 @@ export type CacheOptions<Ctx = unknown, I = unknown> = {
 export interface WithCacheOptions<
   C = unknown,
   I = unknown,
-> extends CacheOptions<C, I> {
+  P extends unknown[] = any[],
+> extends CacheOptions<C, I, P> {
   staleWhileRevalidate?: boolean; // Return stale data while revalidating
 }
 
+export type WithCacheOptionsInput<
+  C = unknown,
+  I = unknown,
+  P extends unknown[] = any[],
+> =
+  | WithCacheOptions<C, I, P>
+  | CacheCallback<
+      { ctx: C; input: I },
+      P,
+      MaybePromise<WithCacheOptions<C, I, P> | null | undefined>
+    >;
+
 export type CacheConfig = {
   enabled: boolean;
-  options?: WithCacheOptions;
+  options?: WithCacheOptionsInput;
 };
 
-export type CacheInvalidateKeyFn<Ctx = unknown, I = unknown> =
-  | ((opts: { ctx: Ctx; input: I }) => MaybePromise<string | string[]>)
+export type CacheInvalidateKeyFn<
+  Ctx = unknown,
+  I = unknown,
+  P extends unknown[] = any[],
+> =
+  | CacheCallback<{ ctx: Ctx; input: I }, P, MaybePromise<string | string[]>>
   | string
   | string[];
 
-export interface CacheInvalidationOptions<Ctx = unknown, I = unknown> {
+export interface CacheInvalidationOptions<
+  Ctx = unknown,
+  I = unknown,
+  P extends unknown[] = any[],
+> {
   /** Keys or patterns to invalidate */
-  keys?: CacheInvalidateKeyFn<Ctx, I>;
+  keys?: CacheInvalidateKeyFn<Ctx, I, P>;
   /** Patterns to match (supports * wildcard) */
-  patterns?: CacheInvalidateKeyFn<Ctx, I>;
+  patterns?: CacheInvalidateKeyFn<Ctx, I, P>;
 
   /** Tags to invalidate (if using tag-based caching) */
-  tags?: CacheInvalidateKeyFn<Ctx, I>;
+  tags?: CacheInvalidateKeyFn<Ctx, I, P>;
   /** Delay invalidation in ms (useful for race conditions) */
   delay?: number;
 }
 
+export type CacheInvalidationOptionsInput<
+  Ctx = unknown,
+  I = unknown,
+  P extends unknown[] = any[],
+> =
+  | CacheInvalidationOptions<Ctx, I, P>
+  | CacheCallback<
+      { ctx: Ctx; input: I },
+      P,
+      MaybePromise<CacheInvalidationOptions<Ctx, I, P> | null | undefined>
+    >;
+
 export type CacheInvalidationConfig = {
   enabled: boolean;
-  options?: CacheInvalidationOptions;
+  options?: CacheInvalidationOptionsInput;
 };
 
 /**
  * Context-aware cache helper attached to `ctx.cache`.
  * Combines all standard CacheAdapter methods with typed invalidation.
  */
-export type CacheContextHelper<
-  TCtx = unknown,
-  TInput = unknown,
-> = CacheAdapter & {
-  /**
-   * Invalidates cache from inside a terminal handler.
-   * Same options as the `.invalidate()` builder method.
-   */
-  invalidate: (
-    options: CacheInvalidationOptions<TCtx, TInput>,
-  ) => Promise<void>;
-};
+export type CacheContextHelper<TCtx = unknown, TInput = unknown> = Prettify<
+  CacheAdapter & {
+    /**
+     * Invalidates cache from inside a terminal handler.
+     * Same options as the `.invalidate()` builder method.
+     */
+    invalidate: (
+      options: CacheInvalidationOptions<TCtx, TInput>,
+    ) => Promise<void>;
+  }
+>;
 
 export type RateLimitOptions<
   Ctx = unknown,

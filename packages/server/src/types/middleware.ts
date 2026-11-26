@@ -4,6 +4,7 @@ import type {
   MaybePromise,
   MergeMeta,
   Prettify,
+  ProcedureType,
 } from "./misc.js";
 
 /**
@@ -64,6 +65,7 @@ export type Middleware<
   opts: {
     ctx: MergeMeta<Ctx, BaseContext<TMeta, TName>>;
     input: Prettify<I & TEnrich>;
+    type: ProcedureType;
     next: <NewCtx extends Record<string, unknown>>(
       ctx?: NewCtx,
     ) => MiddlewareResult<MergeMeta<Ctx, NewCtx>>;
@@ -162,4 +164,34 @@ export type Plugin<
       >
     | { success: true; data?: unknown }
     | { success: false; errors?: Record<string, string> };
+};
+
+export type RootMiddleware<
+  TCtx = any,
+  TEnrich = any,
+  TMeta = any,
+> = (
+  opts: {
+    ctx: MergeMeta<TCtx, BaseContext<TMeta, string>>;
+    input: Prettify<TEnrich>;
+    type: ProcedureType;
+    next: <NewCtx extends Record<string, unknown>>(
+      ctx?: NewCtx,
+    ) => MiddlewareResult<MergeMeta<TCtx, NewCtx>>;
+  },
+  ...args: any[]
+) => MaybePromise<MiddlewareResult<any>>;
+
+export type RootPlugin<
+  TCtx = any,
+  TEnrich = any,
+  TMeta = any,
+> = {
+  onBefore?: RootMiddleware<TCtx, TEnrich, TMeta>;
+  onAfter?: (
+    ctx: MergeMeta<TCtx, BaseContext<TMeta, string>>,
+    result: unknown,
+  ) => Promise<void> | void;
+  onError?: (props: any) => Promise<any> | any;
+  validate?: (input: any) => Promise<any> | any;
 };

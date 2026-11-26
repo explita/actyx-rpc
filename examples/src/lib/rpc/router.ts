@@ -27,13 +27,13 @@ export const appRouter = createRouter({
   notif: createRouter({
     sse: procedure.sse(async function* () {
       for (let i = 0; i < 10; i++) {
-        yield { data: i };
+        yield { type: "data", data: i };
         await new Promise((res) => setTimeout(res, 1000));
       }
     }),
-    stream: procedure.stream(async function* () {
+    stream: procedure.sse(async function* () {
       for (let i = 0; i < 10; i++) {
-        yield { value: i };
+        yield { type: "stream-message", data: { value: i } };
         await new Promise((res) => setTimeout(res, 1000));
       }
     }),

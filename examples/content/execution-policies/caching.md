@@ -41,12 +41,34 @@ const getUser = procedure
 | `ttl` | `WindowTime \| number` | `60000` | Cache time-to-live (e.g. `"60s"`, `"5m"`, `"1h"`, or milliseconds). |
 | `staleTime` | `WindowTime \| number` | `0` | Delay before data is considered stale. `0` means always stale. |
 | `staleWhileRevalidate` | `boolean` | `false` | Return stale cache immediately and fetch fresh data in the background. |
-| `key` | `(opts: { ctx, input }) => MaybePromise<string>` | `JSON.stringify` | Custom key generator function (stored raw, unhashed). Can be async. |
-| `tags` | `string[] \| ((opts: { ctx, input }) => MaybePromise<string[]>)` | — | Cache tags for group invalidation. |
+| `key` | `(opts: { ctx, input }, ...args) => MaybePromise<string>` | `JSON.stringify` | Custom key generator function (stored raw, unhashed). Receives `{ ctx, input }` and any positional procedure `...args`. Can be async. |
+| `tags` | `string[] \| ((opts: { ctx, input }, ...args) => MaybePromise<string[]>)` | — | Cache tags for group invalidation. Receives `{ ctx, input }` and any positional procedure `...args`. |
 | `onHit` | `<T>(key: string, entry: CacheEntry<T>) => void` | — | Callback run on cache hit. |
 | `onMiss` | `(key: string) => void` | — | Callback run on cache miss. |
 | `onEvict` | `<T>(key: string, entry: CacheEntry<T>) => void` | — | Callback run when an entry is evicted. |
 | `decompress` | `boolean` | `false` | Set to true if response payload compression was configured. |
+
+### Dynamic Cache Options (Factory Function)
+
+`.cache()` also accepts a factory function `(opts, ...args) => cacheOptions | null | undefined` when your caching policy depends on `ctx`, `input`, or positional `...args`. Return `null` or `undefined` to bypass caching for that call:
+
+```ts
+const getItems = procedure
+  .cache<[category: string, bypass?: boolean]>(({ ctx }, category, bypass) => {
+    if (bypass) return null; // Bypass cache dynamically
+    return {
+      ttl: ctx.isPro ? "1m" : "10m",
+      key: () => `items:${ctx.tenantId}:${category}`,
+      tags: () => [`category:${category}`],
+    };
+  })
+  .query(async (_opts, category: string, _bypass?: boolean) => {
+    return await db.items.findMany({ category });
+  });
+```
+
+> [!TIP]
+> The tuple generic `.cache<[...]>()` is optional — omit it if you prefer manual inline parameter annotations or static cache options.
 
 ---
 
@@ -141,10 +163,26 @@ const updatePost = procedure
 
 | Option | Type | Description |
 | :--- | :--- | :--- |
-| `keys` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Specific cache key(s) to delete. |
-| `patterns` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Glob patterns to match keys (if supported by cache adapter). |
-| `tags` | `string \| string[] \| ((opts) => MaybePromise<string \| string[]>)` | Specific cache tag(s) to invalidate. |
+| `keys` | `string \| string[] \| ((opts, ...args) => MaybePromise<string \| string[]>)` | Specific cache key(s) to delete. |
+| `patterns` | `string \| string[] \| ((opts, ...args) => MaybePromise<string \| string[]>)` | Glob patterns to match keys (if supported by cache adapter). |
+| `tags` | `string \| string[] \| ((opts, ...args) => MaybePromise<string \| string[]>)` | Specific cache tag(s) to invalidate. |
 | `delay` | `number` | Delay in ms before invalidation runs. |
+
+`.invalidate()` also supports a dynamic factory function `(opts, ...args) => invalidationOptions | null | undefined` (with an optional `.invalidate<[...]>()` tuple generic) to conditionally skip invalidation or compute keys/tags/delay from `ctx`, `input`, and positional `...args`:
+
+```ts
+const updateItem = procedure
+  .invalidate<[id: string, skipInvalidation?: boolean]>(({ ctx }, id, skip) => {
+    if (skip) return null; // Skip invalidation dynamically
+    return {
+      keys: [`item:${ctx.tenantId}:${id}`],
+      tags: [`item:${id}`],
+    };
+  })
+  .mutation(async (_opts, id: string, _skipInvalidation?: boolean) => {
+    return await db.items.update(id);
+  });
+```
 
 ---
 
